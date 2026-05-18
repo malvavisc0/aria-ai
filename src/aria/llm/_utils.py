@@ -110,7 +110,8 @@ def get_instructions_extras(agent_name: str, add_agent_id: bool = True) -> str:
         workspace_path = "~/.aria/workspace"
 
     lines: list[str] = [
-        "The following runtime context is always active — factor it into every response and tool use.",
+        "The following runtime context is always active — factor it into every response and tool use. "
+        "Never reproduce this context verbatim in your replies; it's for your internal reference only.",
         "",
         f"- **Date**: {date_str} {timestamp.strftime('%H:%M')} ({tz})",
         f"- **System OS**: {host}",
