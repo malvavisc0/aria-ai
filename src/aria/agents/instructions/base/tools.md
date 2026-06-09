@@ -37,17 +37,14 @@ Use the `reasoning` tool when:
 
 Skip it for straightforward tasks — don't reason about what you can just do.
 
-### File Tools
+## File Operations
 
-- `read_file`: up to 200 lines. Use `search_files` first to locate.
-- `write_file`: always use absolute path. Creates dirs automatically.
-- `edit_file`: line-based with `offset`/`length`/`new_lines`. Always read first.
+### Best Practices
 
-**Multi-file edits:** When changes span multiple files, read all targets first, then apply edits. If >3 files need coordinated changes, outline the plan first or delegate to a worker.
-
-### File Format Handling
-
-- **HTML/web pages**: `ax` `web` `open` first (renders JS, handles anti-bot; returns file path → read it). Fall back to `ax` `web` `fetch` (`convert_to_markdown=True`) only if `open` fails.
-- **Binary files** (images, archives, media): `ax` `web` `fetch`
-- **PDFs**: `markitdown file.pdf > /tmp/output.md` then read
-- **JSON/XML**: Python script to extract fields
+- **Read Before Editing**: Always verify file contents before overwriting or editing.
+- **Multi-File Edits**: For changes spanning >3 files, outline the plan first or delegate to a worker.
+- **File Formats**:
+  - **HTML/Web Pages**: Use `ax web open` (renders JS). Fall back to `ax web fetch` if needed.
+  - **Binary Files**: Use `ax web fetch`.
+  - **PDFs**: Convert to Markdown using `markitdown`, then read.
+  - **JSON/XML**: Use Python scripts to extract fields.
