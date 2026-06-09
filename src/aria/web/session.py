@@ -20,7 +20,11 @@ from pathlib import Path
 
 import chainlit as cl
 from chainlit.types import ThreadDict
-from llama_index.core.base.llms.types import ChatMessage, MessageRole
+from llama_index.core.base.llms.types import (
+    ChatMessage,
+    MessageRole,
+    ToolCallBlock,
+)
 from llama_index.core.memory import Memory
 from loguru import logger
 from PIL import Image
@@ -375,50 +379,138 @@ def convert_documents_to_markdown(
     return results
 
 
+def _message_tool_call_count(msg: ChatMessage) -> int:
+    """Return the number of tool calls advertised by an assistant message.
+
+    LlamaIndex carries tool calls in two places (mirroring
+    ``to_openai_message_dict``'s precedence): ``ToolCallBlock`` objects in
+    ``msg.blocks`` (modern path) or ``additional_kwargs["tool_calls"]``
+    (legacy/streaming path).  Blocks take precedence; the kwargs list is
+    only consulted when no blocks are present.
+    """
+    block_calls = sum(1 for block in msg.blocks if isinstance(block, ToolCallBlock))
+    if block_calls:
+        return block_calls
+    kwarg_calls = msg.additional_kwargs.get("tool_calls")
+    if kwarg_calls:
+        return len(kwarg_calls)
+    return 0
+
+
+def _is_tool_message(msg: ChatMessage) -> bool:
+    """True if *msg* is a tool-result message (``role == TOOL``)."""
+    return msg.role == MessageRole.TOOL
+
+
 def _sanitize_chat_history(
     chat_history: list[ChatMessage],
 ) -> list[ChatMessage]:
-    """Ensure chat history has strictly alternating user/assistant roles.
+    """Repair chat history so it is valid for the OpenAI/Mistral API.
 
-    The OpenAI-compatible API requires that after the optional system
-    message, conversation roles must strictly alternate between user and
-    assistant.  This helper enforces that invariant by:
+    Mistral's chat template enforces a strict invariant: every assistant
+    message that advertises ``N`` tool calls must be immediately followed
+    by exactly ``N`` ``tool`` (result) messages, otherwise it raises
+    ``InvalidMessageStructureException: Not the same number of function
+    calls and responses``.  The OpenAI-compatible API additionally
+    requires alternating ``user``/``assistant`` roles for plain turns.
 
-    1. Collapsing consecutive messages of the same role into one
-       (keeping the *last* message of each run).
-    2. Dropping any leading assistant messages (conversation must start
-       with a user message after the system prompt).
-    3. Dropping any trailing user messages (so the next user turn
-       maintains alternation).
+    This helper enforces both invariants while being **tool-call aware**:
+
+    1. Collapse consecutive duplicate roles (keep last of each run) — but
+       never collapse ``tool`` messages (parallel tool calls legitimately
+       produce several consecutive ``tool`` messages) and never collapse
+       an assistant message that carries tool calls into an adjacent
+       assistant message.
+    2. Validate tool groups: for each assistant message advertising ``N``
+       tool calls, consume the next ``N`` consecutive ``tool`` messages.
+       If fewer than ``N`` follow (dangling/partial group left by a failed
+       turn), drop the whole group.  Drop orphan ``tool`` messages that
+       have no preceding assistant tool-call.
+    3. Drop leading messages until the history starts with a ``user``
+       message (without splitting a tool group).
+    4. Drop a trailing incomplete tool group so the history ends on a
+       clean boundary (assistant final answer or user message).
 
     Args:
-        chat_history: Raw chat messages (may have consecutive duplicates).
+        chat_history: Raw chat messages (may have consecutive duplicates
+            and/or unbalanced tool sequences).
 
     Returns:
-        A sanitised list with strictly alternating ``user → assistant``
-        roles.
+        A sanitised list whose tool-call/response counts are balanced and
+        whose plain turns alternate ``user → assistant``.
     """
     if not chat_history:
         return chat_history
 
-    # Step 1: Collapse consecutive duplicate roles (keep last of each run).
+    # Step 1: Collapse consecutive duplicate roles (keep last of each run),
+    # but never merge tool messages or assistant-with-tool-call messages.
     deduplicated: list[ChatMessage] = []
     for msg in chat_history:
-        if deduplicated and deduplicated[-1].role == msg.role:
+        prev = deduplicated[-1] if deduplicated else None
+        can_collapse = (
+            prev is not None
+            and prev.role == msg.role
+            and not _is_tool_message(msg)
+            and _message_tool_call_count(prev) == 0
+            and _message_tool_call_count(msg) == 0
+        )
+        if can_collapse:
             deduplicated[-1] = msg  # replace — keep latest
         else:
             deduplicated.append(msg)
 
-    # Step 2: Ensure it starts with a user message.
-    while deduplicated and deduplicated[0].role != MessageRole.USER:
-        deduplicated.pop(0)
+    # Step 2: Validate tool groups — keep an assistant tool-call message
+    # only if exactly N matching tool messages follow it; drop orphan
+    # tool messages.
+    validated: list[ChatMessage] = []
+    i = 0
+    n = len(deduplicated)
+    while i < n:
+        msg = deduplicated[i]
 
-    # Step 3: Ensure it ends with an assistant message so the next user
-    # turn maintains alternation.
-    while deduplicated and deduplicated[-1].role != MessageRole.ASSISTANT:
-        deduplicated.pop()
+        if _is_tool_message(msg):
+            # Orphan tool message (no preceding assistant tool-call that
+            # consumed it) — drop.
+            i += 1
+            continue
 
-    return deduplicated
+        call_count = _message_tool_call_count(msg)
+        if call_count > 0:
+            # Gather the immediately following tool messages.
+            j = i + 1
+            tool_msgs: list[ChatMessage] = []
+            while j < n and _is_tool_message(deduplicated[j]):
+                tool_msgs.append(deduplicated[j])
+                j += 1
+
+            if len(tool_msgs) >= call_count:
+                # Keep the assistant message plus exactly call_count tool
+                # responses; any extra tool messages are dropped as orphans.
+                validated.append(msg)
+                validated.extend(tool_msgs[:call_count])
+            # else: dangling/partial group — drop assistant + partial tools.
+            i = j
+            continue
+
+        validated.append(msg)
+        i += 1
+
+    # Step 3: Ensure it starts with a user message.
+    while validated and validated[0].role != MessageRole.USER:
+        validated.pop(0)
+
+    # Step 4: Ensure it ends on a clean boundary. A trailing assistant
+    # message that still advertises tool calls (its responses were dropped
+    # above) is incomplete — drop it. Also drop a trailing user message so
+    # the next user turn maintains alternation.
+    while validated:
+        last = validated[-1]
+        if _message_tool_call_count(last) > 0 or last.role == MessageRole.USER:
+            validated.pop()
+        else:
+            break
+
+    return validated
 
 
 async def restore_chat_history(thread: ThreadDict) -> Memory:

@@ -20,7 +20,6 @@ from typing import Any
 import chainlit as cl
 import httpx
 from llama_index.core.agent.workflow import AgentOutput, AgentStream, ToolCall
-from llama_index.core.base.llms.types import MessageRole
 from llama_index.core.memory import Memory
 from loguru import logger
 from workflows.handler import WorkflowHandler
@@ -83,23 +82,32 @@ async def _sanitize_memory(memory: Memory) -> None:
 
 
 async def _rollback_memory(memory: Memory | None) -> None:
-    """Remove a dangling user message left by a failed workflow run.
+    """Repair dangling state left by a failed workflow run.
 
     When an LLM/infrastructure error occurs after ``AgentWorkflow.run()``
-    has persisted the user message but before the assistant reply is
-    generated, the memory ends with a user message — breaking
-    alternation on the next turn.  This removes it.
+    has begun persisting a turn, the memory may end with:
+
+    * a dangling user message (no assistant reply), breaking alternation; or
+    * an assistant message advertising tool calls whose matching ``tool``
+      responses are missing (or only partially present), breaking
+      Mistral's "same number of function calls and responses" invariant.
+
+    Routing through :func:`_sanitize_chat_history` repairs all of these in
+    one pass so the next turn sees a structurally valid history.
     """
     if memory is None:
         return
     try:
         messages = await memory.aget()
-        if messages and messages[-1].role == MessageRole.USER:
+        if not messages:
+            return
+        repaired = _sanitize_chat_history(messages)
+        if len(repaired) != len(messages):
             logger.debug(
-                "Rolling back dangling user message from memory "
-                f"({len(messages)} → {len(messages) - 1} messages)"
+                "Rolling back dangling/partial turn from memory "
+                f"({len(messages)} → {len(repaired)} messages)"
             )
-            memory.set(messages[:-1])
+            memory.set(repaired)
     except Exception:
         logger.warning("Failed to rollback memory", exc_info=True)
 

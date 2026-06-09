@@ -14,13 +14,13 @@
     },
     "black-formatter.args": [
         "--line-length",
-        "79"
+        "90"
     ],
     "isort.args": [
         "--profile",
         "black",
         "--line-length",
-        "79"
+        "90"
     ],
     "files.exclude": {
         "**/__pycache__": true,
@@ -41,5 +41,6 @@
     "files.watcherExclude": {
         "**/.venv/**": true,
         "**/__pycache__/**": true
-    }
+    },
+    "editor.wordWrap": "on"
 }

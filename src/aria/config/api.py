@@ -121,6 +121,10 @@ class Vllm:
         Path.cwd() / Path(_chat_template_raw) if _chat_template_raw else None
     )
 
+    enforce_eager: bool = (
+        get_optional_env("ARIA_VLLM_ENFORCE_EAGER", "").lower() == "true"
+    )
+
 
 class Lightpanda:
     """Configuration for Lightpanda browser binary (optional).

@@ -315,6 +315,7 @@ class VllmServerManager:
         reasoning_parser: str | None = None,
         chat_template_kwargs: str | None = None,
         vision_enabled: bool = False,
+        enforce_eager: bool = True,
         data_parallel_size: int = 1,
         expert_parallel: bool = False,
         mm_encoder_tp_mode: str = "",
@@ -492,6 +493,9 @@ class VllmServerManager:
         # API key for internal use — must match the client-side api_key
         cmd.extend(["--api-key", api_key])
 
+        if enforce_eager:
+            cmd.extend(["--enforce-eager"])
+
         return cmd
 
     def _wait_for_ready(
@@ -663,6 +667,7 @@ class VllmServerManager:
             kv_offload_mode=VllmConfig.kv_offload_mode,
             kv_offloading_size_gb=kv_offload_size,
             kv_offloading_backend=backend,
+            enforce_eager=VllmConfig.enforce_eager,
         )
         servers.append(("chat", chat_cmd, Chat.get_port()))
 

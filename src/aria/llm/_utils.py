@@ -120,7 +120,7 @@ def get_instructions_extras(agent_name: str, add_agent_id: bool = True) -> str:
         f"- **Vision Enabled**: {'Yes' if vision else 'No'}",
         f"- **Browser Available**: {'Yes' if browser else 'No'}",
         f"- **Max Output Tokens**: {max_tok} (keep responses concise to avoid truncation)",
-        f"- **Max Iterations (tool calls)**: {max_iter} (plan and batch work efficiently to stay within this limit)",
+        f"- **Max Tool Calls per response**: {max_iter} (plan and batch work efficiently to stay within this limit)",
     ]
     if add_agent_id:
         lines.append(f"- **Agent ID**: {generate_agent_id(agent_name)}")

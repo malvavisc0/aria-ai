@@ -677,3 +677,168 @@ def test_sanitize_chat_history_leading_assistant_dropped() -> None:
     ]
     result = session_module._sanitize_chat_history(msgs)
     assert [m.content for m in result] == ["a", "b"]
+
+
+def test_sanitize_chat_history_trailing_user_dropped() -> None:
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    msgs = [
+        ChatMessage(role=MessageRole.USER, content="a"),
+        ChatMessage(role=MessageRole.ASSISTANT, content="b"),
+        ChatMessage(role=MessageRole.USER, content="dangling"),
+    ]
+    result = session_module._sanitize_chat_history(msgs)
+    assert [m.content for m in result] == ["a", "b"]
+
+
+def _assistant_with_tool_calls(n: int, content: str = "") -> "ChatMessage":  # noqa: F821
+    from llama_index.core.base.llms.types import (
+        ChatMessage,
+        MessageRole,
+        TextBlock,
+        ToolCallBlock,
+    )
+
+    blocks: list = [TextBlock(text=content)] if content else []
+    for i in range(n):
+        blocks.append(
+            ToolCallBlock(
+                tool_call_id=f"call_{i}",
+                tool_name=f"tool_{i}",
+                tool_kwargs="{}",
+            )
+        )
+    return ChatMessage(role=MessageRole.ASSISTANT, blocks=blocks)
+
+
+def _tool_message(call_id: str, content: str = "ok") -> "ChatMessage":  # noqa: F821
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    return ChatMessage(
+        role=MessageRole.TOOL,
+        content=content,
+        additional_kwargs={"tool_call_id": call_id},
+    )
+
+
+def test_sanitize_preserves_parallel_tool_calls() -> None:
+    """Regression: two parallel tool calls must keep BOTH tool responses.
+
+    Previously consecutive TOOL messages were collapsed into one, leaving
+    2 tool calls with 1 response → Mistral 400.
+    """
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    msgs = [
+        ChatMessage(role=MessageRole.USER, content="q"),
+        _assistant_with_tool_calls(2),
+        _tool_message("call_0", "r0"),
+        _tool_message("call_1", "r1"),
+        ChatMessage(role=MessageRole.ASSISTANT, content="final"),
+    ]
+    result = session_module._sanitize_chat_history(msgs)
+
+    tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
+    assert len(tool_msgs) == 2
+    # call count == response count
+    assistant_calls = session_module._message_tool_call_count(result[1])
+    assert assistant_calls == len(tool_msgs)
+    assert result[-1].content == "final"
+
+
+def test_sanitize_drops_dangling_tool_call_group() -> None:
+    """Assistant with tool calls but no following tool messages → dropped.
+
+    The trailing user message is then also dropped (no assistant reply
+    follows), so the whole history collapses to empty — the important
+    invariant is that no unbalanced tool group survives.
+    """
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    msgs = [
+        ChatMessage(role=MessageRole.USER, content="q"),
+        _assistant_with_tool_calls(2),  # failed mid-turn, no tool results
+    ]
+    result = session_module._sanitize_chat_history(msgs)
+    assert all(m.role != MessageRole.TOOL for m in result)
+    assert all(session_module._message_tool_call_count(m) == 0 for m in result)
+
+
+def test_sanitize_drops_dangling_tool_call_group_keeps_prior_turn() -> None:
+    """A complete prior turn survives even when the latest turn dangles."""
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    msgs = [
+        ChatMessage(role=MessageRole.USER, content="q1"),
+        ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
+        ChatMessage(role=MessageRole.USER, content="q2"),
+        _assistant_with_tool_calls(2),  # failed mid-turn, no tool results
+    ]
+    result = session_module._sanitize_chat_history(msgs)
+    # Dangling tool group + its trailing user turn are dropped; the first
+    # complete user/assistant turn remains and is balanced.
+    assert [m.content for m in result] == ["q1", "a1"]
+    assert all(m.role != MessageRole.TOOL for m in result)
+
+
+def test_sanitize_drops_partial_tool_call_group() -> None:
+    """2 tool calls but only 1 response → whole group dropped."""
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    msgs = [
+        ChatMessage(role=MessageRole.USER, content="q"),
+        _assistant_with_tool_calls(2),
+        _tool_message("call_0", "r0"),
+    ]
+    result = session_module._sanitize_chat_history(msgs)
+    assert all(m.role != MessageRole.TOOL for m in result)
+    assert all(session_module._message_tool_call_count(m) == 0 for m in result)
+
+
+def test_sanitize_drops_orphan_tool_message() -> None:
+    """A tool message with no preceding assistant tool-call is dropped."""
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    msgs = [
+        ChatMessage(role=MessageRole.USER, content="q"),
+        _tool_message("call_x", "orphan"),
+        ChatMessage(role=MessageRole.ASSISTANT, content="final"),
+    ]
+    result = session_module._sanitize_chat_history(msgs)
+    assert all(m.role != MessageRole.TOOL for m in result)
+    assert [m.content for m in result] == ["q", "final"]
+
+
+def test_sanitize_counts_additional_kwargs_tool_calls() -> None:
+    """Tool calls in additional_kwargs (no blocks) are counted correctly."""
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    assistant = ChatMessage(
+        role=MessageRole.ASSISTANT,
+        additional_kwargs={"tool_calls": [{"id": "a"}, {"id": "b"}]},
+    )
+    assert session_module._message_tool_call_count(assistant) == 2
+
+    msgs = [
+        ChatMessage(role=MessageRole.USER, content="q"),
+        assistant,
+        _tool_message("a"),
+        _tool_message("b"),
+        ChatMessage(role=MessageRole.ASSISTANT, content="final"),
+    ]
+    result = session_module._sanitize_chat_history(msgs)
+    assert len([m for m in result if m.role == MessageRole.TOOL]) == 2
+
+
+def test_sanitize_keeps_single_tool_call_turn() -> None:
+    from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+    msgs = [
+        ChatMessage(role=MessageRole.USER, content="q"),
+        _assistant_with_tool_calls(1),
+        _tool_message("call_0"),
+        ChatMessage(role=MessageRole.ASSISTANT, content="final"),
+    ]
+    result = session_module._sanitize_chat_history(msgs)
+    assert len(result) == 4
+    assert len([m for m in result if m.role == MessageRole.TOOL]) == 1

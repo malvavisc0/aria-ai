@@ -47,6 +47,7 @@ Skip it for straightforward tasks — don't reason about what you can just do.
 
 ### File Format Handling
 
-- **HTML/XML**: `ax` `web` `fetch` (set `convert_to_markdown=True`; returns file path → read it)
+- **HTML/web pages**: `ax` `web` `open` first (renders JS, handles anti-bot; returns file path → read it). Fall back to `ax` `web` `fetch` (`convert_to_markdown=True`) only if `open` fails.
+- **Binary files** (images, archives, media): `ax` `web` `fetch`
 - **PDFs**: `markitdown file.pdf > /tmp/output.md` then read
 - **JSON/XML**: Python script to extract fields

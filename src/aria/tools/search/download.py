@@ -50,13 +50,17 @@ def download(
     max_size: int | None = None,
     convert_to_markdown: bool = False,
 ) -> str:
-    """Download files from URLs (PDFs, images, archives, HTML, etc.).
+    """Download binary files and raw content from URLs (PDFs, images, archives, etc.).
 
     When to use:
-        - Use this to download any file from a direct URL (PDFs, images,
-          archives, data files, HTML pages).
-        - Use this with convert_to_markdown=True to get readable text
-          from HTML pages.
+        - Use this to download binary files: PDFs, images, archives,
+          data files, audio/video, and other raw content.
+        - Use this for direct file URLs where you need the bytes saved
+          to disk.
+        - For reading web pages, prefer `open_url` — it renders
+          JavaScript and handles anti-bot protection. Only fall back to
+          this tool (with convert_to_markdown=True) when `open_url`
+          fails on an HTML page.
         - Do NOT use this to browse websites interactively — use
           `open_url`.
         - Do NOT use this to search the web — use `web_search` first
@@ -66,8 +70,8 @@ def download(
 
     Why:
         Provides a persistence-first download mechanism that saves files
-        to disk and returns metadata. Supports format conversion for
-        HTML content.
+        to disk and returns metadata. Best suited for binary/raw
+        artifacts; HTML retrieval should go through `open_url` first.
 
     Args:
         reason: Required. Brief explanation of why you are downloading this file.
@@ -76,7 +80,7 @@ def download(
         custom_headers: Optional HTTP headers.
         max_size: Max bytes to download (default: 5 MB).
         convert_to_markdown: Convert HTML content to markdown
-            (default: False).
+            (default: False). Only relevant for the `open_url` fallback case.
 
     Returns:
         JSON with file_path and metadata about the saved artifact.
@@ -85,8 +89,9 @@ def download(
 
     Important:
         - Files are saved to disk; the response contains the file path.
-        - For HTML pages, set convert_to_markdown=True to persist a
-          markdown version alongside the saved source file.
+        - This is a fallback for HTML pages; reach for `open_url` first.
+          If you do fetch HTML here, set convert_to_markdown=True to
+          persist a markdown version alongside the saved source file.
         - Large files are rejected if they exceed max_size.
     """
     try:

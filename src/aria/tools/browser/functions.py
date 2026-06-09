@@ -85,8 +85,16 @@ def _get_manager():
 async def open_url(reason: Reason, url: str, content_mode: str = "text") -> str:
     """Open a URL in the headless browser and capture rendered content.
 
-    Use this for JavaScript-heavy pages, consent flows, or sites that need
-    real browser rendering. Do not use it for plain API calls.
+    This is the PRIMARY tool for reading web page content. Always prefer
+    it over `download` for HTML pages: it renders JavaScript, follows
+    consent flows, and gets through anti-bot protection that a plain HTTP
+    fetch cannot.
+
+    Only use `download` instead when:
+        - The URL points to a binary file (PDF, image, archive, media), or
+        - `open_url` fails and you need the raw content as a fallback.
+
+    Do not use this for plain API/JSON calls — use `http` or `download`.
 
     Args:
         reason: Required. Brief explanation of why you are opening this URL.
