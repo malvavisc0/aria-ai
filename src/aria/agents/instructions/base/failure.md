@@ -16,3 +16,10 @@
 - Report the blocker in 1–2 lines.
 - Continue with verified partial results if possible.
 - Never loop on the same failing approach.
+
+### Tool Parameter Verification
+
+- Always verify tool parameters before execution. For example:
+  - Ensure `args` is passed as a **dictionary**, not a string.
+  - Confirm required parameters (e.g., `reason`, `family`, `command`) are included.
+- If a tool call fails due to parameter formatting, **do not retry**. Report the error and adapt.
