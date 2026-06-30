@@ -46,7 +46,7 @@
 ```bash
 git clone git@github.com:malvavisc0/aria-ai.git
 cd aria-ai
-uv sync
+uv sync   # pins CPU-only torch automatically (embeddings run on CPU; vLLM has its own isolated CUDA venv)
 aria server run
 # → Open http://localhost:9876
 ```
@@ -139,7 +139,7 @@ git clone git@github.com:malvavisc0/aria-ai.git
 cd aria-ai
 
 # Install dependencies
-uv sync
+uv sync   # CPU-only torch pinned automatically via [tool.uv] index
 
 # Or with GUI support
 uv sync --extra gui
@@ -180,9 +180,16 @@ aria server stop      # Stop the server
 aria server status    # Check status
 
 # Inference engine
-aria vllm install         # Install vLLM with auto-detected hardware target
-aria vllm status          # Check vLLM installation status and version
+aria vllm install         # Build isolated vLLM venv + install pinned wheel
+aria vllm install --version 0.24.0  # Install a specific pinned release
+aria vllm update          # Recreate the isolated venv at the latest PyPI release
+aria vllm status          # Check installation status, version, and venv path
 aria vllm info            # Show vLLM configuration details
+aria vllm start           # Start the vLLM server
+aria vllm stop            # Stop the vLLM server
+aria vllm restart         # Restart only the vLLM server (no web UI side effects)
+aria vllm uninstall       # Remove the isolated vLLM venv
+aria vllm uninstall --legacy  # Remove a pre-detach vLLM from Aria's own .venv
 
 # Browser
 aria lightpanda download  # Download Lightpanda headless browser
@@ -327,7 +334,38 @@ EMBED_MODEL_PATH = ibm-granite/granite-embedding-311m-multilingual-r2
 # vLLM engine
 ARIA_VLLM_QUANT = gptq_marlin
 ARIA_VLLM_GPU_MEMORY_UTILIZATION = 0.85
+
+# vLLM isolated venv (advanced overrides)
+#ARIA_VLLM_VERSION = 0.24.0          # pinned PyPI release tag (v0.24.0 → 0.24.0)
+#ARIA_VLLM_VENV = /opt/vllm          # use a pre-existing venv (Aria won't create/delete it)
+#ARIA_VLLM_REMOTE = true            # skip local process mgmt (external server)
 ```
+
+> **Upgrading from an in-`.venv` vLLM install (before the detach)**
+> vLLM is now an **external tool** installed into an isolated venv at
+> `~/.aria/venvs/vllm` (Aria's own dependency tree no longer imports it).
+> A vLLM copy left in Aria's `.venv` from before the detach is ignored at
+> runtime. `aria vllm status` prints a one-line notice when it detects
+> this; reclaim the multi-GB CUDA/torch stack with
+> `aria vllm uninstall --legacy`, then install the isolated copy with
+> `aria vllm install`.
+
+> **Reclaiming unused CUDA wheels from Aria's `.venv` (CPU-torch pin)**
+> Aria's venv now installs CPU-only torch — embeddings run on CPU by default
+> (`device="cpu"`), so the multi-GB CUDA/torch wheel set was loaded but
+> never used. This is enforced automatically via the `[tool.uv]` pytorch-cpu
+> index in `pyproject.toml`; plain `uv sync` resolves `torch==+cpu`. An
+> existing `.venv` still holds the old CUDA wheels after re-syncing; prune
+> them explicitly:
+> ```bash
+> uv pip uninstall torch nvidia-cuda-runtime nvidia-cudnn-cu13 \
+>     nvidia-cusparselt-cu13 nvidia-nccl-cu13 nvidia-nvshmem-cu13 \
+>     cuda-toolkit cuda-bindings triton
+> uv sync
+> ```
+> vLLM's GPU stack is unaffected — it lives in its own isolated venv at
+> `~/.aria/venvs/vllm`, and the vLLM installer passes `--no-config` so Aria's
+> CPU index never leaks into it.
 
 <details>
 <summary>📁 Directory Structure</summary>

@@ -36,7 +36,10 @@ RUN curl -LsSf https://astral.sh/uv/install.sh | sh && \
     ln -s /root/.local/bin/uv /usr/local/bin/uv
 
 # ── Install Aria ──────────────────────────────────────────────────────────────
-RUN uv pip install --system --break-system-packages --no-cache aria-ai
+# `--no-config --torch-backend cpu` explicitly pins CPU torch for this no-GPU
+# image (embeddings run on CPU). `--no-config` makes it self-contained — it
+# doesn't depend on Aria's source-tree [tool.uv] index being present.
+RUN uv pip install --no-config --torch-backend cpu --system --break-system-packages --no-cache aria-ai
 
 # ── Runtime configuration ─────────────────────────────────────────────────────
 ENV ARIA_HOME=/app/data

@@ -43,6 +43,19 @@ class Bin:
     path = _ARIA_HOME / "bin"
 
 
+class Venvs:
+    """Isolated Python virtual environments managed by Aria.
+
+    Heavy tool stacks that would pollute Aria's own dependency tree
+    (e.g. vLLM's CUDA/PyTorch wheels) are installed here instead of
+    into Aria's ``.venv``.  Aria never imports these tools — it only
+    shells out to the isolated interpreter.
+    """
+
+    path = _ARIA_HOME / "venvs"
+    vllm = path / "vllm"
+
+
 class Debug:
     """Runtime log files."""
 

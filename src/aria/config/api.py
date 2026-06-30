@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from aria.config import get_optional_env
-from aria.config.folders import Bin
+from aria.config.folders import Bin, Venvs
 
 
 class Vllm:
@@ -22,6 +22,57 @@ class Vllm:
     # When true, skip local vLLM process management and connect
     # directly to whatever CHAT_OPENAI_API points to.
     remote: bool = get_optional_env("ARIA_VLLM_REMOTE", "").lower() == "true"
+
+    # --- Isolated venv pinning ---
+    # Pinned vLLM release version (derived from the GitHub release tag,
+    # e.g. ``v0.24.0`` → ``0.24.0``).  The prebuilt PyPI wheel is
+    # installed into a separate venv at ``~/.aria/venvs/vllm`` so
+    # Aria's own dependency tree stays clean.
+    version: str = get_optional_env("ARIA_VLLM_VERSION", "0.24.0")
+
+    @classmethod
+    def get_venv_path(cls) -> Path:
+        """Resolve the isolated vLLM venv directory.
+
+        Honours the ``ARIA_VLLM_VENV`` override (e.g. pointing at a
+        pre-existing system venv like ``/opt/vllm``) so a manually
+        managed install can skip Aria's managed install path.
+        """
+        override = get_optional_env("ARIA_VLLM_VENV", "")
+        if override:
+            return Path(override).expanduser().resolve()
+        return Venvs.vllm
+
+    @classmethod
+    def is_externally_managed_venv(cls) -> bool:
+        """Whether the venv is user-provided via ``ARIA_VLLM_VENV``.
+
+        When set, the venv belongs to the user (e.g. a pre-existing
+        ``/opt/vllm``) and Aria must never create, recreate, or delete
+        it.  Destructive managed operations (install/update/uninstall)
+        refuse to touch an externally-managed venv to avoid data loss.
+        """
+        return bool(get_optional_env("ARIA_VLLM_VENV", ""))
+
+    @classmethod
+    def get_python_executable(cls) -> Path:
+        """Return the interpreter inside the isolated vLLM venv.
+
+        vLLM is Linux-only (macOS is guarded in the installer), so the
+        interpreter always lives at ``<venv>/bin/python``.
+        """
+        return cls.get_venv_path() / "bin" / "python"
+
+    @classmethod
+    def get_site_packages(cls) -> Path | None:
+        """Resolve the venv's ``site-packages`` directory, or None.
+
+        The Python minor version under the venv is not known up-front,
+        so this globs ``lib/python3.*/site-packages`` and returns the
+        last match (highest installed minor version).
+        """
+        hits = sorted(cls.get_venv_path().glob("lib/python3.*/site-packages"))
+        return hits[-1] if hits else None
 
     # --- vLLM engine settings ---
     # None = auto-calculate at launch; set a float to override.

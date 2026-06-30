@@ -39,7 +39,7 @@ git clone <repository-url>
 cd aria
 
 # Install dependencies with uv
-uv sync
+uv sync   # CPU-only torch pinned automatically via [tool.uv] index
 
 # Or install with GUI support
 uv sync --extra gui

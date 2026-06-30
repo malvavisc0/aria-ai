@@ -20,7 +20,11 @@ LABEL org.opencontainers.image.description="Aria — AI Assistant with web UI an
 LABEL org.opencontainers.image.licenses="MIT"
 
 # ── Install Aria ──────────────────────────────────────────────────────────────
-RUN uv pip install --system --break-system-packages --no-cache aria-ai
+# `--no-config` prevents Aria's [tool.uv] pytorch-cpu index (which pins CPU
+# torch for the source-tree venv) from leaking into this image. The vLLM base
+# image already ships GPU torch for vLLM inference; aria-ai's torch dep is
+# satisfied by that preinstalled copy and must NOT be downgraded to CPU.
+RUN uv pip install --no-config --system --break-system-packages --no-cache aria-ai
 
 # ── Runtime configuration ─────────────────────────────────────────────────────
 ENV ARIA_HOME=/app/data

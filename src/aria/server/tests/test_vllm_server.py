@@ -1,5 +1,6 @@
 """Tests for VllmServerManager in server/vllm.py."""
 
+import sys
 from unittest.mock import patch
 
 from aria.server.vllm import VllmServerManager
@@ -11,6 +12,17 @@ class TestBuildVllmCmd:
     def setup_method(self):
         with patch("aria.server.vllm.load_state", return_value={}):
             self.manager = VllmServerManager()
+
+    def test_uses_isolated_interpreter_not_sys_executable(self):
+        """cmd[0] must be the isolated venv python, not Aria's sys.executable."""
+        from aria.config.api import Vllm
+
+        cmd = self.manager._build_vllm_cmd(
+            model_path="/data/models/chat",
+            port=9090,
+        )
+        assert cmd[0] == str(Vllm.get_python_executable())
+        assert cmd[0] != sys.executable
 
     def test_basic_cmd_structure(self):
         """Command must include required vLLM entrypoint arguments."""

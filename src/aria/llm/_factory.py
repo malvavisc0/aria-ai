@@ -173,7 +173,12 @@ def get_embeddings_model(
 
     Args:
         model_name: HuggingFace model ID or local path.
-        device: Device to run on (``"cpu"`` or ``"cuda"``).
+        device: Device to run on (``"cpu"`` or ``"cuda"``). Aria's venv ships
+            CPU-only torch (pinned via the ``[tool.uv]`` pytorch-cpu index in
+            ``pyproject.toml``), so ``"cuda"`` will fail to find CUDA unless the
+            venv is re-synced with a CUDA torch backend or embeddings are moved
+            to an HTTP endpoint (``llama-index-embeddings-openai-like`` pointed
+            at a vLLM ``/v1/embeddings`` server). See ``docs/plan-cpu-torch.md``.
 
     Returns:
         A :class:`HuggingFaceEmbedding` instance.

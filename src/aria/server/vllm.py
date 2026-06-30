@@ -21,7 +21,6 @@ import importlib.util
 import json
 import os
 import subprocess
-import sys
 import time
 from pathlib import Path
 from urllib.error import URLError
@@ -361,8 +360,10 @@ class VllmServerManager:
             List of command arguments.
         """
 
+        from aria.config.api import Vllm as VllmConfig
+
         cmd = [
-            sys.executable,
+            str(VllmConfig.get_python_executable()),
             "-m",
             "vllm.entrypoints.openai.api_server",
             "--model",
@@ -555,6 +556,10 @@ class VllmServerManager:
             self.stop_all()
         from aria.config.api import Vllm as VllmConfig
         from aria.config.models import Chat
+        from aria.scripts.vllm import is_vllm_installed
+
+        if not VllmConfig.remote and not is_vllm_installed():
+            raise RuntimeError("vLLM is not installed. Run: aria vllm install")
 
         servers: list[tuple[str, list[str], int]] = []
 

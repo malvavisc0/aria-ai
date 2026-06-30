@@ -38,7 +38,6 @@ dependencies = [
 
 [project.optional-dependencies]
 gui = ["pyside6"]
-vllm = ["vllm"]
 
 [project.scripts]
 aria = "aria:main"
@@ -118,3 +117,24 @@ exclude_lines = [
 [tool.uv]
 link-mode = "copy"
 override-dependencies = ["onnxruntime; sys_platform != 'darwin'"]
+# Pin torch to the CPU wheel from the PyTorch CPU index. Embeddings run on CPU
+# by default (device="cpu" in get_embeddings_model). vLLM owns the GPU stack 
+# in its own isolated venv (~/.aria/venvs/vllm). See docs/plan-cpu-torch.md.
+#
+# `unsafe-best-match` is required (not the default `first-index`): the PyTorch
+# CPU index mirrors some pure-Python packages at STALE versions (e.g. certifi
+# 2022 vs PyPI 2026), so first-index would freeze them years behind. With
+# unsafe-best-match, torch resolves to its +cpu local-version wheel (highest)
+# while non-torch packages pick the newest across both indexes (i.e. PyPI).
+#
+# This config applies to `uv sync`/`uv lock`/`uv run` on the source tree. It
+# does NOT propagate to `uv pip install aria-ai` from PyPI (Docker builds), so
+# the CUDA/ROCm images keep the GPU torch from their vLLM base image. The
+# vLLM installer (scripts/vllm.py) passes `--no-config` to its `uv pip install`
+# so this CPU index never leaks into vLLM's CUDA venv. The lite/arm64 Docker
+# images use `--torch-backend cpu` on their `uv pip install` line instead.
+index-strategy = "unsafe-best-match"
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
