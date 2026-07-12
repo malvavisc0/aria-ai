@@ -1,5 +1,6 @@
 """Factory functions for constructing LLM clients, workflows, and memory."""
 
+import httpx
 from chromadb.api import ClientAPI as ChromaClientAPI
 from llama_index.core.agent.workflow import AgentWorkflow
 from llama_index.core.base.embeddings.base import BaseEmbedding
@@ -53,6 +54,11 @@ def get_chat_llm(
         is_function_calling_model=True,
         max_tokens=max_tokens,
         temperature=VllmConfig.temperature,
+        reuse_client=True,
+        async_http_client=httpx.AsyncClient(
+            timeout=httpx.Timeout(300.0, connect=10.0),
+            limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
+        ),
         additional_kwargs={
             "extra_body": {
                 "top_p": VllmConfig.top_p,
