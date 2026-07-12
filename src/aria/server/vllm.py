@@ -317,6 +317,8 @@ class VllmServerManager:
         enforce_eager: bool = True,
         data_parallel_size: int = 1,
         expert_parallel: bool = False,
+        moe_backend: str = "",
+        linear_backend: str = "",
         mm_encoder_tp_mode: str = "",
         mm_processor_cache_type: str = "",
         prefix_caching: bool = False,
@@ -431,8 +433,11 @@ class VllmServerManager:
 
         if kv_cache_dtype and kv_cache_dtype != "auto":
             cmd.extend(["--kv-cache-dtype", kv_cache_dtype])
-            if kv_cache_dtype.startswith("fp8"):
-                # FlashAttention v2 doesn't support fp8 KV cache — switch to FlashInfer
+            if kv_cache_dtype.startswith("fp8") and not vision_enabled:
+                # FlashAttention v2 doesn't support fp8 KV cache — switch to FlashInfer.
+                # Skip for vision/multimodal models (e.g. Gemma 4) where FlashInfer
+                # doesn't support partial multimodal token full attention; vLLM
+                # will auto-select a compatible backend (e.g. triton_attn).
                 cmd.extend(["--attention-backend", "flashinfer"])
 
         if served_model_name:
@@ -458,6 +463,12 @@ class VllmServerManager:
 
         if expert_parallel:
             cmd.extend(["--enable-expert-parallel"])
+
+        if moe_backend:
+            cmd.extend(["--moe-backend", moe_backend])
+
+        if linear_backend:
+            cmd.extend(["--linear-backend", linear_backend])
 
         if mm_encoder_tp_mode:
             cmd.extend(["--mm-encoder-tp-mode", mm_encoder_tp_mode])
@@ -671,6 +682,8 @@ class VllmServerManager:
             vision_enabled=VllmConfig.vision_enabled,
             data_parallel_size=VllmConfig.data_parallel_size,
             expert_parallel=VllmConfig.expert_parallel,
+            moe_backend=VllmConfig.moe_backend,
+            linear_backend=VllmConfig.linear_backend,
             mm_encoder_tp_mode=VllmConfig.mm_encoder_tp_mode,
             mm_processor_cache_type=VllmConfig.mm_processor_cache_type,
             prefix_caching=VllmConfig.prefix_caching,

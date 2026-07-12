@@ -102,6 +102,8 @@ class Vllm:
     mm_processor_cache_type: str = get_optional_env(
         "ARIA_VLLM_MM_PROCESSOR_CACHE_TYPE", ""
     )
+    moe_backend: str = get_optional_env("ARIA_VLLM_MOE_BACKEND", "")
+    linear_backend: str = get_optional_env("ARIA_VLLM_LINEAR_BACKEND", "")
     prefix_caching: bool = (
         get_optional_env("ARIA_VLLM_PREFIX_CACHING", "").lower() == "true"
     )
