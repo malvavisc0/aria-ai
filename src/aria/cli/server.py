@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import Callable
 from urllib.error import URLError
-from urllib.request import urlopen
+from urllib.request import Request, urlopen
 
 import typer
 from rich.console import Console
@@ -49,6 +49,23 @@ error_console = Console(stderr=True, style="bold red")
 # Health check settings
 HEALTH_CHECK_TIMEOUT = 180  # seconds (vLLM model loading can take 30s+)
 HEALTH_CHECK_INTERVAL = 0.5  # seconds
+
+
+def _authenticated_request(url: str, timeout: float = 5):
+    """Open a URL with the vLLM API key when in remote mode.
+
+    Remote vLLM servers enforce ``--api-key`` auth, so every request
+    must carry ``Authorization: Bearer <key>``.  Local mode leaves the
+    key unset (``sk-aria`` default) and the local server doesn't check,
+    so the header is harmless.
+    """
+    from aria.config.api import Vllm as VllmConfig
+
+    headers = {}
+    if VllmConfig.remote and VllmConfig.api_key:
+        headers["Authorization"] = f"Bearer {VllmConfig.api_key}"
+    req = Request(url, headers=headers)
+    return urlopen(req, timeout=timeout)
 
 
 def _print_startup_banner(host: str, port: int, background: bool = False) -> None:
@@ -247,7 +264,7 @@ def _is_vllm_healthy() -> bool:
     if VllmConfig.remote:
         # In remote mode, check the configured API URL directly
         try:
-            with urlopen(f"{Chat.api_url}/models", timeout=5) as resp:
+            with _authenticated_request(f"{Chat.api_url}/models", timeout=5) as resp:
                 return resp.status == 200
         except (URLError, OSError):
             return False
@@ -394,7 +411,7 @@ def _ensure_endpoint_reachable() -> None:
     # ── Remote mode ──────────────────────────────────────────────────────
     if VllmConfig.remote:
         try:
-            with urlopen(f"{Chat.api_url}/models", timeout=10) as resp:
+            with _authenticated_request(f"{Chat.api_url}/models", timeout=10) as resp:
                 if resp.status == 200:
                     console.print("[green]✓[/green] Remote OpenAI endpoint reachable")
                     return

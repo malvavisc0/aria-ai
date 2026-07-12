@@ -779,9 +779,13 @@ def _check_llm_server(checks: list[CheckResult]) -> None:
     try:
         import httpx
 
+        from aria.config.api import Vllm as VllmConfig
         from aria.config.models import Chat as ChatConfig
 
-        r = httpx.get(f"{ChatConfig.api_url}/models", timeout=3)
+        headers = {}
+        if VllmConfig.remote and VllmConfig.api_key:
+            headers["Authorization"] = f"Bearer {VllmConfig.api_key}"
+        r = httpx.get(f"{ChatConfig.api_url}/models", timeout=3, headers=headers)
         models = r.json().get("data", [])
         checks.append(
             CheckResult(
