@@ -296,6 +296,7 @@ def _ensure_models_downloaded() -> None:
     from huggingface_hub import snapshot_download
     from rich.status import Status
 
+    from aria.config.api import Vllm as VllmConfig
     from aria.config.huggingface import HuggingFace
     from aria.config.models import Chat, Embeddings
 
@@ -303,6 +304,12 @@ def _ensure_models_downloaded() -> None:
         ("chat", "CHAT_MODEL_PATH", Chat),
         ("embeddings", "EMBED_MODEL_PATH", Embeddings),
     ]
+
+    # In remote mode the chat model is served by an external vLLM endpoint,
+    # so we must never attempt to download it locally.  Only the in-process
+    # embeddings model still needs to be present on disk.
+    if VllmConfig.remote:
+        models_to_check = [m for m in models_to_check if m[0] != "chat"]
 
     max_retries = 3
 

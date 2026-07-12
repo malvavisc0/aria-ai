@@ -467,6 +467,11 @@ class VllmServerManager:
 
         if prefix_caching:
             cmd.extend(["--enable-prefix-caching"])
+            # Hybrid Mamba+attention models (e.g. Qwen3 MoE) use "Mamba cache
+            # align mode" when prefix caching is on, which sets block_size to
+            # the Mamba page size (e.g. 2096). vLLM requires block_size <=
+            # max_num_batched_tokens (default 2048), so raise it to 4096.
+            cmd.extend(["--max-num-batched-tokens", "4096"])
 
         # KV cache RAM offloading
         if kv_offload_mode in ("auto", "ram") and kv_offloading_size_gb is not None:
@@ -695,14 +700,24 @@ class VllmServerManager:
             logger.info(f"  stderr → {log_file}")
 
             log_fh = open(log_file, "w")
+            from aria.config.api import Vllm as VllmConfig
             from aria.config.folders import get_augmented_env
+
+            env = get_augmented_env()
+            # Prepend the vLLM venv bin dir so JIT build tools (ninja,
+            # cc, etc.) are discoverable by worker subprocesses spawned
+            # during profiling/warmup. flashinfer's sampling kernel and
+            # Triton both shell out to these tools at runtime.
+            vllm_bin = VllmConfig.get_venv_path() / "bin"
+            if vllm_bin.is_dir():
+                env["PATH"] = f"{vllm_bin}{os.pathsep}{env['PATH']}"
 
             proc = subprocess.Popen(
                 cmd,
                 stdout=log_fh,
                 stderr=subprocess.STDOUT,
                 start_new_session=True,
-                env=get_augmented_env(),
+                env=env,
             )
             log_fh.close()
             self._pids[role] = proc.pid

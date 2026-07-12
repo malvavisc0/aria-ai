@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from aria.cli.server import app
+from aria.cli.server import _ensure_models_downloaded, app
 
 runner = CliRunner()
 
@@ -107,6 +107,37 @@ def test_server_start_shows_clean_timeout_panel() -> None:
     assert result.exit_code == 1
     assert "Startup failed" in result.output
     assert "model load error" in result.output
+
+
+def test_ensure_models_downloaded_skips_chat_in_remote_mode() -> None:
+    """When ARIA_VLLM_REMOTE=true the chat model must never be downloaded."""
+    import os
+
+    with (
+        patch("aria.config.api.Vllm") as mock_vllm,
+        patch("aria.config.models.Chat") as mock_chat,
+        patch("aria.config.models.Embeddings") as mock_embed,
+        patch("aria.config.huggingface.HuggingFace"),
+        patch("huggingface_hub.snapshot_download") as mock_download,
+        patch.dict(
+            os.environ,
+            {
+                "CHAT_MODEL_PATH": "org/chat-model",
+                "EMBED_MODEL_PATH": "org/embed-model",
+            },
+        ),
+    ):
+        mock_vllm.remote = True
+        # Both models configured but missing locally.
+        mock_chat.model_path = "/nonexistent/chat-model"
+        mock_embed.model_path = "/nonexistent/embed-model"
+
+        _ensure_models_downloaded()
+
+    # Only the embeddings repo id should have been downloaded — never chat.
+    downloaded_repos = {call.kwargs["repo_id"] for call in mock_download.call_args_list}
+    assert "org/embed-model" in downloaded_repos
+    assert "org/chat-model" not in downloaded_repos
 
 
 def test_ensure_vllm_running_shows_clean_failure_panel() -> None:
