@@ -19,6 +19,12 @@
 | `dev` | Python sandbox |
 | `processes` | Background processes |
 
+### Web Search Tips
+
+- **Recent news/events**: Pass `category="news"` and `time_range="week"` to get fresh results. Do not include year numbers in the query (e.g. search `"OpenAI news"`, not `"OpenAI news 2026"`).
+- **Current date**: Today's date is provided in the Runtime Context section. Use `time_range="day"` for today's news, `"week"` for recent, `"month"` for broader recency.
+- **Zero results**: If a search returns nothing, simplify the query and/or remove temporal terms before retrying. Do not rephrase and retry the same pattern more than twice.
+
 ### `shell`
 
 **Blocks your turn until exit.** For commands >30s, use `ax` `processes` instead. **Never use `sudo`.**
