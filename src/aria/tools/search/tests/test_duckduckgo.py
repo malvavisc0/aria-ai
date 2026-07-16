@@ -40,7 +40,7 @@ def test_web_search_success():
             == "Elon Musk Is a Far-Right Activist - The Atlantic"
         )
         assert (
-            result_dict["data"]["results"][0]["href"]
+            result_dict["data"]["results"][0]["url"]
             == "https://www.theatlantic.com/technology/archive/2022/12/elon-musk-twitter-far-right-activist/672436/"
         )
 
@@ -182,7 +182,7 @@ def test_web_search_empty_results():
 
 
 def test_web_search_result_structure():
-    """Test that results only contain title and href (not body)"""
+    """Test that results only contain title and url (not body)"""
     mock_results = [
         {
             "title": "Test Title",
@@ -203,10 +203,10 @@ def test_web_search_result_structure():
         assert len(result_dict["data"]["results"]) == 1
         result_item = result_dict["data"]["results"][0]
         assert "title" in result_item
-        assert "href" in result_item
+        assert "url" in result_item
         assert "body" not in result_item
         assert "extra_field" not in result_item
-        assert len(result_item) == 2  # Only title and href
+        assert len(result_item) == 2  # Only title and url
 
 
 def test_web_search_json_format():

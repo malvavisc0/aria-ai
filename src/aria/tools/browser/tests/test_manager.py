@@ -147,7 +147,7 @@ async def test_navigate_returns_recovery_error_after_crash() -> None:
     manager._ensure_page = AsyncMock(side_effect=[True, True])
 
     result = await manager.navigate(
-        "https://example.com", tool="open_url", reason="testing"
+        "https://example.com", tool="visit_url", reason="testing"
     )
     payload = json.loads(result)
 
@@ -210,22 +210,6 @@ async def test_get_page_content_returns_cleaned_text() -> None:
     result = await manager.get_page_content()
 
     assert result == "Line 1\nLine 2"
-
-
-@pytest.mark.asyncio
-async def test_get_page_content_supports_article_mode() -> None:
-    manager = _make_manager()
-    page = Mock()
-    page.evaluate = AsyncMock(return_value="Headline\n\nParagraph 1\n\nParagraph 2")
-
-    manager._process = Mock()
-    manager._browser = Mock()
-    manager._page = page
-    manager._ensure_page = AsyncMock(return_value=True)
-
-    result = await manager.get_page_content(content_mode="article")
-
-    assert result == "Headline\nParagraph 1\nParagraph 2"
 
 
 @pytest.mark.asyncio

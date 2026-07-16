@@ -314,8 +314,8 @@ def get_venv_extras(
 
     lines.append("### Virtual Environment Commands\n")
     lines.append(
-        "These commands are available in the active virtual environment "
-        "and can be called via `shell`.\n"
+        "You can use these commands in your active virtual environment by calling them with `shell`. "
+        "Use them when your registered tools aren't enough to get the job done.\n"
     )
     lines.append(
         "| Category | Commands |",

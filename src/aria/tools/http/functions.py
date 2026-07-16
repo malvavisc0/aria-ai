@@ -43,7 +43,7 @@ def http_request(
 
     When to use:
         - Call REST APIs, fetch JSON data, or interact with web services.
-        - Do NOT use for browsing websites — use `open_url`.
+        - Do NOT use for browsing websites — use `visit_url`.
         - Do NOT use for downloading files — use `download`.
 
     Args:

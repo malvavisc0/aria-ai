@@ -4,12 +4,7 @@ from aria.tools.registry import (
     ALL_CATEGORIES,
     AX,
     CORE,
-    DEVELOPMENT,
-    ENTERTAINMENT,
     FILES,
-    FINANCE,
-    SYSTEM,
-    WEB,
     get_tools,
 )
 
@@ -37,14 +32,5 @@ class TestToolRegistry:
 
     def test_all_categories_defined(self):
         """Test that all expected categories are defined."""
-        expected = {
-            CORE,
-            FILES,
-            AX,
-            WEB,
-            DEVELOPMENT,
-            FINANCE,
-            ENTERTAINMENT,
-            SYSTEM,
-        }
+        expected = {CORE, FILES, AX}
         assert set(ALL_CATEGORIES) == expected

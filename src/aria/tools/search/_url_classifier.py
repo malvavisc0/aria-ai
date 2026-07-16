@@ -4,7 +4,7 @@ Provides a single ``classify_url()`` function that inspects a URL's path
 extension and, if needed, sends a HEAD request to determine the
 Content-Type.  The result drives the unified ``aria search fetch`` CLI
 command so that Aria never has to decide between ``download`` and
-``open_url`` — the CLI routes automatically.
+``visit_url`` — the CLI routes automatically.
 """
 
 import enum

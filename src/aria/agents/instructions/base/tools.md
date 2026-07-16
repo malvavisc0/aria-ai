@@ -18,8 +18,8 @@ Call as `ax(reason, family, command, args={...})`. Pass function-specific parame
 |---------|----------|----------|
 | `search` | `query` | `category`, `time_range`, `max_results` |
 | `fetch` | `url` | `output`, `convert_to_markdown`, `custom_headers`, `max_size` |
-| `open` | `url` | `content_mode` |
-| `click` | `selector` | `content_mode` |
+| `visit` | `url` | — |
+| `click` | `selector` | — |
 | `close` | — | — |
 | `weather` | `location` | — |
 | `youtube` | `url` | `languages` |
@@ -91,7 +91,7 @@ Call as `ax(reason, family, command, args={...})`. Pass function-specific parame
 
 | Command | Required | Optional |
 |---------|----------|----------|
-| `spawn` | `prompt`, `expected` | `instructions`, `output_dir` |
+| `spawn` | `prompt`, `expected` | `instructions`, `output_dir`, `thread_id` |
 | `list` | — | `thread_id` |
 | `status` | `worker_id` | — |
 | `logs` | `worker_id` | `tail` |
@@ -104,11 +104,11 @@ Call as `ax(reason, family, command, args={...})`. Pass function-specific parame
 |------|---------|
 | Find information / answers | `web search` |
 | Fetch static content, APIs, or raw files | `web fetch` |
-| Render a JS-heavy or dynamic page | `web open` |
+| Render a JS-heavy or dynamic page | `web visit` |
 | Get weather for a location | `web weather` |
 | Get a YouTube video transcript | `web youtube` |
 
-**Flow**: `search` → (find URL) → `fetch` (static) or `open` (dynamic/JS).
+**Flow**: `search` → (find URL) → `fetch` (static/files) or `visit` (dynamic/JS).
 
 ### Web Search Tips
 
@@ -141,7 +141,7 @@ Skip it for straightforward tasks — don't reason about what you can just do.
 - **Read Before Editing**: Always verify file contents before overwriting or editing.
 - **Multi-File Edits**: For changes spanning >3 files, outline a plan first or delegate to a worker.
 - **File Formats**:
-  - **HTML/Web Pages**: Use `ax web open` (renders JS). Fall back to `ax web fetch` if needed.
+  - **HTML/Web Pages**: Use `ax web visit` (renders JS). Fall back to `ax web fetch` if needed.
   - **Binary Files**: Use `ax web fetch`.
   - **PDFs**: Convert to Markdown using `markitdown`, then read.
   - **JSON/XML**: Use Python scripts to extract fields.

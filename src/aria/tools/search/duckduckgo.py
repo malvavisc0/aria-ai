@@ -26,8 +26,8 @@ def duckduckgo_web_search(
         max_results: Maximum results (default: 5, max: 50)
 
     Returns:
-        JSON with results[{title, href}], error if failed.
-        Use open_url to read web pages from the results.
+        JSON with results[{title, url}], error if failed.
+        Use visit_url to read web pages from the results.
         Use download to download files (PDFs, images, etc.).
     """
     # Validate inputs
@@ -40,24 +40,16 @@ def duckduckgo_web_search(
     results: list[dict[str, str]] = []
 
     try:
-        # Perform the search with timeout
         search_results = DDGS(timeout=DEFAULT_TIMEOUT).text(
             query=query.strip(), max_results=max_results
         )
 
-        # Process results
         for result in search_results:
             try:
                 title = result.get("title", "")
                 url = result.get("href", "")
-
-                # Keep response minimal - only title and href
-                processed_result = {"title": title, "href": url}
-                # Skip results with missing required fields
-                if processed_result["title"] and processed_result["href"]:
-                    results.append(processed_result)
-                else:
-                    logger.warning(f"Skipping result with missing fields: {result}")
+                if title and url:
+                    results.append({"title": title, "url": url})
             except (KeyError, TypeError) as field_error:
                 logger.warning(f"Skipping malformed result: {field_error}")
                 continue

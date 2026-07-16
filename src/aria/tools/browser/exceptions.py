@@ -42,4 +42,4 @@ class PageNotOpenError(BrowserError):
 
     code = "PAGE_NOT_OPEN"
     recoverable = True
-    how_to_fix = "Navigate to a URL first using open_url()."
+    how_to_fix = "Navigate to a URL first using visit_url()."

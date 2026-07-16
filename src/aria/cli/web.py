@@ -4,8 +4,8 @@ All internet-facing commands live here:
 
     aria web search "query"        Search the web
     aria web fetch "url"           Download a file or raw URL content
-    aria web open "url"            Open a page in the browser (stays open for click)
-    aria web click "selector"      Click an element on the opened page
+    aria web visit "url"           Visit a page in the browser (stays open for click)
+    aria web click "selector"      Click an element on the visited page
     aria web close                 Close the current browser page
     aria web weather "city"        Get weather conditions
     aria web youtube "url"         Fetch a YouTube transcript
@@ -34,8 +34,8 @@ def search_cmd(
 ):
     """Search the web and return matching results.
 
-    Returns metadata only — results are leads, not evidence.
-    Use ``aria web fetch`` or ``aria web open`` to verify before citing.
+    Returns URLs only — use ``aria web visit`` or ``aria web fetch``
+    to get page content.
     """
     from aria.tools.search import web_search
 
@@ -48,19 +48,13 @@ def search_cmd(
 
 
 # ------------------------------------------------------------------
-# Fetch / Open / Click / Close (browser & download)
+# Fetch / Visit / Click / Close (browser & download)
 # ------------------------------------------------------------------
 
 
 @app.command("fetch")
 def fetch_cmd(
     url: str = typer.Argument(..., help="URL to fetch"),
-    content_mode: str = typer.Option(
-        "text",
-        "--content-mode",
-        "-m",
-        help="Extraction mode for websites: 'text' or 'article'.",
-    ),
 ):
     """Download a file or fetch raw URL content.
 
@@ -68,7 +62,7 @@ def fetch_cmd(
     or a website. Files are downloaded directly; websites are rendered
     via the browser and saved as text artifacts.
 
-    For interactive browsing (open → click → close), use ``aria web open``.
+    For interactive browsing (visit -> click -> close), use ``aria web visit``.
     """
     from aria.tools.search import download as _download
     from aria.tools.search._url_classifier import URLType, classify_url
@@ -78,40 +72,32 @@ def fetch_cmd(
     if url_type == URLType.FILE:
         result = _download(reason="CLI fetch (auto-classified as file)", url=url)
     else:
-        from aria.tools.browser.functions import open_url as _open_url
+        from aria.tools.browser.functions import visit_url as _visit_url
 
         result = asyncio.run(
-            _open_url(
+            _visit_url(
                 reason="CLI fetch (auto-classified as website)",
                 url=url,
-                content_mode=content_mode,
             )
         )
     typer.echo(result)
 
 
-@app.command("open")
-def open_cmd(
-    url: str = typer.Argument(..., help="URL to open in the browser"),
-    content_mode: str = typer.Option(
-        "text",
-        "--content-mode",
-        "-m",
-        help="Extraction mode: 'text' or 'article'.",
-    ),
+@app.command("visit")
+def visit_cmd(
+    url: str = typer.Argument(..., help="URL to visit in the browser"),
 ):
-    """Open a web page in the browser and extract its content.
+    """Visit a web page in the browser and extract its content.
 
     The page stays open so you can interact with it using
     ``aria web click``. When done, close it with ``aria web close``.
     """
-    from aria.tools.browser.functions import open_url as _open_url
+    from aria.tools.browser.functions import visit_url as _visit_url
 
     result = asyncio.run(
-        _open_url(
-            reason="CLI browser open",
+        _visit_url(
+            reason="CLI browser visit",
             url=url,
-            content_mode=content_mode,
         )
     )
     typer.echo(result)
@@ -122,16 +108,10 @@ def click_cmd(
     selector: str = typer.Argument(
         ..., help="CSS selector (e.g. 'button.accept', '#submit')"
     ),
-    content_mode: str = typer.Option(
-        "text",
-        "--content-mode",
-        "-m",
-        help="Extraction mode for the updated page: 'text' or 'article'.",
-    ),
 ):
     """Click an element on the currently open page.
 
-    Use after ``aria web open`` has loaded a page. Returns the updated
+    Use after ``aria web visit`` has loaded a page. Returns the updated
     page content after the click.
     """
     from aria.tools.browser.functions import browser_click
@@ -140,7 +120,6 @@ def click_cmd(
         browser_click(
             reason="CLI browser click",
             selector=selector,
-            content_mode=content_mode,
         )
     )
     typer.echo(result)

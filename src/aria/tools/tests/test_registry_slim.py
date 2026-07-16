@@ -24,25 +24,25 @@ class TestSlimmedCoreTools:
         assert names == {"reasoning", "plan", "scratchpad", "shell"}
 
     def test_core_does_not_include_web_search(self):
-        """web_search should no longer be in CORE."""
+        """web_search should not be in CORE."""
         tools = get_tools([CORE])
         names = {t.metadata.name for t in tools}
         assert "web_search" not in names
 
     def test_core_does_not_include_download(self):
-        """download should no longer be in CORE."""
+        """download should not be in CORE."""
         tools = get_tools([CORE])
         names = {t.metadata.name for t in tools}
         assert "download" not in names
 
     def test_core_does_not_include_weather(self):
-        """get_current_weather should no longer be in CORE."""
+        """get_current_weather should not be in CORE."""
         tools = get_tools([CORE])
         names = {t.metadata.name for t in tools}
         assert "get_current_weather" not in names
 
     def test_core_does_not_include_knowledge(self):
-        """knowledge should no longer be in CORE."""
+        """knowledge should not be in CORE."""
         tools = get_tools([CORE])
         names = {t.metadata.name for t in tools}
         assert "knowledge" not in names
@@ -72,13 +72,13 @@ class TestSlimmedFileTools:
         assert names == expected
 
     def test_files_does_not_include_delete_file(self):
-        """delete_file should no longer be in FILES."""
+        """delete_file should not be in FILES."""
         tools = get_tools([FILES])
         names = {t.metadata.name for t in tools}
         assert "delete_file" not in names
 
     def test_files_does_not_include_rename_file(self):
-        """rename_file should no longer be in FILES."""
+        """rename_file should not be in FILES."""
         tools = get_tools([FILES])
         names = {t.metadata.name for t in tools}
         assert "rename_file" not in names
@@ -124,8 +124,3 @@ class TestAllCategories:
         """ALL_CATEGORIES should include all category names."""
         assert CORE in ALL_CATEGORIES
         assert FILES in ALL_CATEGORIES
-        assert "web" in ALL_CATEGORIES
-        assert "development" in ALL_CATEGORIES
-        assert "finance" in ALL_CATEGORIES
-        assert "entertainment" in ALL_CATEGORIES
-        assert "system" in ALL_CATEGORIES

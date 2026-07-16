@@ -1,25 +1,20 @@
 """Unified web search tool.
 
-
-Auto-selects backend based on SEARXNG_URL environment variable.
+Routes to SearXNG when SEARXNG_URL is configured, otherwise DuckDuckGo.
+Both backends return their own structured JSON; this wrapper only selects
+which one to call and catches unexpected exceptions.
 """
+
+from os import getenv
 
 from loguru import logger
 
-from aria.tools import Reason, log_tool_call
-
-# Lazy imports to avoid hard dependency on DDGS when SearXNG is available
-_SEARXNG_URL: str = ""
-
-
-def _get_searxng_url() -> str:
-    """Get SearXNG URL from environment (cached)."""
-    global _SEARXNG_URL
-    if not _SEARXNG_URL:
-        from os import getenv
-
-        _SEARXNG_URL = getenv("SEARXNG_URL", "").rstrip("/")
-    return _SEARXNG_URL
+from aria.tools import (
+    Reason,
+    get_function_name,
+    log_tool_call,
+    tool_error_response,
+)
 
 
 @log_tool_call
@@ -37,7 +32,7 @@ def web_search(
           (e.g., documentation, news, tutorials, facts).
         - Use this as the first step when researching a topic online.
         - Do NOT use this to download files — use `download`.
-        - Do NOT use this to browse a specific website — use `open_url`.
+        - Do NOT use this to browse a specific website — use `visit_url`.
 
     Why:
         Auto-selects the best available search backend (SearXNG if
@@ -54,29 +49,28 @@ def web_search(
         max_results: Maximum results (default: 5).
 
     Returns:
-        JSON with results[{title, href}], error if failed.
+        JSON with results, error if failed.
+        Use `visit_url` or `download` to get full content from URLs.
 
     Important:
         - category and time_range only work when SEARXNG_URL is set.
-        - Returns URLs, not page content — use `open_url` or `download`
+        - Returns URLs, not page content — use `visit_url` or `download`
           to get full content.
     """
-    searxng_url = _get_searxng_url()
     max_results_value = max_results if max_results is not None else 5
 
-    if searxng_url:
-        logger.debug("Using SearXNG backend for web search")
-        from aria.tools.search.searxng import searxng_web_search
+    try:
+        if getenv("SEARXNG_URL", "").strip():
+            from aria.tools.search.searxng import searxng_web_search
 
-        return searxng_web_search(
-            reason=reason,
-            query=query,
-            category=(category or "general"),  # type: ignore[arg-type]
-            time_range=(time_range or ""),  # type: ignore[arg-type]
-            max_results=max_results_value,
-        )
-    else:
-        logger.debug("Using DuckDuckGo backend for web search")
+            return searxng_web_search(
+                reason=reason,
+                query=query,
+                category=(category or "general"),  # type: ignore[arg-type]
+                time_range=(time_range or ""),  # type: ignore[arg-type]
+                max_results=max_results_value,
+            )
+
         from aria.tools.search.duckduckgo import duckduckgo_web_search
 
         return duckduckgo_web_search(
@@ -84,3 +78,6 @@ def web_search(
             query=query,
             max_results=max_results_value,
         )
+    except Exception as exc:
+        logger.error(f"web_search failed: {exc}")
+        return tool_error_response(get_function_name(), reason, exc)

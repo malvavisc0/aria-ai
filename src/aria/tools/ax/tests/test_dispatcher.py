@@ -53,7 +53,7 @@ class TestDispatchTable:
         assert set(_DISPATCH["web"].keys()) == {
             "search",
             "fetch",
-            "open",
+            "visit",
             "click",
             "close",
             "weather",

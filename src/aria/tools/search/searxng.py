@@ -44,14 +44,11 @@ _CATEGORY_FIELD_MAP: dict[str, list[FieldSpec]] = {
     "general": [
         {"name": "url", "required": True, "default": None},
         {"name": "title", "required": True, "default": None},
-        {"name": "content", "required": True, "default": None},
     ],
     "news": [
         {"name": "url", "required": True, "default": None},
         {"name": "title", "required": True, "default": None},
-        {"name": "content", "required": True, "default": None},
         {"name": "source", "required": False, "default": ""},
-        {"name": "thumbnail", "required": False, "default": ""},
         {"name": "pubdate", "required": False, "default": ""},
     ],
     "images": [
@@ -63,15 +60,12 @@ _CATEGORY_FIELD_MAP: dict[str, list[FieldSpec]] = {
     "videos": [
         {"name": "url", "required": True, "default": None},
         {"name": "title", "required": True, "default": None},
-        {"name": "content", "required": True, "default": None},
         {"name": "iframe_src", "required": False, "default": ""},
         {"name": "thumbnail", "required": False, "default": ""},
-        {"name": "engine", "required": False, "default": ""},
     ],
     "files": [
         {"name": "url", "required": True, "default": None},
         {"name": "title", "required": True, "default": None},
-        {"name": "content", "required": True, "default": None},
         {"name": "filename", "required": True, "default": None},
         {"name": "size", "required": False, "default": ""},
         {"name": "mimetype", "required": False, "default": ""},

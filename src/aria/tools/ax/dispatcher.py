@@ -65,10 +65,10 @@ def _download():
     return download
 
 
-def _open_url():
-    from aria.tools.browser.functions import open_url
+def _visit_url():
+    from aria.tools.browser.functions import visit_url
 
-    return open_url
+    return visit_url
 
 
 def _browser_click():
@@ -200,7 +200,7 @@ _DISPATCH: dict[str, dict[str, tuple[Callable, bool]]] = {
     "web": {
         "search": (_web_search, False),
         "fetch": (_download, False),
-        "open": (_open_url, False),
+        "visit": (_visit_url, False),
         "click": (_browser_click, False),
         "close": (_browser_close, False),
         "weather": (_weather, False),

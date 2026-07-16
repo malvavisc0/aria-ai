@@ -1,7 +1,7 @@
 """Browser automation tools using Lightpanda with Playwright CDP.
 
 Tools for:
-1. Opening URLs and getting page content
+1. Visiting URLs and getting page content
 2. Clicking elements (accept cookies, pagination, etc.)
 
 The browser is started automatically when the Aria server starts.
@@ -10,10 +10,10 @@ Lightpanda must be installed first:
 
 Example:
     ```python
-    from aria.tools.browser import open_url, browser_click
+    from aria.tools.browser import visit_url, browser_click
 
-    # Open a URL and get page content
-    result = open_url("Reading documentation", "https://example.com")
+    # Visit a URL and get page content
+    result = visit_url("Reading documentation", "https://example.com")
 
     # Click an element by CSS selector
     result = browser_click("Accepting cookies", "button.accept")
@@ -27,20 +27,13 @@ from aria.tools.browser.manager import get_browser_manager
 from aria.tools.decorators import log_tool_call
 
 
-class OpenUrlSchema(BaseModel):
-    """Schema exposed to the LLM for open_url."""
+class VisitUrlSchema(BaseModel):
+    """Schema exposed to the LLM for visit_url."""
 
     reason: str = Field(
-        description="Required. Brief explanation of why you are opening this URL."
+        description="Required. Brief explanation of why you are visiting this URL."
     )
-    url: str = Field(description="Full URL to open in the headless browser.")
-    content_mode: str = Field(
-        default="text",
-        description=(
-            "'text' for plain text/markdown content, "
-            "'html' for raw HTML (default: 'text')."
-        ),
-    )
+    url: str = Field(description="Full URL to visit in the headless browser.")
 
 
 class BrowserClickSchema(BaseModel):
@@ -53,13 +46,6 @@ class BrowserClickSchema(BaseModel):
         description=(
             "CSS selector or text to identify the element to click "
             "(e.g. '#submit-btn', 'a.more')."
-        ),
-    )
-    content_mode: str = Field(
-        default="text",
-        description=(
-            "'text' for plain text content after click, "
-            "'html' for raw HTML (default: 'text')."
         ),
     )
 
@@ -82,8 +68,8 @@ def _get_manager():
 
 
 @log_tool_call
-async def open_url(reason: Reason, url: str, content_mode: str = "text") -> str:
-    """Open a URL in the headless browser and capture rendered content.
+async def visit_url(reason: Reason, url: str) -> str:
+    """Visit a URL in the headless browser and capture rendered content.
 
     This is the PRIMARY tool for reading web page content. Always prefer
     it over `download` for HTML pages: it renders JavaScript, follows
@@ -92,14 +78,13 @@ async def open_url(reason: Reason, url: str, content_mode: str = "text") -> str:
 
     Only use `download` instead when:
         - The URL points to a binary file (PDF, image, archive, media), or
-        - `open_url` fails and you need the raw content as a fallback.
+        - `visit_url` fails and you need the raw content as a fallback.
 
-    Do not use this for plain API/JSON calls — use `http` or `download`.
+    Do not use this for plain API/JSON calls.
 
     Args:
-        reason: Required. Brief explanation of why you are opening this URL.
+        reason: Required. Brief explanation of why you are visiting this URL.
         url: URL to navigate to.
-        content_mode: ``text`` for cleaned page text or ``article`` for main content.
 
     Returns:
         JSON with page metadata and a saved content file path.
@@ -109,7 +94,6 @@ async def open_url(reason: Reason, url: str, content_mode: str = "text") -> str:
         url,
         tool=get_function_name(),
         reason=reason,
-        content_mode=content_mode,
     )
 
 
@@ -117,17 +101,15 @@ async def open_url(reason: Reason, url: str, content_mode: str = "text") -> str:
 async def browser_click(
     reason: Reason,
     selector: str,
-    content_mode: str = "text",
 ) -> str:
     """Click an element on the current browser page.
 
-    Use this after ``open_url`` for consent banners, pagination, or reveal
+    Use this after ``visit_url`` for consent banners, pagination, or reveal
     interactions. An active page must already exist.
 
     Args:
         reason: Required. Brief explanation of why you are clicking this element.
         selector: CSS selector for the target element.
-        content_mode: Extraction mode for the updated page content.
 
     Returns:
         JSON with updated page metadata after the click.
@@ -137,7 +119,6 @@ async def browser_click(
         selector,
         tool=get_function_name(),
         reason=reason,
-        content_mode=content_mode,
     )
 
 
@@ -147,7 +128,7 @@ async def browser_close(reason: Reason) -> str:
 
     When to use:
         - Use this after you're done interacting with a page that was
-          opened with `open_url`.
+          visited with `visit_url`.
         - Closes the current page by navigating to about:blank. The
           browser itself stays running for future use.
 

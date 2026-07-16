@@ -7,11 +7,8 @@ Categories:
 - core: Worker tools (reasoning, plan, scratchpad, shell)
 - files: Worker file tools (read_file, write_file, edit_file,
          file_info, list_files, search_files, copy_file)
-- web: On-demand browser tools
-- development: On-demand python tool
-- finance: On-demand stock tools
-- entertainment: On-demand imdb tools
-- system: On-demand http_request, process
+- ax: Unified dispatcher (web, knowledge, finance, imdb, http, dev,
+     processes, worker)
 """
 
 from collections.abc import Callable
@@ -25,21 +22,11 @@ FILES_LITE = "files_lite"
 CORE = "core"
 FILES = "files"
 AX = "ax"
-WEB = "web"
-DEVELOPMENT = "development"
-FINANCE = "finance"
-ENTERTAINMENT = "entertainment"
-SYSTEM = "system"
 
 ALL_CATEGORIES = [
     CORE,
     FILES,
     AX,
-    WEB,
-    DEVELOPMENT,
-    FINANCE,
-    ENTERTAINMENT,
-    SYSTEM,
 ]
 
 
@@ -184,150 +171,6 @@ def _get_file_tools() -> list[FunctionTool]:
     return tools
 
 
-def _get_web_tools() -> list[FunctionTool]:
-    """Get on-demand browser tools."""
-    try:
-        from aria.config.api import Lightpanda
-
-        if not Lightpanda.is_available():
-            logger.debug("Browser tools not available (Lightpanda)")
-            return []
-    except Exception:
-        return []
-
-    from aria.tools.browser.functions import BrowserClickSchema, OpenUrlSchema
-
-    tool_specs = [
-        ("aria.tools.browser", "open_url"),
-        ("aria.tools.browser", "browser_click"),
-    ]
-    explicit_schemas = {
-        "open_url": OpenUrlSchema,
-        "browser_click": BrowserClickSchema,
-    }
-    tools = []
-    for mod, fn in tool_specs:
-        try:
-            func = _import_function(mod, fn)
-            schema = explicit_schemas.get(fn)
-            if schema is not None:
-                tools.append(
-                    FunctionTool.from_defaults(async_fn=func, fn_schema=schema)
-                )
-            else:
-                tools.append(FunctionTool.from_defaults(async_fn=func))
-        except (ImportError, AttributeError):
-            logger.warning(f"Could not load browser tool: {mod}.{fn}")
-    return tools
-
-
-def _get_development_tools() -> list[FunctionTool]:
-    """Get on-demand development tools."""
-    from aria.tools.schemas import PythonSchema
-
-    func = _import_function("aria.tools.development", "python")
-    return [FunctionTool.from_defaults(fn=func, fn_schema=PythonSchema)]
-
-
-def _get_finance_tools() -> list[FunctionTool]:
-    """Get on-demand finance tools."""
-    from aria.tools.schemas import (
-        FetchCompanyInfoSchema,
-        FetchStockPriceSchema,
-        FetchTickerNewsSchema,
-    )
-
-    tool_specs = [
-        ("aria.tools.search", "fetch_current_stock_price"),
-        ("aria.tools.search", "fetch_company_information"),
-        ("aria.tools.search", "fetch_ticker_news"),
-    ]
-    explicit_schemas = {
-        "fetch_current_stock_price": FetchStockPriceSchema,
-        "fetch_company_information": FetchCompanyInfoSchema,
-        "fetch_ticker_news": FetchTickerNewsSchema,
-    }
-    tools: list[FunctionTool] = []
-    for mod, fn in tool_specs:
-        func = _import_function(mod, fn)
-        schema = explicit_schemas.get(fn)
-        if schema is not None:
-            tools.append(FunctionTool.from_defaults(fn=func, fn_schema=schema))
-        else:
-            tools.append(FunctionTool.from_defaults(fn=func))
-    return tools
-
-
-def _get_entertainment_tools() -> list[FunctionTool]:
-    """Get on-demand entertainment tools."""
-    from aria.tools.schemas import (
-        GetAllSeriesEpisodesSchema,
-        GetMovieDetailsSchema,
-        GetMovieReviewsSchema,
-        GetMovieTriviaSchema,
-        GetPersonDetailsSchema,
-        GetPersonFilmographySchema,
-        GetYoutubeTranscriptionSchema,
-        SearchImdbTitlesSchema,
-    )
-
-    tool_specs = [
-        ("aria.tools.imdb", "search_imdb_titles"),
-        ("aria.tools.imdb", "get_movie_details"),
-        ("aria.tools.imdb", "get_person_details"),
-        ("aria.tools.imdb", "get_person_filmography"),
-        ("aria.tools.imdb", "get_all_series_episodes"),
-        ("aria.tools.imdb", "get_movie_reviews"),
-        ("aria.tools.imdb", "get_movie_trivia"),
-        ("aria.tools.search", "get_youtube_video_transcription"),
-    ]
-    explicit_schemas = {
-        "search_imdb_titles": SearchImdbTitlesSchema,
-        "get_movie_details": GetMovieDetailsSchema,
-        "get_person_details": GetPersonDetailsSchema,
-        "get_person_filmography": GetPersonFilmographySchema,
-        "get_all_series_episodes": GetAllSeriesEpisodesSchema,
-        "get_movie_reviews": GetMovieReviewsSchema,
-        "get_movie_trivia": GetMovieTriviaSchema,
-        "get_youtube_video_transcription": GetYoutubeTranscriptionSchema,
-    }
-    tools = []
-    for mod, fn in tool_specs:
-        try:
-            func = _import_function(mod, fn)
-            schema = explicit_schemas.get(fn)
-            if schema is not None:
-                tools.append(FunctionTool.from_defaults(fn=func, fn_schema=schema))
-            else:
-                tools.append(FunctionTool.from_defaults(fn=func))
-        except (ImportError, AttributeError):
-            logger.warning(f"Could not load entertainment tool: {mod}.{fn}")
-    return tools
-
-
-def _get_system_tools() -> list[FunctionTool]:
-    """Get on-demand system tools."""
-    from aria.tools.schemas import HttpRequestSchema, ProcessSchema
-
-    tool_specs = [
-        ("aria.tools.http", "http_request"),
-        ("aria.tools.process", "process"),
-    ]
-    explicit_schemas = {
-        "http_request": HttpRequestSchema,
-        "process": ProcessSchema,
-    }
-    tools: list[FunctionTool] = []
-    for mod, fn in tool_specs:
-        func = _import_function(mod, fn)
-        schema = explicit_schemas.get(fn)
-        if schema is not None:
-            tools.append(FunctionTool.from_defaults(fn=func, fn_schema=schema))
-        else:
-            tools.append(FunctionTool.from_defaults(fn=func))
-    return tools
-
-
 def _get_ax_tools() -> list[FunctionTool]:
     """Single unified ax dispatcher tool."""
     from aria.tools.ax import ax
@@ -342,11 +185,6 @@ _CATEGORY_LOADERS: dict[str, Callable[[], list[FunctionTool]]] = {
     CORE: _get_core_tools,
     FILES: _get_file_tools,
     AX: _get_ax_tools,
-    WEB: _get_web_tools,
-    DEVELOPMENT: _get_development_tools,
-    FINANCE: _get_finance_tools,
-    ENTERTAINMENT: _get_entertainment_tools,
-    SYSTEM: _get_system_tools,
 }
 
 

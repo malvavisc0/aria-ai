@@ -57,12 +57,12 @@ def download(
           data files, audio/video, and other raw content.
         - Use this for direct file URLs where you need the bytes saved
           to disk.
-        - For reading web pages, prefer `open_url` — it renders
+        - For reading web pages, prefer `visit_url` — it renders
           JavaScript and handles anti-bot protection. Only fall back to
-          this tool (with convert_to_markdown=True) when `open_url`
+          this tool (with convert_to_markdown=True) when `visit_url`
           fails on an HTML page.
         - Do NOT use this to browse websites interactively — use
-          `open_url`.
+          `visit_url`.
         - Do NOT use this to search the web — use `web_search` first
           to find URLs.
         - Do NOT use this for YouTube transcripts — use
@@ -71,7 +71,7 @@ def download(
     Why:
         Provides a persistence-first download mechanism that saves files
         to disk and returns metadata. Best suited for binary/raw
-        artifacts; HTML retrieval should go through `open_url` first.
+        artifacts; HTML retrieval should go through `visit_url` first.
 
     Args:
         reason: Required. Brief explanation of why you are downloading this file.
@@ -80,7 +80,7 @@ def download(
         custom_headers: Optional HTTP headers.
         max_size: Max bytes to download (default: 5 MB).
         convert_to_markdown: Convert HTML content to markdown
-            (default: False). Only relevant for the `open_url` fallback case.
+            (default: False). Only relevant for the `visit_url` fallback case.
 
     Returns:
         JSON with file_path and metadata about the saved artifact.
@@ -89,7 +89,7 @@ def download(
 
     Important:
         - Files are saved to disk; the response contains the file path.
-        - This is a fallback for HTML pages; reach for `open_url` first.
+        - This is a fallback for HTML pages; reach for `visit_url` first.
           If you do fetch HTML here, set convert_to_markdown=True to
           persist a markdown version alongside the saved source file.
         - Large files are rejected if they exceed max_size.

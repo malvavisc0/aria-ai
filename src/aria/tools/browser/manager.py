@@ -417,7 +417,6 @@ class LightpandaManager:
         *,
         tool: str = "",
         reason: str = "",
-        content_mode: str = "text",
     ) -> str:
         """Navigate to URL and return rendered content.
 
@@ -437,22 +436,16 @@ class LightpandaManager:
                 timeout=timeout_ms,
                 wait_until=DEFAULT_WAIT_STRATEGY,
             )
-            # Explicit wait ensures the page is stable before extracting
-            # content.  Without this, Lightpanda may still be processing
-            # deferred scripts / redirects and the evaluate() call hits
-            # "Execution context was destroyed".
             await page.wait_for_load_state(DEFAULT_WAIT_STRATEGY, timeout=timeout_ms)
 
-            content = await self._get_text_content(page, mode=content_mode)
+            content = await self._get_text_content(page)
 
             if self._is_navigation_failed(content, page.url):
                 fail_reason = content if content else "Navigation failed"
                 logger.error(f"Navigation failed: {fail_reason}")
                 return self._error(fail_reason, tool=tool, reason=reason)
 
-            content_path = self._persist_content(
-                content, page.url, f"open_{content_mode}"
-            )
+            content_path = self._persist_content(content, page.url, "visit")
             title = await self._safe_title()
             return self._content_response(
                 content,
@@ -473,7 +466,6 @@ class LightpandaManager:
         *,
         tool: str = "",
         reason: str = "",
-        content_mode: str = "text",
     ) -> str:
         """Click element by CSS selector and return updated content.
 
@@ -491,10 +483,8 @@ class LightpandaManager:
             await page.click(selector, timeout=timeout_ms)
             await page.wait_for_load_state(DEFAULT_WAIT_STRATEGY, timeout=timeout_ms)
 
-            content = await self._get_text_content(page, mode=content_mode)
-            content_path = self._persist_content(
-                content, page.url, f"click_{content_mode}"
-            )
+            content = await self._get_text_content(page)
+            content_path = self._persist_content(content, page.url, "click")
             title = await self._safe_title()
             return self._content_response(
                 content,
@@ -551,7 +541,6 @@ class LightpandaManager:
         *,
         tool: str = "",
         reason: str = "",
-        content_mode: str = "text",
     ) -> str:
         """Get current page content as clean text.
 
@@ -564,7 +553,7 @@ class LightpandaManager:
         """
 
         async def _do_get_content(page: Page) -> str:
-            return await self._get_text_content(page, mode=content_mode)
+            return await self._get_text_content(page)
 
         return await self._with_recovery(
             "get_page_content", _do_get_content, tool=tool, reason=reason
@@ -598,26 +587,16 @@ class LightpandaManager:
         return any(pattern in content for pattern in error_patterns)
 
     @staticmethod
-    async def _get_text_content(page: Page, mode: str = "text") -> str:
+    async def _get_text_content(page: Page) -> str:
         """Extract cleaned page text content.
 
-        Modes:
-        - ``text``: cleaned body text
-        - ``article``: attempt to extract main content only
-
-        Removes script, style, and noscript elements, then collapses
-        whitespace. Falls back to raw HTML on evaluation errors.
-
-        Args:
-            page: Playwright Page instance.
-
-        Returns:
-            Cleaned text content string.
+        Removes script, style, nav, footer, and other non-content elements,
+        then collapses whitespace. Falls back to raw HTML on evaluation errors.
         """
         try:
             content = await page.evaluate(
                 """
-                (mode) => {
+                () => {
                     const clean = (root) => {
                         if (!root) return '';
                         const clone = root.cloneNode(true);
@@ -648,40 +627,9 @@ class LightpandaManager:
                         return clone.innerText || clone.textContent || '';
                     };
 
-                    if (mode === 'article') {
-                        const candidates = [
-                            document.querySelector('article'),
-                            document.querySelector('main'),
-                            document.querySelector('[role="main"]'),
-                            ...Array.from(
-                                document.querySelectorAll('div, section')
-                            )
-                                .filter(el => {
-                                    const text =
-                                        el.innerText ||
-                                        el.textContent ||
-                                        '';
-                                    return text.trim().length > 1500;
-                                })
-                                .slice(0, 5)
-                        ].filter(Boolean);
-
-                        let best = null;
-                        let bestLen = 0;
-                        for (const el of candidates) {
-                            const text = clean(el);
-                            if (text.length > bestLen) {
-                                best = text;
-                                bestLen = text.length;
-                            }
-                        }
-                        if (best && best.trim()) return best;
-                    }
-
                     return clean(document.body);
                 }
                 """,
-                mode,
             )
             lines = (line.strip() for line in content.splitlines())
             return "\n".join(line for line in lines if line)
