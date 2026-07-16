@@ -119,6 +119,10 @@ class Embeddings:
         Uses the same logic as ``VllmServerManager._clamp_context_to_gpu_kv``
         so the memory system's token budget matches what the model actually
         supports.
+
+        Warns when the clamped size collapses below a usable threshold —
+        this happens when a large model leaves too little VRAM for the KV
+        cache, silently shrinking the memory budget to near-zero.
         """
         requested = VllmConfig.chat_context_size
         model_path = _resolve_model_path(get_optional_env("CHAT_MODEL_PATH", ""))
@@ -131,12 +135,23 @@ class Embeddings:
             gpu_mem = VllmConfig.gpu_memory_utilization
             if gpu_mem is None:
                 gpu_mem = 0.90
-            return VllmServerManager._clamp_context_to_gpu_kv(
+            effective = VllmServerManager._clamp_context_to_gpu_kv(
                 model_path=model_path,
                 requested_context=ctx,
                 gpu_memory_utilization=gpu_mem,
                 kv_cache_dtype=VllmConfig.kv_cache_dtype,
             )
+            if effective < requested * 0.5:
+                from loguru import logger
+
+                logger.warning(
+                    f"Context collapsed {requested:,} → {effective:,} tokens "
+                    f"due to GPU KV cache limits. Memory budget will be very "
+                    f"small (token_limit ≈ {int(effective * Embeddings.token_limit_ratio):,}). "
+                    f"Consider a smaller model or raise TOKEN_LIMIT_RATIO "
+                    f"to preserve memory budget at the cost of scratchpad."
+                )
+            return effective
         except Exception:
             return requested
 
