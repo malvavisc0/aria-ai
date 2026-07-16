@@ -647,11 +647,24 @@ def _estimate_kv_cache_mb(
     assert num_kv_heads is not None
     assert head_dim is not None
 
-    bytes_per_elem = 1 if kv_cache_dtype == "fp8" else 2
+    # 4-bit (nvfp4, int4) = 0.5 bytes/elem; 8-bit (fp8*) = 1 byte; else 16-bit = 2
+    if kv_cache_dtype in (
+        "nvfp4",
+        "int4_per_token_head",
+        "turboquant_k8v4",
+        "turboquant_4bit_nc",
+        "turboquant_k3v4_nc",
+        "turboquant_3bit_nc",
+    ):
+        bytes_per_elem = 0.5
+    elif kv_cache_dtype.startswith("fp8"):
+        bytes_per_elem = 1
+    else:
+        bytes_per_elem = 2
     # 2 tensors (K + V) per layer
     kv_per_token = 2 * num_layers * num_kv_heads * head_dim * bytes_per_elem
     total_bytes = kv_per_token * context_size
-    kv_mb = total_bytes // (1024 * 1024)
+    kv_mb = int(total_bytes // (1024 * 1024))
 
     logger.debug(
         "KV cache from config.json: layers={}, kv_heads={}, head_dim={}, "
@@ -769,7 +782,7 @@ def calculate_gpu_memory_utilization(
     from aria.helpers.memory import get_model_file_size
 
     MIN_UTILIZATION = 0.50
-    MAX_UTILIZATION = 0.95
+    MAX_UTILIZATION = 0.90
     FALLBACK = 0.85
     DEFAULT_MODEL_SIZE_MB = 4096  # Assume ~4 GiB if model path is unknown
 
@@ -806,7 +819,19 @@ def calculate_gpu_memory_utilization(
         # This assumes KV cache at 32k baseline is roughly proportional to
         # model weight size — conservative for GQA models, adequate for MHA.
         kv_source = "heuristic (no config.json)"
-        kv_dtype_factor = 0.5 if kv_cache_dtype == "fp8" else 1.0
+        if kv_cache_dtype in (
+            "nvfp4",
+            "int4_per_token_head",
+            "turboquant_k8v4",
+            "turboquant_4bit_nc",
+            "turboquant_k3v4_nc",
+            "turboquant_3bit_nc",
+        ):
+            kv_dtype_factor = 0.25
+        elif kv_cache_dtype.startswith("fp8"):
+            kv_dtype_factor = 0.5
+        else:
+            kv_dtype_factor = 1.0
         context_factor = context_size / 32768
         kv_cache_mb = int(model_size_mb * context_factor * kv_dtype_factor)
 

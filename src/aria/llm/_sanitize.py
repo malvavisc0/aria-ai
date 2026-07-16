@@ -386,7 +386,12 @@ class SanitizedOpenAILike(OpenAILike):
 
                 # Extract reasoning_content for chain-of-thought
                 # streaming from providers that surface this field.
+                # vLLM uses "reasoning" (not "reasoning_content") for
+                # its reasoning parser output; some providers (DeepSeek,
+                # OpenRouter) use "reasoning_content". Check both.
                 raw_reasoning = getattr(delta, "reasoning_content", None)
+                if not raw_reasoning:
+                    raw_reasoning = getattr(delta, "reasoning", None)
                 reasoning_delta = (
                     raw_reasoning if isinstance(raw_reasoning, str) else ""
                 )
