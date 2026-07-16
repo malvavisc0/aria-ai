@@ -602,9 +602,11 @@ async def on_message_handler(message: cl.Message) -> None:
             max_iterations=ChatConfig.max_iteration,
         )
 
-        # Send the (empty) assistant message first so it has an id; tokens
-        # are streamed into it via stream_token. Streaming before send()
-        # can drop frames on Chainlit versions that require a message id.
+        # Send the (empty) assistant message first so it has an id in the
+        # UI; tokens are then streamed into it via stream_token. After
+        # streaming completes, update() must be called to flip streaming
+        # off (stops the blinking dot) and persist the final content via
+        # update_step — a second send() would be a no-op (persisted guard).
         output = cl.Message(content="")
         await output.send()
         _run_succeeded = False
@@ -614,6 +616,7 @@ async def on_message_handler(message: cl.Message) -> None:
             _run_succeeded = True
         finally:
             if _run_succeeded:
+                await output.update()
                 await _mark_message_processed(
                     message, extra_metadata={**pipeline_meta, **stream_meta}
                 )

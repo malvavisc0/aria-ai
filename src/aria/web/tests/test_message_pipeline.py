@@ -684,6 +684,7 @@ class TestEditDetection:
         # Mock cl.Message for output
         mock_output = MagicMock()
         mock_output.send = AsyncMock()
+        mock_output.update = AsyncMock()
         mock_output.remove = AsyncMock()
         monkeypatch.setattr(
             pipeline.cl,
@@ -751,6 +752,7 @@ class TestEditDetection:
 
         mock_output = MagicMock()
         mock_output.send = AsyncMock()
+        mock_output.update = AsyncMock()
         mock_output.remove = AsyncMock()
         monkeypatch.setattr(
             pipeline.cl,
@@ -773,7 +775,126 @@ class TestEditDetection:
         assert reset_called == []
 
     @pytest.mark.asyncio
-    async def test_reset_memory_for_edit(self, monkeypatch) -> None:
+    async def test_successful_stream_calls_send_then_update(self, monkeypatch) -> None:
+        """A successful turn must call send() (register the empty message)
+        then update() (persist final content, stop the blinking dot).
+
+        Regression guard for the bug where send() was called before
+        streaming and update() was never called — leaving the assistant
+        step persisted empty with a forever-blinking streaming dot.
+        """
+        from aria.config.models import Chat as ChatConfigCls
+
+        monkeypatch.setattr(ChatConfigCls.__dict__["max_iteration"], "_value", 10)
+        monkeypatch.setattr(pipeline, "_mark_message_processed", AsyncMock())
+        object.__setattr__(pipeline._state, "agents_workflow", MagicMock())
+        object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
+        monkeypatch.setattr(
+            pipeline,
+            "_handle_message",
+            AsyncMock(return_value=("prompt", {})),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_stream_agent_response",
+            AsyncMock(return_value=(True, {})),
+        )
+        monkeypatch.setattr(
+            pipeline.cl,
+            "user_session",
+            SimpleNamespace(
+                get=lambda k: MagicMock(
+                    session_id="thread-1", aget=AsyncMock(return_value=[])
+                ),
+                set=lambda k, v: None,
+            ),
+        )
+
+        output = MagicMock()
+        output.send = AsyncMock()
+        output.update = AsyncMock()
+        output.remove = AsyncMock()
+        monkeypatch.setattr(pipeline.cl, "Message", lambda **kw: output)
+
+        message = SimpleNamespace(
+            id="msg-1",
+            content="Hello",
+            command=None,
+            thread_id="thread-1",
+            elements=[],
+            metadata={},
+        )
+
+        await pipeline.on_message_handler(message)
+
+        output.send.assert_awaited_once()
+        output.update.assert_awaited_once()
+        output.remove.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_failed_stream_calls_remove_not_update(self, monkeypatch) -> None:
+        """A failed turn must remove the placeholder, never update() it.
+
+        Note: a separate error cl.Message is also sent by _fail_turn; that
+        uses its own mock, so we only assert on the streaming output mock.
+        """
+        from aria.config.models import Chat as ChatConfigCls
+
+        monkeypatch.setattr(ChatConfigCls.__dict__["max_iteration"], "_value", 10)
+        monkeypatch.setattr(pipeline, "_mark_message_processed", AsyncMock())
+        monkeypatch.setattr(pipeline, "_rollback_memory", AsyncMock())
+        object.__setattr__(pipeline._state, "agents_workflow", MagicMock())
+        object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
+        monkeypatch.setattr(
+            pipeline,
+            "_handle_message",
+            AsyncMock(return_value=("prompt", {})),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_stream_agent_response",
+            AsyncMock(side_effect=RuntimeError("boom")),
+        )
+        monkeypatch.setattr(
+            pipeline.cl,
+            "user_session",
+            SimpleNamespace(
+                get=lambda k: MagicMock(
+                    session_id="thread-1", aget=AsyncMock(return_value=[])
+                ),
+                set=lambda k, v: None,
+            ),
+        )
+
+        outputs = []
+
+        def _make_message(**kw):
+            m = MagicMock()
+            m.send = AsyncMock()
+            m.update = AsyncMock()
+            m.remove = AsyncMock()
+            outputs.append(m)
+            return m
+
+        monkeypatch.setattr(pipeline.cl, "Message", _make_message)
+
+        message = SimpleNamespace(
+            id="msg-1",
+            content="Hello",
+            command=None,
+            thread_id="thread-1",
+            elements=[],
+            metadata={},
+        )
+
+        await pipeline.on_message_handler(message)
+
+        # First Message is the streaming placeholder; the second (if any) is
+        # the error notice sent by _fail_turn.
+        streaming_output = outputs[0]
+        streaming_output.send.assert_awaited_once()
+        streaming_output.remove.assert_awaited_once()
+        streaming_output.update.assert_not_awaited()
         """_reset_memory_for_edit rebuilds memory from DB."""
         mock_vector_db = MagicMock()
         monkeypatch.setattr(pipeline._state, "vector_db", mock_vector_db)
