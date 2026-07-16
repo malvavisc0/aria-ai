@@ -477,6 +477,12 @@ async def _stream_agent_response(
                 await thinking.write(event.thinking_delta)
                 emitted = True
             elif event.delta:
+                # The final answer is starting — clear the lingering last
+                # tool step now so it doesn't stay visible until AgentOutput
+                # arrives (which may be several tokens later).
+                if current_step is not None:
+                    await maybe_remove_step(current_step)
+                    current_step = None
                 await thinking.close()
                 await output.stream_token(event.delta)
                 emitted = True

@@ -41,6 +41,96 @@ class TestStreamAgentResponse:
         return output
 
     @pytest.mark.asyncio
+    async def test_removes_last_tool_step_when_answer_delta_starts(
+        self, monkeypatch
+    ) -> None:
+        """The last ToolCall step must be cleared as soon as the final
+        answer's first delta streams — not left visible until AgentOutput.
+
+        Regression guard for the "lingering last tool step" bug.
+        """
+        from llama_index.core.agent.workflow import AgentStream, ToolCall
+
+        tool_event = ToolCall(
+            tool_name="read_file",
+            tool_kwargs={},
+            tool_id="t1",
+        )
+        answer = AgentStream(
+            delta="Here is the answer",
+            response="Here is the answer",
+            current_agent_name="test",
+        )
+
+        handler = self._make_handler(tool_event, answer)
+        output = self._make_output()
+
+        sent_step = MagicMock()
+        sent_step.remove = AsyncMock()
+        monkeypatch.setattr(
+            pipeline, "send_tool_step", AsyncMock(return_value=sent_step)
+        )
+
+        await pipeline._stream_agent_response(handler, output)
+
+        # The tool step is created on ToolCall and removed once the answer
+        # delta begins streaming — before any AgentOutput event.
+        sent_step.remove.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_interleaved_stream_tool_stream_removes_each_tool_step(
+        self, monkeypatch
+    ) -> None:
+        """Models may interleave: answer → tool → answer → tool → answer.
+
+        Every tool step must appear while its tool runs and be cleared when
+        the answer resumes; the last tool (no delta after it) is cleared by
+        the AgentOutput cleanup.  None should linger at the end.
+        """
+        from llama_index.core.agent.workflow import (
+            AgentOutput,
+            AgentStream,
+            ToolCall,
+        )
+        from llama_index.core.llms import ChatMessage
+
+        events = [
+            AgentStream(delta="Let me check ", response="", current_agent_name="t"),
+            ToolCall(tool_name="search", tool_kwargs={}, tool_id="t1"),
+            AgentStream(delta="found it, now ", response="", current_agent_name="t"),
+            ToolCall(tool_name="read_file", tool_kwargs={}, tool_id="t2"),
+            AgentStream(
+                delta="here is the answer", response="", current_agent_name="t"
+            ),
+            AgentOutput(
+                response=ChatMessage(content="here is the answer"),
+                current_agent_name="t",
+            ),
+        ]
+
+        handler = self._make_handler(*events)
+        output = self._make_output()
+
+        steps: list[MagicMock] = []
+
+        async def _send_tool_step(_event):
+            s = MagicMock()
+            s.remove = AsyncMock()
+            steps.append(s)
+            return s
+
+        monkeypatch.setattr(pipeline, "send_tool_step", _send_tool_step)
+
+        await pipeline._stream_agent_response(handler, output)
+
+        # Two tool steps were created; both must have been removed (the
+        # first by the intervening answer delta, the second by the
+        # AgentOutput cleanup — no delta follows it).
+        assert len(steps) == 2
+        for s in steps:
+            s.remove.assert_awaited()
+
+    @pytest.mark.asyncio
     async def test_streams_text_delta(self) -> None:
         from llama_index.core.agent.workflow import AgentStream
 
