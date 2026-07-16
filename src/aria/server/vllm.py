@@ -20,6 +20,7 @@ Example:
 import importlib.util
 import json
 import os
+import socket
 import subprocess
 import time
 from pathlib import Path
@@ -319,6 +320,76 @@ class VllmServerManager:
 
         return sorted(leaders)
 
+    @staticmethod
+    def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+        """Return True if *port* already has a listener on *host*.
+
+        Uses a raw TCP connect (no HTTP) so it detects any process bound
+        to the port, not just a healthy vLLM server.
+        """
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.5)
+        try:
+            return sock.connect_ex((host, port)) == 0
+        finally:
+            sock.close()
+
+    def _preflight_port_check(self, port: int) -> None:
+        """Detect and clean up stale vLLM processes before starting.
+
+        When a previous aria instance was killed (not shut down gracefully),
+        its vLLM child can survive as an orphan — holding VRAM and the
+        target port.  Starting a new vLLM alongside produces a confusing
+        ``OSError: Address already in use`` or, worse, a silently wrong
+        GPU-memory clamp (low free VRAM → tiny context → history eviction).
+
+        This check runs before any server config is computed:
+
+        1. If the port is free, return immediately (the common case).
+        2. If the port is occupied **by a vLLM orphan** we own, stop it
+           automatically and log clearly.
+        3. If the port is occupied by something else, abort with an
+           actionable error so the user can stop it manually.
+
+        Args:
+            port: Target port for the new vLLM server.
+        """
+        if not self._port_in_use(port):
+            return
+
+        logger.warning(
+            f"Port {port} is already in use — checking for stale vLLM processes..."
+        )
+
+        # Try to identify the process listening on the port.
+        stale_pids = self._find_orphan_pids()
+
+        if not stale_pids:
+            raise RuntimeError(
+                f"Port {port} is already in use by a non-vLLM process. "
+                f"Stop it manually before starting aria:\n"
+                f"  lsof -ti :{port} | xargs kill"
+            )
+
+        logger.info(
+            f"Found {len(stale_pids)} stale vLLM process group(s) on "
+            f"port {port}: {stale_pids} — stopping them..."
+        )
+        for pid in stale_pids:
+            stop_process_group(pid, timeout=10.0)
+
+        # Give the OS a moment to release the port.
+        time.sleep(1)
+
+        if self._port_in_use(port):
+            raise RuntimeError(
+                f"Port {port} is still in use after stopping stale vLLM "
+                f"processes. A non-vLLM process may be holding it.\n"
+                f"  lsof -ti :{port} | xargs kill"
+            )
+
+        logger.info(f"Port {port} is now free after cleaning up stale vLLM.")
+
     def _build_vllm_cmd(
         self,
         model_path: str,
@@ -599,6 +670,13 @@ class VllmServerManager:
 
         if not VllmConfig.remote and not is_vllm_installed():
             raise RuntimeError("vLLM is not installed. Run: aria vllm install")
+
+        # --- Preflight: detect and clean up stale vLLM processes ---
+        # This runs before any GPU-memory or context-size computation so
+        # a surviving orphan (holding VRAM + the port) doesn't silently
+        # produce a tiny context clamp or an Address-already-in-use error.
+        if not VllmConfig.remote:
+            self._preflight_port_check(Chat.get_port())
 
         servers: list[tuple[str, list[str], int]] = []
 

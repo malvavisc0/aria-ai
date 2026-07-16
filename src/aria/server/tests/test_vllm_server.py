@@ -323,3 +323,66 @@ class TestStopAll:
                 pass
 
         assert mock_stop.call_count >= 1
+
+
+class TestPreflightPortCheck:
+    """Tests for VllmServerManager preflight port-in-use detection."""
+
+    def setup_method(self):
+        with patch("aria.server.vllm.load_state", return_value={}):
+            self.manager = VllmServerManager()
+
+    def test_returns_immediately_when_port_is_free(self):
+        """No action when the target port has no listener."""
+        with (
+            patch.object(self.manager, "_port_in_use", return_value=False) as mock_port,
+            patch.object(self.manager, "_find_orphan_pids") as mock_orphans,
+            patch("aria.server.vllm.stop_process_group") as mock_stop,
+        ):
+            self.manager._preflight_port_check(9090)
+
+        mock_port.assert_called_once_with(9090)
+        mock_orphans.assert_not_called()
+        mock_stop.assert_not_called()
+
+    def test_stops_stale_vllm_when_port_occupied(self):
+        """Stale vLLM orphans are stopped automatically when port is in use."""
+        with (
+            patch.object(self.manager, "_port_in_use", side_effect=[True, False]),
+            patch.object(self.manager, "_find_orphan_pids", return_value=[9999]),
+            patch("aria.server.vllm.stop_process_group") as mock_stop,
+            patch("aria.server.vllm.time.sleep"),
+        ):
+            self.manager._preflight_port_check(9090)
+
+        mock_stop.assert_called_once_with(9999, timeout=10.0)
+
+    def test_aborts_when_non_vllm_process_owns_port(self):
+        """Port occupied by non-vLLM process raises actionable error."""
+        with (
+            patch.object(self.manager, "_port_in_use", return_value=True),
+            patch.object(self.manager, "_find_orphan_pids", return_value=[]),
+            patch("aria.server.vllm.stop_process_group") as mock_stop,
+        ):
+            try:
+                self.manager._preflight_port_check(9090)
+                raise AssertionError("Should have raised RuntimeError")
+            except RuntimeError as e:
+                assert "9090" in str(e)
+                assert "lsof" in str(e)
+
+        mock_stop.assert_not_called()
+
+    def test_aborts_if_port_still_in_use_after_cleanup(self):
+        """If orphans are killed but port stays occupied, abort."""
+        with (
+            patch.object(self.manager, "_port_in_use", return_value=True),
+            patch.object(self.manager, "_find_orphan_pids", return_value=[9999]),
+            patch("aria.server.vllm.stop_process_group"),
+            patch("aria.server.vllm.time.sleep"),
+        ):
+            try:
+                self.manager._preflight_port_check(9090)
+                raise AssertionError("Should have raised RuntimeError")
+            except RuntimeError as e:
+                assert "still in use" in str(e)
