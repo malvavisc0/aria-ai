@@ -23,3 +23,4 @@
   - Ensure `args` is passed as a **dictionary**, not a string.
   - Confirm required parameters (e.g., `reason`, `family`, `command`) are included.
 - If a tool call fails due to parameter formatting, **do not retry**. Report the error and adapt.
+- If `ax` returns an `unknown_command` or `unknown_family` error, **read the `available_commands` or `available_families` list in the response** and use a valid one. Do not retry the same invalid call or immediately fall back to `shell` — the error tells you exactly what's supported. Fall back to `shell` only for CLI-only commands (e.g., `check instructions`, `check preflight`).
