@@ -647,6 +647,21 @@ def _estimate_kv_cache_mb(
     assert num_kv_heads is not None
     assert head_dim is not None
 
+    # Hybrid Mamba+attention models (e.g. Qwen3.5/3.6) interleave
+    # ``linear_attention`` (Mamba/SSM) layers with ``full_attention``
+    # layers.  Only ``full_attention`` layers need per-token KV cache;
+    # Mamba layers have a fixed-size state that does not scale with
+    # context length.  Count only the attention layers for KV cache
+    # estimation.  Falls back to ``num_layers`` when ``layer_types``
+    # is absent (pure-attention models).
+    layer_types = text_cfg.get("layer_types") or cfg.get("layer_types")
+    if layer_types and isinstance(layer_types, list):
+        attn_layers = sum(
+            1 for lt in layer_types if isinstance(lt, str) and "full_attention" in lt
+        )
+        if attn_layers > 0:
+            num_layers = attn_layers
+
     # 4-bit (nvfp4, int4) = 0.5 bytes/elem; 8-bit (fp8*) = 1 byte; else 16-bit = 2
     if kv_cache_dtype in (
         "nvfp4",
@@ -667,7 +682,7 @@ def _estimate_kv_cache_mb(
     kv_mb = int(total_bytes // (1024 * 1024))
 
     logger.debug(
-        "KV cache from config.json: layers={}, kv_heads={}, head_dim={}, "
+        "KV cache from config.json: layers={} (attn-only), kv_heads={}, head_dim={}, "
         "dtype={}, ctx={} → {} MiB",
         num_layers,
         num_kv_heads,
