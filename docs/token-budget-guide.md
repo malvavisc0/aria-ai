@@ -38,16 +38,35 @@ in a single request:
 ### The Key Formula
 
 ```
-Memory token_limit = CHAT_CONTEXT_SIZE × TOKEN_LIMIT_RATIO
+Effective context = GPU-KV-clamped CHAT_CONTEXT_SIZE
+
+Memory token_limit = Effective context × TOKEN_LIMIT_RATIO
 
 Chat history buffer = token_limit × CHAT_HISTORY_TOKEN_RATIO  (~10%)
 Memory blocks       = token_limit × (1 - CHAT_HISTORY_TOKEN_RATIO)  (~90%)
 
-Available for scratchpad = CHAT_CONTEXT_SIZE
+Available for scratchpad = Effective context
                          - Memory token_limit
                          - System prompt (~10k)
                          - Output (max_tokens = 8,192)
 ```
+
+> ⚠️ **`CHAT_CONTEXT_SIZE` is a request, not a guarantee.** vLLM clamps
+> it to what the GPU KV cache can hold. A large model (e.g. 30B+ on
+> 24 GB VRAM) can collapse `CHAT_CONTEXT_SIZE=262,144` down to
+> ~12,000 tokens — shrinking `token_limit` to ~3,000 and the buffer
+> to ~300 tokens (less than one message pair). This causes **total
+> amnesia**: every turn is flushed to the vector store, and the
+> retrieved content is then dropped by truncation on the next turn.
+> A startup warning is logged when the clamp exceeds 50%.
+
+### How to Avoid Budget Collapse
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Agent forgets the previous turn | `token_limit` < ~3k (GPU clamp) | Use a smaller model, or raise `TOKEN_LIMIT_RATIO` to prioritize memory over scratchpad |
+| Buffer < 1 message pair (~500 tok) | `token_limit × CHAT_HISTORY_TOKEN_RATIO` too small | Increase `CHAT_HISTORY_TOKEN_RATIO` to 0.20–0.30, or use a smaller model |
+| Retrieved context dropped entirely | Retrieved tokens > `token_limit` → `atruncate()` returns `None` | Ensure `token_limit` comfortably exceeds expected retrieval size (~5k+) |
 
 ---
 
@@ -324,8 +343,8 @@ the best reasoning, but shorter conversations.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `400: context length exceeded` | Total tokens > model limit | Lower `TOKEN_LIMIT_RATIO` or `CHAT_CONTEXT_SIZE` |
-| Agent forgets recent context | `CHAT_HISTORY_TOKEN_RATIO` too low | Increase to 0.15 for 5-6 interactions |
-| Agent loses old context | Vector retrieval not finding relevant messages | Check embedding model quality, increase `similarity_top_k` |
+| Agent forgets the previous turn | GPU KV clamp collapsed `token_limit` below ~3k | Use a smaller model so KV cache fits; check startup warning |
+| Agent loses old context | `token_limit` too small → retrieved content dropped by `atruncate()` | Increase `token_limit` (smaller model or higher `TOKEN_LIMIT_RATIO`) |
 | Agent loops on tool calls | Scratchpad overflow | Lower `MAX_ITERATIONS`, add tool output truncation |
 | Slow responses | Context too large for GPU | Lower `CHAT_CONTEXT_SIZE` or use smaller model |
 
