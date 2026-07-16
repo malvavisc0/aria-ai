@@ -72,7 +72,8 @@ class TestExtractImageData:
         result = session_module.extract_image_data(message)
 
         assert len(result) == 1
-        assert result[0]["mime_type"] == "image/jpg"
+        # .jpg maps to the registered image/jpeg MIME (not image/jpg).
+        assert result[0]["mime_type"] == "image/jpeg"
 
     @staticmethod
     def test_handles_multiple_images(tmp_path: Path) -> None:
@@ -351,10 +352,15 @@ async def test_restore_chat_history_sanitises_consecutive_same_role(
 
 
 @pytest.mark.asyncio
-async def test_restore_chat_history_drops_trailing_user_message(
+async def test_restore_chat_history_keeps_trailing_user_message(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A trailing user message (no assistant reply) must be dropped."""
+    """A trailing user message (no assistant reply) is kept on resume.
+
+    Unlike the pre-run sanitisation path, restore must not drop the
+    user's last message — otherwise an unanswered turn loses that
+    content from the model's context forever.
+    """
     captured_messages = []
 
     class _FakeMemory:
@@ -395,10 +401,11 @@ async def test_restore_chat_history_drops_trailing_user_message(
 
     await session_module.restore_chat_history(thread)
 
-    # Trailing user message is dropped to maintain alternation.
+    # Trailing user message is kept on resume (no follow-up yet).
     assert [m.content for m in captured_messages] == [
         "Hello",
         "Hi!",
+        "unanswered",
     ]
 
 

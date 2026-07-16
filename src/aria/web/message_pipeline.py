@@ -58,6 +58,22 @@ _BLOCKQUOTE_PREFIX = "> "
 _BLOCKQUOTE_END = "\n\n"
 
 
+def _history_fingerprint(messages: list) -> int:
+    """Stable hash of a chat-history list for change detection.
+
+    Comparing fingerprints (instead of ``len``) catches in-place rewrites
+    that preserve message count — a length-only check would silently skip
+    a repair in that case.
+    """
+    h = 0
+    for m in messages:
+        role = getattr(m, "role", None)
+        role_name = getattr(role, "value", role)
+        content = getattr(m, "content", "") or ""
+        h ^= hash((role_name, content))
+    return h
+
+
 async def _sanitize_memory(memory: Memory) -> None:
     """Ensure memory chat history has valid user/assistant alternation.
 
@@ -72,8 +88,10 @@ async def _sanitize_memory(memory: Memory) -> None:
     messages = await memory.aget()
     if not messages:
         return
+    before = _history_fingerprint(messages)
     sanitized = _sanitize_chat_history(messages)
-    if len(sanitized) != len(messages):
+    after = _history_fingerprint(sanitized)
+    if before != after:
         logger.debug(
             f"Sanitized memory chat history: {len(messages)} → "
             f"{len(sanitized)} messages (repaired alternation)"
@@ -101,8 +119,10 @@ async def _rollback_memory(memory: Memory | None) -> None:
         messages = await memory.aget()
         if not messages:
             return
+        before = _history_fingerprint(messages)
         repaired = _sanitize_chat_history(messages)
-        if len(repaired) != len(messages):
+        after = _history_fingerprint(repaired)
+        if before != after:
             logger.debug(
                 "Rolling back dangling/partial turn from memory "
                 f"({len(messages)} → {len(repaired)} messages)"
@@ -145,6 +165,10 @@ async def _mark_message_processed(
         )
 
 
+class _EditThreadMissingError(RuntimeError):
+    """Raised when a thread cannot be found while applying a message edit."""
+
+
 async def _reset_memory_for_edit(
     thread_id: str,
 ) -> Memory:
@@ -154,6 +178,11 @@ async def _reset_memory_for_edit(
     memory, and restores chat history from the persisted thread
     data (which Chainlit has already updated with the edited
     content).
+
+    Raises:
+        _EditThreadMissingError: If the thread no longer exists in the
+            data layer.  An edit against a missing thread would silently
+            wipe the conversation's memory, so we abort instead.
     """
     try:
         if _state.vector_db is not None:
@@ -167,48 +196,140 @@ async def _reset_memory_for_edit(
     memory = create_memory(thread_id)
     data_layer = get_data_layer_handler()
     thread = await data_layer.get_thread(thread_id)
-    if thread:
-        memory = await restore_chat_history(thread)
-    else:
-        logger.warning(f"No thread found for {thread_id} during edit reset")
+    if not thread:
+        raise _EditThreadMissingError(
+            f"Thread {thread_id} not found; cannot apply edit to a thread "
+            "that no longer exists."
+        )
+    memory = await restore_chat_history(thread)
     return memory
 
 
-async def _describe_image(mime_type: str, base64_data: str, prompt: str) -> str:
-    """Send an image to the vision endpoint and get a text description.
+_IMAGE_DESCRIBE_PROMPT = "Describe this image concisely in 2-3 sentences."
+
+
+async def _describe_image(
+    client: httpx.AsyncClient,
+    mime_type: str,
+    base64_data: str,
+    prompt: str = _IMAGE_DESCRIBE_PROMPT,
+) -> str:
+    """Send an image to the vision endpoint and return a text description.
 
     Uses the same vLLM endpoint configured for the main chat model.
     Returns a concise description (~2-3 sentences) suitable for context.
+
+    The caller owns the ``httpx`` client so multiple images can share one
+    connection pool and run concurrently.
     """
     image_url = f"data:{mime_type};base64,{base64_data}"
+    response = await client.post(
+        f"{ChatConfig.api_url}/chat/completions",
+        headers={"Authorization": f"Bearer {VllmConfig.api_key}"},
+        json={
+            "model": ChatConfig.model,
+            "messages": [
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": image_url},
+                        },
+                    ],
+                }
+            ],
+            "max_tokens": 256,
+        },
+    )
+    response.raise_for_status()
+    data = response.json()
+    return data["choices"][0]["message"]["content"] or ""
+
+
+async def _enhance_prompt(message: cl.Message, prompt: str) -> tuple[str, dict]:
+    """Apply prompt enhancement when the "Enhance" command is active.
+
+    Returns the (possibly enhanced) prompt and a metadata dict.  On
+    enhancement failure the original prompt is kept and the user is
+    notified; the pipeline continues rather than aborting.
+    """
+    if message.command != "Enhance":
+        return prompt, {}
+    if not _state.prompt_enhancer:
+        logger.warning("Prompt enhancer not available, returning original prompt")
+        return prompt, {}
+    try:
+        response = await asyncio.wait_for(
+            _state.prompt_enhancer.run(user_msg=message.content),
+            timeout=30.0,
+        )
+        results = response.structured_response
+        if isinstance(results, dict):
+            results = PromptEnhancementResult(**results)
+        logger.debug("Prompt enhancement completed successfully")
+        return results.enhanced, {"prompt_enhanced": True}
+    except Exception as e:
+        logger.error(f"Prompt enhancement failed: {e}")
+        await cl.ErrorMessage(
+            content="Prompt enhancement failed, using original prompt.",
+        ).send()
+        return prompt, {}
+
+
+async def _append_files_block(prompt: str, file_paths: list[str]) -> str:
+    """Append an ``[Uploaded files]`` block describing converted docs."""
+    if not file_paths:
+        return prompt
+    conversions = await asyncio.to_thread(convert_documents_to_markdown, file_paths)
+    lines: list[str] = []
+    for conv in conversions:
+        if conv["markdown_path"]:
+            lines.append(
+                f"- {conv['name']} (original: {conv['original_path']})\n"
+                f"  Converted to markdown: {conv['markdown_path']} "
+                f"({conv['lines']} lines, {conv['chars']} chars)"
+            )
+        elif conv["error"]:
+            lines.append(
+                f"- {conv['name']}: {conv['original_path']} "
+                f"(conversion failed: {conv['error']})"
+            )
+        else:
+            lines.append(f"- {conv['original_path']}")
+    logger.debug(f"Appended {len(file_paths)} file path(s) to prompt")
+    return f"{prompt}\n\n[Uploaded files]:\n" + "\n".join(lines)
+
+
+async def _append_images_block(prompt: str, image_data: list[dict]) -> str:
+    """Append an ``[Attached images]`` block with vision descriptions.
+
+    When vision is disabled the block is omitted entirely — injecting a
+    placeholder like ``<vision disabled>`` would only add noise the model
+    cannot act on.
+    """
+    if not image_data or not VllmConfig.vision_enabled:
+        return prompt
 
     async with httpx.AsyncClient(timeout=30.0) as client:
-        response = await client.post(
-            f"{ChatConfig.api_url}/chat/completions",
-            headers={"Authorization": f"Bearer {VllmConfig.api_key}"},
-            json={
-                "model": ChatConfig.model,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {
-                                "type": "text",
-                                "text": prompt,
-                            },
-                            {
-                                "type": "image_url",
-                                "image_url": {"url": image_url},
-                            },
-                        ],
-                    }
-                ],
-                "max_tokens": 256,
-            },
+
+        async def _describe(i: int, img: dict) -> str:
+            try:
+                desc = await _describe_image(client, img["mime_type"], img["base64"])
+                return f"[Image {i} ({img['name']})]: {desc}"
+            except Exception as e:
+                logger.warning(f"Vision description failed for {img['name']}: {e}")
+                return f"[Image {i} ({img['name']})]: <description unavailable>"
+
+        descriptions = list(
+            await asyncio.gather(
+                *[_describe(i, img) for i, img in enumerate(image_data, 1)]
+            )
         )
-        response.raise_for_status()
-        data = response.json()
-        return data["choices"][0]["message"]["content"] or ""
+
+    logger.debug(f"Described {len(descriptions)} image(s) via vision API")
+    return f"{prompt}\n\n[Attached images]:\n" + "\n".join(descriptions)
 
 
 async def _handle_message(
@@ -216,99 +337,29 @@ async def _handle_message(
 ) -> tuple[str, dict]:
     """Process and enhance a user message before agent execution.
 
-    Handles prompt enhancement if requested via command, extracts
-    file paths from uploaded files, and describes uploaded images
-    via the vision API.
+    Orchestrates, in order: prompt enhancement, uploaded-file extraction
+    & conversion, image vision description, and thread-id tagging.  Each
+    step is handled by a dedicated helper so this function reads as a
+    straight-line pipeline.
 
-    Args:
-        message: The incoming Chainlit message from the user.
-
-    Returns:
-        A ``(prompt, metadata)`` tuple where *prompt* is the
-        processed prompt string and *metadata* is a dict of
-        pipeline metadata to persist alongside the message.
+    File extraction (disk I/O) and document conversion (CPU-bound MarkItDown
+    parsing) run off the event loop via ``asyncio.to_thread`` so a large
+    upload doesn't stall active sessions.
     """
-    prompt = message.content
-    meta: dict = {}
+    prompt, enhance_meta = await _enhance_prompt(message, message.content)
 
-    if message.command == "Enhance":
-        if not _state.prompt_enhancer:
-            logger.warning("Prompt enhancer not available, returning original prompt")
-            return prompt, meta
-        try:
-            response = await asyncio.wait_for(
-                _state.prompt_enhancer.run(user_msg=message.content),
-                timeout=30.0,
-            )
-            results = response.structured_response
-            if isinstance(results, dict):
-                results = PromptEnhancementResult(**results)
-            prompt = results.enhanced
-            meta["prompt_enhanced"] = True
-            logger.debug("Prompt enhancement completed successfully")
-        except Exception as e:
-            logger.error(f"Prompt enhancement failed: {e}")
-            # Notify user so they know the original prompt was used
-            await cl.ErrorMessage(
-                content="Prompt enhancement failed, using original prompt.",
-            ).send()
+    # Deduplicate while preserving order (same file attached twice).
+    file_paths = list(
+        dict.fromkeys(await asyncio.to_thread(extract_file_paths, message))
+    )
+    image_data = await asyncio.to_thread(extract_image_data, message)
 
-    # Deduplicate while preserving order (same file attached twice)
-    file_paths = list(dict.fromkeys(extract_file_paths(message)))
-    image_data = extract_image_data(message)
-
+    meta: dict = dict(enhance_meta)
     if file_paths:
         meta["attachments"] = [Path(p).name for p in file_paths]
 
-    # Non-image files → convert documents to markdown, pass metadata
-    if file_paths:
-        conversions = convert_documents_to_markdown(file_paths)
-        file_lines = []
-        for conv in conversions:
-            if conv["markdown_path"]:
-                file_lines.append(
-                    f"- {conv['name']} (original: {conv['original_path']})\n"
-                    f"  Converted to markdown: {conv['markdown_path']} "
-                    f"({conv['lines']} lines, {conv['chars']} chars)"
-                )
-            elif conv["error"]:
-                file_lines.append(
-                    f"- {conv['name']}: {conv['original_path']} "
-                    f"(conversion failed: {conv['error']})"
-                )
-            else:
-                file_lines.append(f"- {conv['original_path']}")
-        paths_block = "\n".join(file_lines)
-        prompt = f"{prompt}\n\n[Uploaded files]:\n{paths_block}"
-        logger.debug(f"Appended {len(file_paths)} file path(s) to prompt")
-
-    # Images → vision description
-    _IMAGE_DESCRIBE_PROMPT = "Describe this image concisely in 2-3 sentences."
-    if image_data and VllmConfig.vision_enabled:
-        descriptions = []
-        for i, img in enumerate(image_data, 1):
-            try:
-                desc = await _describe_image(
-                    img["mime_type"], img["base64"], _IMAGE_DESCRIBE_PROMPT
-                )
-                descriptions.append(f"[Image {i} ({img['name']})]: {desc}")
-            except Exception as e:
-                logger.warning(f"Vision description failed for {img['name']}: {e}")
-                descriptions.append(
-                    f"[Image {i} ({img['name']})]: <description unavailable>"
-                )
-
-        if descriptions:
-            images_block = "\n".join(descriptions)
-            prompt = f"{prompt}\n\n[Attached images]:\n{images_block}"
-            logger.debug(f"Described {len(descriptions)} image(s) via vision API")
-    elif image_data:
-        # Vision disabled — mention images without describing them
-        mentions = [
-            f"[Image {i} ({img['name']})]: <vision disabled — enable ARIA_VLLM_VISION_ENABLED>"
-            for i, img in enumerate(image_data, 1)
-        ]
-        prompt = f"{prompt}\n\n[Attached images]:\n" + "\n".join(mentions)
+    prompt = await _append_files_block(prompt, file_paths)
+    prompt = await _append_images_block(prompt, image_data)
 
     # Inject thread context so Aria can pass --thread-id when spawning workers
     thread_id = message.thread_id
@@ -317,6 +368,45 @@ async def _handle_message(
         logger.debug(f"Injected thread_id={thread_id} into prompt")
 
     return prompt, meta
+
+
+class _ThinkingBlock:
+    """Render a markdown blockquote around reasoning tokens.
+
+    Encapsulates the open/close bookkeeping so callers just call
+    :meth:`open` before emitting thinking and :meth:`close` before
+    emitting anything else (a tool step, a content token, final output,
+    or on error).  Idempotent: opening twice or closing twice is a no-op.
+    """
+
+    def __init__(self, output: cl.Message) -> None:
+        self._output = output
+        self._open = False
+        self.parts: list[str] = []
+
+    @property
+    def is_open(self) -> bool:
+        return self._open
+
+    async def open(self) -> None:
+        if self._open:
+            return
+        await self._output.stream_token(_BLOCKQUOTE_PREFIX)
+        self._open = True
+
+    async def close(self) -> None:
+        if not self._open:
+            return
+        await self._output.stream_token(_BLOCKQUOTE_END)
+        self._open = False
+
+    async def write(self, delta: str) -> None:
+        await self.open()
+        self.parts.append(delta)
+        await self._output.stream_token(delta.replace("\n", "\n> "))
+
+    def full_text(self) -> str:
+        return "".join(self.parts).strip()
 
 
 async def _stream_agent_response(
@@ -330,6 +420,20 @@ async def _stream_agent_response(
     LlamaIndex's ``AgentStream.thinking_delta`` field (both XML-tag and
     structured-reasoning styles are handled upstream by the framework).
 
+    Two flags are tracked separately to avoid a class of silent bugs:
+
+    * ``emitted`` — any visible token (thinking or answer) was streamed.
+      Controls the "I wasn't able to generate a response" fallback.
+    * ``content_emitted`` — a real *answer* token was streamed (i.e. an
+      ``AgentStream.delta`` or an ``AgentOutput.response.content`` that
+      differs from the accumulated thinking text).
+
+    Some models emit reasoning via ``thinking_delta`` and then return the
+    *same* text as ``AgentOutput.response.content``.  To avoid rendering
+    the answer twice (once as a blockquote, once as plain text) the final
+    ``response.content`` is only streamed when no answer was streamed yet
+    *and* it is not identical to the thinking text.
+
     Args:
         handler: The running agent workflow handler (with ``stream_events``
             and ``__await__``).
@@ -342,36 +446,41 @@ async def _stream_agent_response(
     """
     current_step: cl.Step | None = None
     emitted = False
-    thinking_opened = False
+    content_emitted = False
+    thinking = _ThinkingBlock(output)
     tools_called: list[str] = []
     has_thinking = False
+
+    async def _emit_final(content: str) -> None:
+        """Stream the final answer once, skipping thinking duplicates."""
+        nonlocal emitted, content_emitted
+        if content_emitted or not content:
+            return
+        if content.strip() and content.strip() != thinking.full_text():
+            await output.stream_token(content)
+            emitted = True
+            content_emitted = True
 
     async for event in handler.stream_events():
         if isinstance(event, ToolCall):
             tools_called.append(event.tool_name or "unknown")
             await maybe_remove_step(current_step)
-            if thinking_opened:
-                await output.stream_token(_BLOCKQUOTE_END)
-                thinking_opened = False
+            await thinking.close()
             current_step = await send_tool_step(event)
 
         elif isinstance(event, AgentStream):
-            # LlamaIndex separates thinking from content via thinking_delta
             if event.thinking_delta:
                 has_thinking = True
-                if not thinking_opened:
+                if current_step is not None:
                     await maybe_remove_step(current_step)
                     current_step = None
-                    await output.stream_token(_BLOCKQUOTE_PREFIX)
-                    thinking_opened = True
-                    emitted = True
-                await output.stream_token(event.thinking_delta.replace("\n", "\n> "))
+                await thinking.write(event.thinking_delta)
+                emitted = True
             elif event.delta:
-                if thinking_opened:
-                    await output.stream_token(_BLOCKQUOTE_END)
-                    thinking_opened = False
+                await thinking.close()
                 await output.stream_token(event.delta)
                 emitted = True
+                content_emitted = True
 
         elif isinstance(event, AgentOutput):
             if not event.tool_calls:
@@ -379,33 +488,22 @@ async def _stream_agent_response(
                 if current_step is not None:
                     await maybe_remove_step(current_step)
                     current_step = None
-                if thinking_opened:
-                    await output.stream_token(_BLOCKQUOTE_END)
-                    thinking_opened = False
-            # Emit any text that wasn't already streamed
-            if not emitted and event.response.content:
-                await output.stream_token(event.response.content)
-                emitted = True
+                await thinking.close()
+            await _emit_final(event.response.content or "")
 
     # Always await the handler to retrieve the final result and avoid
     # unawaited-coroutine warnings.
     try:
         handler_result = await handler
     except Exception:
-        if thinking_opened:
-            await output.stream_token(_BLOCKQUOTE_END)
-            thinking_opened = False
+        await thinking.close()
         raise
 
-    # Fallback — use the final result if nothing was streamed
-    if not emitted:
-        content = getattr(handler_result.response, "content", None) or ""
-        if content:
-            await output.stream_token(content)
-            emitted = True
+    # Fallback — use the final result if no answer was streamed
+    if not content_emitted:
+        await _emit_final(getattr(handler_result.response, "content", None) or "")
 
-    if thinking_opened:
-        await output.stream_token(_BLOCKQUOTE_END)
+    await thinking.close()
 
     if not emitted:
         logger.warning("No assistant output emitted for message.")
@@ -419,6 +517,32 @@ async def _stream_agent_response(
         "has_thinking": has_thinking,
     }
     return emitted, stream_meta
+
+
+async def _fail_turn(
+    *,
+    message: cl.Message,
+    memory: Memory | None,
+    pipeline_meta: dict,
+    error: BaseException,
+    user_message: str,
+    log_level: str = "error",
+) -> None:
+    """Shared cleanup for a failed message turn.
+
+    Rolls back dangling memory, marks the user message as *not* processed
+    (so re-delivery is treated as a retry, not an edit), and sends a
+    user-facing explanation.  Every error path in :func:`on_message_handler`
+    routes here so the bookkeeping can't drift between branches.
+    """
+    getattr(logger, log_level)(f"Turn failed: {error}")
+    await _rollback_memory(memory)
+    await _mark_message_processed(
+        message,
+        extra_metadata={**pipeline_meta, "error": str(error)},
+        processed=False,
+    )
+    await cl.Message(content=user_message).send()
 
 
 async def on_message_handler(message: cl.Message) -> None:
@@ -465,9 +589,7 @@ async def on_message_handler(message: cl.Message) -> None:
                 f"Edit detected for message {message.id}, "
                 "resetting memory from persisted history"
             )
-            memory = await _reset_memory_for_edit(
-                message.thread_id,
-            )
+            memory = await _reset_memory_for_edit(message.thread_id)
             cl.user_session.set("memory", memory)
 
         # Repair broken alternation left by a previous failed turn
@@ -480,69 +602,75 @@ async def on_message_handler(message: cl.Message) -> None:
             max_iterations=ChatConfig.max_iteration,
         )
 
+        # Send the (empty) assistant message first so it has an id; tokens
+        # are streamed into it via stream_token. Streaming before send()
+        # can drop frames on Chainlit versions that require a message id.
         output = cl.Message(content="")
+        await output.send()
         _run_succeeded = False
         stream_meta: dict = {}
         try:
             _, stream_meta = await _stream_agent_response(handler, output)
             _run_succeeded = True
         finally:
-            all_meta = {**pipeline_meta, **stream_meta}
             if _run_succeeded:
-                await output.send()
-                # Mark as processed only after successful completion
-                # so failed runs don't falsely trigger edit detection
-                # on retry/re-delivery.
-                await _mark_message_processed(message, extra_metadata=all_meta)
+                await _mark_message_processed(
+                    message, extra_metadata={**pipeline_meta, **stream_meta}
+                )
             else:
-                # Don't persist partial/incomplete assistant
-                # content to the data layer — remove the
-                # placeholder instead.
+                # Don't persist partial/incomplete assistant content to the
+                # data layer — remove the placeholder instead.
                 await output.remove()
 
     except AppStateNotInitializedError as e:
-        logger.error(f"App state not initialized: {e}")
-        await _rollback_memory(memory)
-        await _mark_message_processed(
-            message,
-            extra_metadata={**pipeline_meta, "error": str(e)},
-            processed=False,
-        )
-        await cl.Message(
-            content=(
+        await _fail_turn(
+            message=message,
+            memory=memory,
+            pipeline_meta=pipeline_meta,
+            error=e,
+            user_message=(
                 "The application is not fully initialized. "
                 "Please wait a moment and try again."
-            )
-        ).send()
+            ),
+        )
+
+    except _EditThreadMissingError as e:
+        await _fail_turn(
+            message=message,
+            memory=memory,
+            pipeline_meta=pipeline_meta,
+            error=e,
+            user_message=(
+                "This conversation could not be found, so the edit could not "
+                "be applied. The thread may have been deleted."
+            ),
+        )
 
     except httpx.TimeoutException as e:
-        logger.error(f"Request timed out: {e}")
-        await _rollback_memory(memory)
-        await _mark_message_processed(
-            message,
-            extra_metadata={**pipeline_meta, "error": str(e)},
-            processed=False,
+        await _fail_turn(
+            message=message,
+            memory=memory,
+            pipeline_meta=pipeline_meta,
+            error=e,
+            user_message="The model took too long to respond. Please try again.",
         )
-        await cl.Message(
-            content=("The model took too long to respond. Please try again.")
-        ).send()
 
     except Exception as e:
-        error_msg = str(e)
         logger.exception(f"Error processing message: {e}")
-        await _rollback_memory(memory)
-        await _mark_message_processed(
-            message,
-            extra_metadata={**pipeline_meta, "error": error_msg},
-            processed=False,
-        )
-
+        error_msg = str(e)
         if "maximum context length" in error_msg.lower():
-            error_content = (
+            user_message = (
                 "The conversation has grown too large for the "
                 "model's context window. Please start a new "
                 "conversation."
             )
         else:
-            error_content = "An error occurred. Please try again."
-        await cl.Message(content=error_content).send()
+            user_message = "An error occurred. Please try again."
+        await _fail_turn(
+            message=message,
+            memory=memory,
+            pipeline_meta=pipeline_meta,
+            error=e,
+            user_message=user_message,
+            log_level="exception",
+        )

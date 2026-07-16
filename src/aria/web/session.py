@@ -51,6 +51,53 @@ _IMAGE_MIME_TYPES = {
 }
 _IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}
 
+# Extension → MIME mapping for image uploads.  Required because naive
+# ``image/{ext}`` synthesis produces unregistered types such as
+# ``image/jpg`` and ``image/tif`` which some vision endpoints reject.
+_IMAGE_MIME_BY_EXT = {
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".webp": "image/webp",
+    ".gif": "image/gif",
+    ".bmp": "image/bmp",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+}
+
+
+def _mime_for_image(mime: str, ext: str) -> str:
+    """Resolve a MIME type for an image element.
+
+    Prefers the element's declared MIME, then a known extension mapping,
+    then falls back to ``image/{ext}`` only for extensions we don't map.
+    """
+    if mime:
+        return mime
+    return _IMAGE_MIME_BY_EXT.get(ext, f"image/{ext.lstrip('.')}")
+
+
+class _ElementInfo:
+    """Normalised view of a Chainlit file element.
+
+    Centralises the mime/extension/image-detection logic shared by
+    :func:`extract_image_data` and :func:`extract_file_paths` so the two
+    don't drift apart.
+    """
+
+    __slots__ = ("path", "mime", "name", "ext")
+
+    def __init__(self, element) -> None:
+        self.path = str(getattr(element, "path", None) or "")
+        self.mime = getattr(element, "mime", "") or ""
+        name = getattr(element, "name", "") or ""
+        self.name = name
+        self.ext = Path(name).suffix.lower() if name else Path(self.path).suffix.lower()
+
+    @property
+    def is_image(self) -> bool:
+        return (self.mime in _IMAGE_MIME_TYPES) or (self.ext in _IMAGE_EXTENSIONS)
+
 
 def create_memory(thread_id: str) -> Memory:
     """Create a new conversation memory instance for a thread.
@@ -158,33 +205,24 @@ def extract_image_data(message: cl.Message) -> list[dict]:
 
     images = []
     for element in message.elements:
-        path = getattr(element, "path", None)
-        if not path:
-            continue
-
-        # Detect by MIME type or extension
-        mime = getattr(element, "mime", "") or ""
-        name = getattr(element, "name", "") or ""
-        ext = Path(name).suffix.lower() if name else Path(str(path)).suffix.lower()
-
-        is_image = (mime in _IMAGE_MIME_TYPES) or (ext in _IMAGE_EXTENSIONS)
-        if not is_image:
+        info = _ElementInfo(element)
+        if not info.path or not info.is_image:
             continue
 
         try:
-            with open(path, "rb") as f:
+            with open(info.path, "rb") as f:
                 raw = f.read()
             raw = _resize_image_for_vision(raw)
             data = base64.b64encode(raw).decode("utf-8")
             images.append(
                 {
-                    "mime_type": mime or f"image/{ext.lstrip('.')}",
+                    "mime_type": _mime_for_image(info.mime, info.ext),
                     "base64": data,
-                    "name": name,
+                    "name": info.name,
                 }
             )
         except OSError as e:
-            logger.warning(f"Failed to read image {path}: {e}")
+            logger.warning(f"Failed to read image {info.path}: {e}")
 
     return images
 
@@ -201,33 +239,23 @@ def extract_file_paths(message: cl.Message) -> list[str]:
 
     paths = []
     for element in message.elements:
-        path = getattr(element, "path", None)
-        if not path:
+        info = _ElementInfo(element)
+        if not info.path or info.is_image:
             continue
 
-        # Skip image files — handled by extract_image_data()
-        mime = getattr(element, "mime", "") or ""
-        name = getattr(element, "name", "") or ""
-        ext = Path(name).suffix.lower() if name else Path(str(path)).suffix.lower()
-        if (mime in _IMAGE_MIME_TYPES) or (ext in _IMAGE_EXTENSIONS):
-            continue
-
-        path_str = str(path)
-        src = Path(path_str)
-        name = getattr(element, "name", None)
-        dest_name = name or src.name
+        src = Path(info.path)
+        dest_name = info.name or src.name
         thread_id = getattr(message, "thread_id", None) or "thread"
         dest = UploadsConfig.path / (
             f"{thread_id}_{uuid.uuid4().hex}_{Path(dest_name).name}"
         )
 
         try:
-            shutil.copy2(path_str, dest)
-            path_str = str(dest)
+            shutil.copy2(info.path, dest)
+            paths.append(str(dest))
         except OSError:
-            logger.warning(f"Failed to copy uploaded file {path_str} to {dest}")
-
-        paths.append(path_str)
+            logger.warning(f"Failed to copy uploaded file {info.path} to {dest}")
+            paths.append(info.path)
     return paths
 
 
@@ -316,6 +344,14 @@ def convert_documents_to_markdown(
     workspace_uploads = WorkspaceConfig.path / "uploads"
     workspace_uploads.mkdir(parents=True, exist_ok=True)
 
+    try:
+        from markitdown import MarkItDown
+
+        converter = MarkItDown()
+    except Exception as e:
+        logger.warning(f"MarkItDown unavailable, skipping conversion: {e}")
+        converter = None
+
     results = []
     for file_path in file_paths:
         src = Path(file_path)
@@ -335,10 +371,21 @@ def convert_documents_to_markdown(
             )
             continue
 
-        try:
-            from markitdown import MarkItDown
+        if converter is None:
+            results.append(
+                {
+                    "original_path": file_path,
+                    "markdown_path": None,
+                    "name": src.name,
+                    "lines": 0,
+                    "chars": 0,
+                    "error": "MarkItDown unavailable",
+                }
+            )
+            continue
 
-            result = MarkItDown().convert(file_path)
+        try:
+            result = converter.convert(file_path)
             md_content = result.text_content or ""
 
             md_name = f"{src.stem}.md"
@@ -349,19 +396,20 @@ def convert_documents_to_markdown(
 
             md_dest.write_text(md_content, encoding="utf-8")
 
+            line_count = len(md_content.splitlines())
             results.append(
                 {
                     "original_path": file_path,
                     "markdown_path": str(md_dest),
                     "name": src.name,
-                    "lines": md_content.count("\n") + 1,
+                    "lines": line_count,
                     "chars": len(md_content),
                     "error": None,
                 }
             )
             logger.debug(
                 f"Converted {src.name} to markdown: {md_dest} "
-                f"({md_content.count(chr(10)) + 1} lines, {len(md_content)} chars)"
+                f"({line_count} lines, {len(md_content)} chars)"
             )
         except Exception as e:
             logger.warning(f"MarkItDown conversion failed for {src.name}: {e}")
@@ -404,6 +452,8 @@ def _is_tool_message(msg: ChatMessage) -> bool:
 
 def _sanitize_chat_history(
     chat_history: list[ChatMessage],
+    *,
+    drop_trailing_user: bool = True,
 ) -> list[ChatMessage]:
     """Repair chat history so it is valid for the OpenAI/Mistral API.
 
@@ -429,11 +479,20 @@ def _sanitize_chat_history(
     3. Drop leading messages until the history starts with a ``user``
        message (without splitting a tool group).
     4. Drop a trailing incomplete tool group so the history ends on a
-       clean boundary (assistant final answer or user message).
+       clean boundary (assistant final answer or user message).  When
+       *drop_trailing_user* is True (the pre-run path, where a new user
+       message is about to be appended), a trailing ``user`` message is
+       also removed so the next turn maintains alternation.  When False
+       (the resume/restore path), a trailing ``user`` is kept so the
+       user's last message is not silently lost from context.
 
     Args:
         chat_history: Raw chat messages (may have consecutive duplicates
             and/or unbalanced tool sequences).
+        drop_trailing_user: If True, drop a trailing ``user`` message so
+            the next appended user message alternates correctly.  Pass
+            False when restoring history for resume, where there is no
+            immediate follow-up user message.
 
     Returns:
         A sanitised list whose tool-call/response counts are balanced and
@@ -502,10 +561,14 @@ def _sanitize_chat_history(
     # Step 4: Ensure it ends on a clean boundary. A trailing assistant
     # message that still advertises tool calls (its responses were dropped
     # above) is incomplete — drop it. Also drop a trailing user message so
-    # the next user turn maintains alternation.
+    # the next user turn maintains alternation — but only when a new user
+    # message is about to be appended (drop_trailing_user=True). On resume
+    # we keep the trailing user so the last user message is not lost.
     while validated:
         last = validated[-1]
-        if _message_tool_call_count(last) > 0 or last.role == MessageRole.USER:
+        if _message_tool_call_count(last) > 0:
+            validated.pop()
+        elif drop_trailing_user and last.role == MessageRole.USER:
             validated.pop()
         else:
             break
@@ -574,7 +637,7 @@ async def restore_chat_history(thread: ThreadDict) -> Memory:
         )
         raw_history.append(ChatMessage(role=role, content=content))
 
-    chat_history = _sanitize_chat_history(raw_history)
+    chat_history = _sanitize_chat_history(raw_history, drop_trailing_user=False)
     if len(raw_history) != len(chat_history):
         logger.debug(
             f"Sanitised chat history: {len(raw_history)} → {len(chat_history)} "

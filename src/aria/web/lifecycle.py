@@ -166,6 +166,26 @@ def _init_vllm_servers() -> None:
     logger.info("All vLLM servers ready")
 
 
+async def _probe_remote_vllm(api_url: str, timeout: float = 10.0) -> bool:
+    """Best-effort health probe of a remote vLLM endpoint.
+
+    Returns True if the endpoint responded (any HTTP status), False if the
+    connection could not be established.  A non-200 is still considered
+    "reachable" — the server is up even if still loading models.
+    """
+    import httpx
+
+    health_url = api_url.rstrip("/") + "/health"
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            await client.get(health_url)
+        logger.info(f"Remote vLLM endpoint reachable at {health_url}")
+        return True
+    except Exception as e:
+        logger.warning(f"Remote vLLM health probe failed for {health_url}: {e}")
+        return False
+
+
 def _init_chat_llm() -> None:
     """Initialize the chat LLM client (requires vLLM to be healthy)."""
     _state.llm = get_chat_llm(
@@ -178,11 +198,11 @@ def _init_chat_llm() -> None:
 def _load_embeddings_sync() -> None:
     """Load the embeddings model in-process (CPU-only, no vLLM dependency).
 
-    Uses the local model path resolved by ``_ensure_models_downloaded()``
-    (runs before the server starts).  If that path doesn't exist, we fall
-    back to the HuggingFace model name — ``sentence-transformers`` will
-    attempt its own download to its cache, but on constrained devices this
-    may OOM or hang.  A warning is emitted so the operator can pre-download.
+    The embeddings model must be pre-downloaded to a local path (via
+    ``aria models download --model embeddings``).  We fail fast when it is
+    missing rather than silently falling back to a HuggingFace download,
+    which on constrained devices can OOM or hang and stall startup
+    indefinitely.
     """
     from pathlib import Path
 
@@ -192,13 +212,11 @@ def _load_embeddings_sync() -> None:
     if model_path and model_path.is_dir():
         resolved = str(model_path)
     else:
-        logger.warning(
-            f"Embeddings model path '{model_ref}' not found locally. "
-            "Falling back to HuggingFace download — this may be slow "
-            "or fail on low-memory devices. "
-            "Pre-download with: aria models download --model embeddings"
+        raise RuntimeError(
+            f"Embeddings model not found locally at '{model_ref}'. "
+            "Pre-download it before starting the server: "
+            "aria models download --model embeddings"
         )
-        resolved = model_ref
 
     _state.embeddings = get_embeddings_model(model_name=resolved)
 
@@ -207,9 +225,13 @@ def _init_vector_db() -> None:
     """Initialize the ChromaDB persistent vector database.
 
     Validates the path is accessible before creating the client.
-    If the database is corrupted, removes the directory and retries
-    with a fresh instance.
+    If the database is corrupted (a ``ChromaError``), removes the
+    directory and retries with a fresh instance.  Transient/non-corruption
+    errors are **not** wiped — nuking the vector DB on any failure would
+    destroy all threads' embeddings.
     """
+    from chromadb.errors import ChromaError
+
     db_path = ChromaDBConfig.db_path
     db_path.mkdir(parents=True, exist_ok=True)
 
@@ -223,10 +245,9 @@ def _init_vector_db() -> None:
 
     try:
         _state.vector_db = ChromaDBPersistentClient(path=str(db_path))
-    except Exception as e:
+    except ChromaError as e:
         logger.warning(
-            f"ChromaDB failed to open (possible corruption): {e}. "
-            f"Resetting database at '{db_path}'..."
+            f"ChromaDB corrupted ({e}). Resetting database at '{db_path}'..."
         )
         import shutil
 
@@ -399,6 +420,20 @@ async def on_app_startup_handler() -> None:
             "Remote vLLM mode — skipping local server startup "
             f"(endpoint: {ChatConfig.api_url})"
         )
+        # Probe the remote endpoint so a down/misconfigured URL fails fast
+        # at startup instead of surfacing only on the first user message.
+        if not await _probe_remote_vllm(ChatConfig.api_url):
+            embed_task.cancel()
+            try:
+                await embed_task
+            except (asyncio.CancelledError, Exception):
+                pass
+            await _abort_startup(
+                RuntimeError(
+                    f"Remote vLLM endpoint not reachable at {ChatConfig.api_url}"
+                ),
+                "vLLM",
+            )
         _vllm_ready = True
     else:
         try:

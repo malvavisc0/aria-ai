@@ -131,6 +131,63 @@ class TestStreamAgentResponse:
         assert meta["has_thinking"] is False
         output.stream_token.assert_any_await("fallback answer")
 
+    @pytest.mark.asyncio
+    async def test_thinking_then_distinct_final_answer_is_streamed(self) -> None:
+        """Thinking streamed as blockquote; a distinct final answer is also
+        streamed (the original bug dropped it because thinking set emitted)."""
+        from llama_index.core.agent.workflow import AgentOutput, AgentStream
+        from llama_index.core.llms import ChatMessage
+
+        thinking = AgentStream(
+            delta="",
+            response="",
+            current_agent_name="test",
+            thinking_delta="reasoning here",
+        )
+        final = AgentOutput(
+            response=ChatMessage(content="the actual answer"),
+            current_agent_name="test",
+        )
+        handler = self._make_handler(thinking, final)
+        output = self._make_output()
+
+        emitted, meta = await pipeline._stream_agent_response(handler, output)
+
+        assert emitted is True
+        assert meta["has_thinking"] is True
+        calls = [c.args[0] for c in output.stream_token.call_args_list]
+        # blockquoted thinking + the distinct final answer must both appear
+        assert "reasoning here" in calls
+        assert "the actual answer" in calls
+
+    @pytest.mark.asyncio
+    async def test_thinking_duplicated_as_final_not_restreamed(self) -> None:
+        """When the final answer equals the thinking text, it is not
+        streamed twice (some models echo thinking as the response)."""
+        from llama_index.core.agent.workflow import AgentOutput, AgentStream
+        from llama_index.core.llms import ChatMessage
+
+        thinking = AgentStream(
+            delta="",
+            response="",
+            current_agent_name="test",
+            thinking_delta="same text",
+        )
+        final = AgentOutput(
+            response=ChatMessage(content="same text"),
+            current_agent_name="test",
+        )
+        handler = self._make_handler(thinking, final)
+        output = self._make_output()
+
+        emitted, meta = await pipeline._stream_agent_response(handler, output)
+
+        assert emitted is True
+        assert meta["has_thinking"] is True
+        calls = [c.args[0] for c in output.stream_token.call_args_list]
+        # "same text" appears once (as the blockquoted thinking), not twice
+        assert calls.count("same text") == 1
+
 
 # ---------------------------------------------------------------------------
 # _sanitize_memory — repairs broken alternation in the Memory chat store
@@ -294,11 +351,10 @@ class TestDescribeImage:
         monkeypatch.setattr(pipeline.VllmConfig, "api_key", "sk-test")
 
     @staticmethod
-    def _make_mock_httpx(mock_client):
-        """Build a mock httpx module with AsyncClient returning mock_client."""
-        mock_httpx = MagicMock()
-        mock_httpx.AsyncClient.return_value = mock_client
-        return mock_httpx
+    def _mock_client(response: MagicMock) -> AsyncMock:
+        client = AsyncMock()
+        client.post = AsyncMock(return_value=response)
+        return client
 
     @pytest.mark.asyncio
     async def test_returns_description_on_success(self, monkeypatch) -> None:
@@ -310,14 +366,9 @@ class TestDescribeImage:
             "choices": [{"message": {"content": "A screenshot of a dashboard."}}]
         }
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_response)
+        client = self._mock_client(mock_response)
 
-        monkeypatch.setattr(pipeline, "httpx", self._make_mock_httpx(mock_client))
-
-        result = await pipeline._describe_image("image/png", "base64data", "test.png")
+        result = await pipeline._describe_image(client, "image/png", "base64data")
         assert result == "A screenshot of a dashboard."
 
     @pytest.mark.asyncio
@@ -333,15 +384,10 @@ class TestDescribeImage:
             response=MagicMock(status_code=400),
         )
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_response)
-
-        monkeypatch.setattr(pipeline, "httpx", self._make_mock_httpx(mock_client))
+        client = self._mock_client(mock_response)
 
         with pytest.raises(real_httpx.HTTPStatusError):
-            await pipeline._describe_image("image/jpeg", "base64data", "bad.jpg")
+            await pipeline._describe_image(client, "image/jpeg", "base64data")
 
     @pytest.mark.asyncio
     async def test_sends_correct_payload(self, monkeypatch) -> None:
@@ -353,16 +399,11 @@ class TestDescribeImage:
             "choices": [{"message": {"content": "desc"}}]
         }
 
-        mock_client = AsyncMock()
-        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
-        mock_client.__aexit__ = AsyncMock(return_value=False)
-        mock_client.post = AsyncMock(return_value=mock_response)
+        client = self._mock_client(mock_response)
 
-        monkeypatch.setattr(pipeline, "httpx", self._make_mock_httpx(mock_client))
+        await pipeline._describe_image(client, "image/png", "abc123")
 
-        await pipeline._describe_image("image/png", "abc123", "img.png")
-
-        call_kwargs = mock_client.post.call_args
+        call_kwargs = client.post.call_args
         url = call_kwargs[0][0]
         assert url == "http://test:9090/v1/chat/completions"
 
@@ -415,7 +456,9 @@ class TestHandleMessageVision:
         assert meta == {}
 
     @pytest.mark.asyncio
-    async def test_appends_disabled_notice_when_vision_off(self, monkeypatch) -> None:
+    async def test_omits_image_block_when_vision_off(self, monkeypatch) -> None:
+        """When vision is disabled, image placeholders are NOT injected —
+        a ``<vision disabled>`` notice would be noise the model can't act on."""
         monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", False)
         monkeypatch.setattr(
             pipeline,
@@ -435,9 +478,9 @@ class TestHandleMessageVision:
 
         prompt, meta = await pipeline._handle_message(message)
 
-        assert "[Attached images]:" in prompt
-        assert "vision disabled" in prompt
-        assert "ARIA_VLLM_VISION_ENABLED" in prompt
+        assert "[Attached images]:" not in prompt
+        assert "vision disabled" not in prompt
+        assert "ARIA_VLLM_VISION_ENABLED" not in prompt
 
     @pytest.mark.asyncio
     async def test_no_image_block_when_no_images(self, monkeypatch) -> None:
@@ -763,3 +806,27 @@ class TestEditDetection:
         mock_vector_db.delete_collection.assert_called_once_with("thread-1")
         mock_data_layer.get_thread.assert_awaited_once_with("thread-1")
         assert result is restored_memory
+
+    @pytest.mark.asyncio
+    async def test_reset_memory_for_edit_raises_when_thread_missing(
+        self, monkeypatch
+    ) -> None:
+        """A missing thread aborts the edit instead of returning empty memory."""
+        mock_vector_db = MagicMock()
+        monkeypatch.setattr(pipeline._state, "vector_db", mock_vector_db)
+
+        mock_memory = MagicMock()
+        monkeypatch.setattr(pipeline, "create_memory", lambda tid: mock_memory)
+
+        mock_data_layer = MagicMock()
+        mock_data_layer.get_thread = AsyncMock(return_value=None)
+        monkeypatch.setattr(
+            pipeline,
+            "get_data_layer_handler",
+            lambda: mock_data_layer,
+        )
+
+        with pytest.raises(pipeline._EditThreadMissingError):
+            await pipeline._reset_memory_for_edit("ghost-thread")
+
+        mock_vector_db.delete_collection.assert_called_once_with("ghost-thread")

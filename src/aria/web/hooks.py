@@ -68,6 +68,12 @@ async def auth_callback_handler(username: str, password: str) -> cl.User | None:
     against the database. Returns a Chainlit User object with
     metadata if authentication succeeds, None otherwise.
 
+    Credential failures (unknown user, wrong password) return ``None`` so
+    Chainlit shows a normal "invalid credentials" outcome.  Unexpected
+    errors (database down, schema issues) are **not** masked as auth
+    failures — they are logged at error level and re-raised so a backend
+    outage is visible rather than indistinguishable from a bad password.
+
     Args:
         username: The user's identifier (login name).
         password: The user's password to verify.
@@ -99,8 +105,9 @@ async def auth_callback_handler(username: str, password: str) -> cl.User | None:
             return None
 
     except Exception as e:
-        logger.error(f"Authentication error for user {username}: {e}")
-        return None
+        # Backend failure — do not disguise it as an auth failure.
+        logger.error(f"Authentication backend error for user {username}: {e}")
+        raise
 
 
 async def on_chat_start_handler() -> None:
