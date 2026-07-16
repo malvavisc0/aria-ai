@@ -178,6 +178,14 @@ class Vllm:
         get_optional_env("ARIA_VLLM_ENFORCE_EAGER", "").lower() == "true"
     )
 
+    # Max concurrent sequences. vLLM defaults to 256, which is too many
+    # for hybrid Mamba+attention models at large context sizes (each
+    # sequence needs a Mamba cache block). Lower this if you see
+    # "max_num_seqs exceeds available Mamba cache blocks" errors.
+    max_num_seqs: int | None = (
+        int(v) if (v := get_optional_env("ARIA_VLLM_MAX_NUM_SEQS", "")) else None
+    )
+
 
 class Lightpanda:
     """Configuration for Lightpanda browser binary (optional).

@@ -396,6 +396,7 @@ class VllmServerManager:
         port: int,
         task: str = "auto",
         max_model_len: int | None = None,
+        max_num_seqs: int | None = None,
         gpu_memory_utilization: float | None = None,
         quantization: str | None = None,
         tensor_parallel_size: int = 1,
@@ -477,6 +478,9 @@ class VllmServerManager:
 
         if max_model_len:
             cmd.extend(["--max-model-len", str(max_model_len)])
+
+        if max_num_seqs:
+            cmd.extend(["--max-num-seqs", str(max_num_seqs)])
 
         if gpu_memory_utilization is not None:
             cmd.extend(["--gpu-memory-utilization", str(gpu_memory_utilization)])
@@ -768,6 +772,7 @@ class VllmServerManager:
             model_path=Chat.model_path,
             port=Chat.get_port(),
             max_model_len=max_model_len,
+            max_num_seqs=VllmConfig.max_num_seqs,
             gpu_memory_utilization=gpu_mem,
             quantization=VllmConfig.quantization,
             tensor_parallel_size=VllmConfig.tensor_parallel_size,

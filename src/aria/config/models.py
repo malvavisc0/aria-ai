@@ -103,7 +103,7 @@ class Embeddings:
 
     model = _Lazy(lambda: get_required_env("EMBEDDINGS_MODEL"))
     context_size = _Lazy(
-        lambda: int(get_optional_env("EMBEDDINGS_CONTEXT_SIZE", "8192"))
+        lambda: int(get_optional_env("EMBEDDINGS_CONTEXT_SIZE", "2048"))
     )
     token_limit_ratio = _Lazy(
         lambda: float(get_optional_env("TOKEN_LIMIT_RATIO", "0.85"))
