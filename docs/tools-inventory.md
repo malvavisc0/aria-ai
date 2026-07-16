@@ -1,6 +1,6 @@
 # Aria Tools Inventory
 
-A comprehensive guide to all tools available in the `src/aria/tools` package. Each tool returns JSON-formatted responses. Tools are organized into **6 categories** managed by a centralized registry.
+A comprehensive guide to all tools available in the `src/aria/tools` package. Each tool returns JSON-formatted responses. Tools are organized into **categories** managed by a centralized registry, plus a unified `ax` dispatcher that routes to domain tools (web, knowledge, finance, IMDb, HTTP, dev, processes, worker).
 
 ## Docstring Convention
 
@@ -32,6 +32,7 @@ This format is consumed by LlamaIndex's `FunctionTool.from_defaults()` which ext
 11. [Reasoning Tools](#11-reasoning-tools)
 12. [Search Tools](#12-search-tools)
 13. [Shell Tools](#13-shell-tools)
+14. [ax Dispatcher](#14-ax-dispatcher)
 
 ---
 
@@ -65,24 +66,6 @@ Logs tool calls with reason parameter. Extracts reason from the first argument. 
 ```python
 @log_tool_call
 def my_tool(reason: str, ...) -> str:
-    ...
-```
-
-#### `tool_function(operation_name, *, validate, error_handler, validation_decorator)`
-
-Composes logging, validation, and error handling. Wrapper order (outermost to innermost):
-1. `log_tool_call`
-2. Validation decorator (optional)
-3. Error handler decorator (optional)
-
-```python
-@tool_function(
-    "my_operation",
-    validate={"code": True},
-    error_handler=with_runner_error_handling,
-    validation_decorator=with_input_validation,
-)
-def my_tool(reason: str, code: str) -> str:
     ...
 ```
 
@@ -125,6 +108,8 @@ def my_tool(reason: str, code: str) -> str:
 }
 ```
 
+> **Convention:** Tools return `tool_error_response` on failure (status `"error"`), never a success payload embedding an error string.
+
 ### Error Handling (`aria.tools.errors`)
 
 `ToolError` -- base exception for all tool operations:
@@ -134,18 +119,6 @@ def my_tool(reason: str, code: str) -> str:
 | `code` | `str` | `"INTERNAL_ERROR"` | Machine-readable error code |
 | `recoverable` | `bool` | `False` | Whether the agent can retry |
 | `how_to_fix` | `str` | `"An unexpected error occurred."` | Recovery guidance |
-
-### Retry (`aria.tools.retry`)
-
-#### `with_retry(max_retries=3, backoff_factor=1.5, retryable_exceptions=(Exception,))`
-
-Decorator for retrying on transient failures. Supports sync and async. Exponential backoff with jitter.
-
-```python
-@with_retry(max_retries=3, retryable_exceptions=(httpx.TimeoutException,))
-async def fetch_data(url: str) -> dict:
-    ...
-```
 
 ---
 
@@ -159,67 +132,63 @@ Centralized, categorized tool loading. Agents load tools by category through the
 
 ### Categories
 
-| Category | Constant | Loading | Tools |
-|----------|----------|---------|-------|
-| **CORE** | `"core"` | Always | `reasoning`, `plan`, `scratchpad`, `web_search`, `download`, `get_current_weather`, `shell` |
-| **FILES** | `"files"` | Always | `read_file`, `write_file`, `edit_file`, `file_info`, `list_files`, `search_files`, `copy_file`, `delete_file`, `rename_file` |
-| **WEB** | `"web"` | On-demand | `open_url`, `browser_click` |
-| **DEVELOPMENT** | `"development"` | On-demand | `python` |
-| **FINANCE** | `"finance"` | On-demand | `fetch_current_stock_price`, `fetch_company_information`, `fetch_ticker_news` |
-| **ENTERTAINMENT** | `"entertainment"` | On-demand | `search_imdb_titles`, `get_movie_details`, `get_person_details`, `get_person_filmography`, `get_all_series_episodes`, `get_movie_reviews`, `get_movie_trivia`, `get_youtube_video_transcription` |
-| **SYSTEM** | `"system"` | On-demand | `http_request`, `process` |
+The registry exposes three primary categories plus two "lite" variants used by the Aria agent:
 
+| Category | Constant | Used by | Tools |
+|----------|----------|---------|-------|
+| **CORE** | `"core"` | Worker | `reasoning`, `plan`, `scratchpad`, `shell` (4 tools) |
+| **FILES** | `"files"` | Worker | `read_file`, `write_file`, `edit_file`, `file_info`, `list_files`, `search_files`, `copy_file` (7 tools) |
+| **AX** | `"ax"` | Both | Single unified `ax` dispatcher tool |
+| **CORE_LITE** | `"core_lite"` | Aria agent | `reasoning`, `shell` (2 tools) |
+| **FILES_LITE** | `"files_lite"` | Aria agent | `read_file`, `write_file`, `edit_file`, `list_files`, `search_files` (5 tools) |
+
+`ALL_CATEGORIES` = `[CORE, FILES, AX]`.
+
+> Domain tools (web, knowledge, finance, IMDb, HTTP, dev, processes, worker) are **not** separate categories anymore — they are all routed through the single `ax` dispatcher (the `AX` category).
+
+### Which agent loads what
+
+| Agent | Categories |
+|-------|------------|
+| Aria agent | `[CORE_LITE, FILES_LITE, AX]` |
+| Worker agent | `[CORE, FILES, AX]` |
 
 ### API
 
 #### `get_tools(categories=None) -> List[FunctionTool]`
 
-Load tools by category. `None` loads all. Deduplicates by name.
+Load tools by category. `None` loads `ALL_CATEGORIES`. Deduplicates by name so the same tool is never registered twice when multiple categories are combined.
 
 ```python
-from aria.tools.registry import get_tools, CORE, FILES, DEVELOPMENT
+from aria.tools.registry import get_tools, CORE, FILES, AX
 all_tools = get_tools()
-tools = get_tools([CORE, FILES, DEVELOPMENT])
+tools = get_tools([CORE, FILES, AX])
 ```
 
-#### `get_core_tools() -> List[FunctionTool]`
-
-Shortcut for `get_tools([CORE])`.
-
-#### `get_file_tools() -> List[FunctionTool]`
-
-Shortcut for `get_tools([FILES])`.
-
-#### `get_domain_tools(domain) -> List[FunctionTool]`
-
-Load on-demand domain tools (`web`, `development`, `finance`, `entertainment`, `system`).
-
-### Internal Loading
-
-Each category has a private loader (e.g., `_get_core_tools()`) that lazily imports and wraps with `FunctionTool.from_defaults()`. Browser tools use `async_fn=`. Web tools check `Lightpanda.is_available()` first.
+Each category has a private loader (e.g. `_get_core_tools()`, `_get_file_tools()`, `_get_ax_tools()`) that lazily imports and wraps with `FunctionTool.from_defaults()`. Browser-backed `ax` commands use async targets.
 
 ---
 
 ## 3. Browser Tools
 
-**Package:** `aria.tools.browser` -- **Category:** WEB (on-demand) -- **Requires:** Lightpanda (`aria lightpanda download`)
+**Package:** `aria.tools.browser` -- **Routed via:** `ax` (family `web`: `visit`, `click`, `close`) -- **Requires:** Lightpanda (`aria lightpanda download`)
 
 Browser automation using Lightpanda with Playwright CDP. Bypasses anti-bot protection. Browser starts automatically with the Aria server.
 
-### `open_url(reason, url)` -- async
+### `visit_url(reason, url)` -- async
 
-Open a URL and get page content.
+Visit a URL and get rendered page content. The page stays open so you can interact with it via `browser_click`.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
-| `reason` | `str` | Yes | Why you are opening this URL |
+| `reason` | `str` | Yes | Why you are visiting this URL |
 | `url` | `str` | Yes | The URL to navigate to |
 
 **Returns:** JSON with URL, title, persisted content metadata (`content_file`, `content_preview`, `content_size`).
 
 ### `browser_click(reason, selector)` -- async
 
-Click an element by CSS selector.
+Click an element by CSS selector on the currently open page.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
@@ -227,6 +196,10 @@ Click an element by CSS selector.
 | `selector` | `str` | Yes | CSS selector (e.g., `button.accept`, `a[href="/next"]`, `#submit-button`) |
 
 **Returns:** JSON with updated page content metadata.
+
+### `browser_close(reason)` -- async
+
+Close the current browser page (navigates to `about:blank`; the browser itself stays running).
 
 ```python
 await browser_click("Accepting cookies", "button.accept")
@@ -237,7 +210,7 @@ await browser_click("Going to next page", "a.next-page")
 
 ## 4. Development Tools
 
-**Package:** `aria.tools.development` -- **Category:** DEVELOPMENT (on-demand)
+**Package:** `aria.tools.development` -- **Routed via:** `ax` (family `dev`, command `run`)
 
 Consolidates `check_python_syntax`, `check_python_file_syntax`, `execute_python_code`, `execute_python_file` into one tool.
 
@@ -268,15 +241,13 @@ python("Validating module", file="module.py", check_only=True)
 
 ## 5. File Operations
 
-**Package:** `aria.tools.files` -- **Category:** FILES (always loaded)
-
-Consolidates 15+ previous functions into 9 tools:
+**Package:** `aria.tools.files` -- **Category:** `FILES` (worker) / `FILES_LITE` (Aria agent)
 
 | Module | Tools |
 |--------|-------|
 | `unified_read` | `read_file`, `file_info`, `list_files`, `search_files` |
 | `write_operations` | `write_file`, `edit_file` |
-| `file_management` | `copy_file`, `delete_file`, `rename_file` |
+| `file_management` | `copy_file` (`delete_file` and `rename_file` exist in the module but are **not** registered as agent tools) |
 
 All paths resolved relative to `BASE_DIR` with security validation.
 
@@ -299,7 +270,7 @@ Read file contents with optional chunking.
 
 ### `file_info(reason, file_name)`
 
-Get file metadata: `exists`, `is_file`, `is_directory`, `size`, `created`, `modified`, `permissions`, `mime_type`.
+Get file metadata: `exists`, `is_file`, `is_directory`, `size`, `created`, `modified`, `permissions`, `mime_type`. (Worker-only; not in `FILES_LITE`.)
 
 ### `list_files(reason, pattern="*", recursive=False, max_depth=3, max_results=100, path=".")`
 
@@ -347,21 +318,15 @@ edit_file("Removing code", "module.py", offset=2, length=3)
 
 ### `copy_file(reason, source, destination, overwrite=False)`
 
-Copy a file. Returns `source`, `destination`, `bytes_copied`, `success`.
+Copy a file. Returns `source`, `destination`, `bytes_copied`, `success`. (Worker-only; not in `FILES_LITE`.)
 
-### `delete_file(reason, file_name)`
-
-Delete with backup. Returns `file_name`, `deleted`, `backup_created`.
-
-### `rename_file(reason, old_name, new_name)`
-
-Rename/move. Returns `old_name`, `new_name`, `success`.
+> `delete_file(reason, file_name)` and `rename_file(reason, old_name, new_name)` are implemented in `aria.tools.files.file_management` but are **not** exposed as registered agent tools.
 
 ---
 
 ## 6. HTTP Tools
 
-**Package:** `aria.tools.http` -- **Category:** SYSTEM (on-demand)
+**Package:** `aria.tools.http` -- **Routed via:** `ax` (family `http`, command `request`)
 
 ### `http_request(reason, method, url, headers?, body?, timeout?)`
 
@@ -376,7 +341,7 @@ General-purpose HTTP requests via `httpx` with redirect following.
 | `body` | `str` | `None` | Request body |
 | `timeout` | `int` | `30` | Timeout seconds (max: 300) |
 
-**Returns:** `status_code`, `headers`, `body`, `url`. Never raises -- returns error data.
+**Returns:** `status_code`, `headers`, `url`, `body_file`, `body_size`, `content_type`. The body is persisted to disk and returned as a file path. Never raises -- returns error data on failure.
 
 ```python
 http_request("Fetching data", "GET", "https://api.example.com/users")
@@ -389,7 +354,7 @@ http_request("Creating user", "POST", "https://api.example.com/users",
 
 ## 7. IMDb Tools
 
-**Package:** `aria.tools.imdb` -- **Category:** ENTERTAINMENT (on-demand)
+**Package:** `aria.tools.imdb` -- **Routed via:** `ax` (family `imdb`)
 
 Movie/TV information via the `imdbinfo` package. Returns curated field subsets.
 
@@ -423,9 +388,17 @@ User reviews for a title.
 
 Trivia for a title.
 
-### `get_youtube_video_transcription(reason, url, download_path?)`
+### `get_youtube_video_transcription(reason, url, languages?)` -- routed via `ax web youtube`
 
-Download YouTube captions to disk. Returns `file_path`, `metadata` (with `video_id`, `transcript_segments`, `estimated_duration`).
+Download YouTube captions to disk.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `reason` | `str` | -- | Why you need this transcript |
+| `url` | `str` | -- | Full YouTube video URL |
+| `languages` | `List[str]` | `None` | Preferred languages in order (e.g. `["en", "es"]`). Default: English |
+
+**Returns:** `file_path`, `metadata` (with `video_id`, `transcript_segments`, `estimated_duration`).
 
 > Persistence-first: writes to disk, returns file metadata (not content).
 
@@ -433,7 +406,7 @@ Download YouTube captions to disk. Returns `file_path`, `metadata` (with `video_
 
 ## 8. Knowledge Tools
 
-**Package:** `aria.tools.knowledge` -- **Category:** CORE (always loaded)
+**Package:** `aria.tools.knowledge` -- **Routed via:** `ax` (family `knowledge`)
 
 Persistent key-value store across conversations. SQLite-backed.
 
@@ -449,7 +422,7 @@ Persistent key-value store across conversations. SQLite-backed.
 | `entry_id` | `str` | `None` | UUID (for `update`/`delete`) |
 | `query` | `str` | `None` | Search query |
 | `max_results` | `int` | `10` | Max results |
-| `agent_id` | `str` | `"aria"` | Auto-set, do not provide |
+| `agent_id` | `str` | `"aria"` | Auto-injected by the dispatcher, do not provide |
 
 | Action | Required | Returns |
 |--------|----------|---------|
@@ -459,6 +432,8 @@ Persistent key-value store across conversations. SQLite-backed.
 | `list` | -- | `count`, `entries[]` |
 | `update` | `entry_id`, `value` | `entry_id`, message |
 | `delete` | `entry_id` | `entry_id`, message |
+
+> `action` is injected automatically by the `ax` dispatcher (do not pass it in `args`).
 
 ```python
 knowledge("Storing pref", action="store", key="lang", value="Python", tags=["prefs"])
@@ -470,7 +445,7 @@ knowledge("Searching", action="search", query="Python")
 
 ## 9. Planner Tools
 
-**Package:** `aria.tools.planner` -- **Category:** CORE (always loaded)
+**Package:** `aria.tools.planner` -- **Category:** `CORE` (worker only; not in `CORE_LITE`)
 
 Consolidates 7 previous functions into one. SQLite-backed execution plans.
 
@@ -518,30 +493,38 @@ plan("Tests passed", action="update",
 
 ## 10. Process Tools
 
-**Package:** `aria.tools.process` -- **Category:** SYSTEM (on-demand)
+**Package:** `aria.tools.process` -- **Routed via:** `ax` (family `processes`)
 
-Background process manager. In-memory (dies on restart). Max 5 concurrent.
+Background process manager. State is persisted to `data/processes.json` (survives restarts); stdout/stderr are redirected to log files so child processes survive parent exit. Default concurrency limit is 10 (configurable via `ARIA_MAX_PROCESSES`).
 
-### `process(reason, action, name?, command?, args?, timeout?)`
+### `process(reason, action, name?, command?, args?, timeout?, working_dir?, env?, use_shell=False, signal_name?)`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `reason` | `str` | -- | Why |
-| `action` | `str` | -- | `start`, `stop`, `status`, `logs`, `list` |
+| `action` | `str` | -- | `start`, `stop`, `status`, `logs`, `list`, `restart`, `signal` |
 | `name` | `str` | `None` | Unique process name |
 | `command` | `str` | `None` | Command (for `start`) |
 | `args` | `List[str]` | `None` | Arguments |
 | `timeout` | `int` | `None` | Timeout seconds |
+| `working_dir` | `str` | `None` | Working directory |
+| `env` | `Dict[str, str]` | `None` | Additional environment variables |
+| `use_shell` | `bool` | `False` | Execute via system shell (pipes/redirects) |
+| `signal_name` | `str` | `None` | Signal name for `signal` (e.g. `SIGTERM`, `SIGKILL`) |
 
 | Action | Required | Returns |
 |--------|----------|---------|
 | `start` | `name`, `command` | `name`, `pid`, message |
 | `stop` | `name` | `name`, message |
 | `status` | `name` | `name`, `pid`, `status`, `return_code` |
-| `logs` | `name` | `stdout`, `stderr` (last 200 lines) |
+| `logs` | `name` | `stdout`, `stderr` (tail) |
 | `list` | -- | `processes[]` |
+| `restart` | `name` | `name`, `pid`, message |
+| `signal` | `name`, `signal_name` | `name`, message |
 
-**Security:** Blocklist includes `sudo`, `shutdown`, `reboot`, `rm -rf /`, `mkfs`, `dd if=`, fork bombs.
+> `action` is injected automatically by the `ax` dispatcher (do not pass it in `args`).
+
+**Security:** Blocklist includes `shutdown`, `reboot`, `halt`, `poweroff`, `mkfs`, `dd`, `shred`, `wipe` (matched by command name).
 
 ```python
 process("Starting server", action="start",
@@ -555,9 +538,9 @@ process("Stopping", action="stop", name="devserver")
 
 ## 11. Reasoning Tools
 
-**Package:** `aria.tools.reasoning` + `aria.tools.scratchpad` -- **Category:** CORE (always loaded)
+**Package:** `aria.tools.reasoning` + `aria.tools.scratchpad` -- **Category:** `CORE` (worker) / `CORE_LITE` (Aria agent)
 
-Consolidates 9 previous functions into `reasoning` + independent `scratchpad`.
+`reasoning` is a structured analysis tool; `scratchpad` is independent key-value working memory. Both persist across sessions.
 
 ### `reasoning(reason, action, content?, cognitive_mode?, reasoning_type?, evidence?, confidence?, on_step?, agent_id="aria")`
 
@@ -568,10 +551,10 @@ Structured analysis tool. One active session per agent (auto-managed).
 | `reason` | `str` | -- | What and why |
 | `action` | `str` | -- | `start`, `step`, `reflect`, `evaluate`, `summary`, `end` |
 | `content` | `str` | `None` | Reasoning content (for `step`/`reflect`) |
-| `cognitive_mode` | `str` | `"analysis"` | `planning`, `analysis`, `evaluation`, `synthesis`, `creative`, `reflection` |
-| `reasoning_type` | `str` | `"deductive"` | `deductive`, `inductive`, `abductive`, `causal`, `probabilistic`, `analogical` |
+| `cognitive_mode` | `str` | `None` | `planning`, `analysis`, `evaluation`, `synthesis`, `creative`, `reflection` |
+| `reasoning_type` | `str` | `None` | `deductive`, `inductive`, `abductive`, `causal`, `probabilistic`, `analogical` |
 | `evidence` | `List[str]` | `None` | Supporting evidence |
-| `confidence` | `float` | `0.65` | 0.0--1.0 |
+| `confidence` | `float` | `None` | 0.0--1.0 |
 | `on_step` | `int` | `None` | Step number (for `reflect`) |
 | `agent_id` | `str` | `"aria"` | Auto-set |
 
@@ -628,11 +611,11 @@ scratchpad("Clearing", key="all", operation="delete")
 
 ## 12. Search Tools
 
-**Package:** `aria.tools.search` -- **Category:** CORE (always loaded) + FINANCE (on-demand)
+**Package:** `aria.tools.search` -- **Routed via:** `ax` (family `web`)
 
-### `web_search(reason, query, category?, time_range?, max_results=10)`
+### `web_search(reason, query, category?, time_range?, max_results=5)`
 
-Auto-selects DuckDuckGo or SearXNG (if `SEARXNG_URL` env var set).
+Auto-selects DuckDuckGo or SearXNG (if `SEARXNG_URL` env var is set). Both backends return their own structured JSON; the wrapper selects which to call and catches unexpected exceptions.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -640,13 +623,13 @@ Auto-selects DuckDuckGo or SearXNG (if `SEARXNG_URL` env var set).
 | `query` | `str` | -- | Search query |
 | `category` | `str` | `None` | SearXNG only: `general`, `files`, `news`, `videos`, `images` |
 | `time_range` | `str` | `None` | SearXNG only: `day`, `week`, `month`, `year` |
-| `max_results` | `int` | `10` | Max results |
+| `max_results` | `int` | `5` | Max results |
 
-**Returns:** `results[{title, href}]`.
+**Returns:** `results[{title, url}]` (DuckDuckGo) or `findings[]` + stats (SearXNG). Returns URLs, not page content -- use `visit_url` or `download` to fetch full pages.
 
-### `download(reason, url, output="auto", custom_headers?, max_size?, download_path?, convert_to_markdown=False)`
+### `download(reason, url, output="auto", custom_headers?, max_size?, convert_to_markdown=False)`
 
-Download files (PDFs, images, archives, HTML, etc.).
+Download files (PDFs, images, archives, HTML, etc.) to disk.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -654,11 +637,10 @@ Download files (PDFs, images, archives, HTML, etc.).
 | `url` | `str` | -- | Direct URL |
 | `output` | `str` | `"auto"` | `auto`, `markdown`, `text`, `binary` |
 | `custom_headers` | `Dict[str, str]` | `None` | HTTP headers |
-| `max_size` | `int` | `5 MB` | Max bytes |
-| `download_path` | `str` | `DOWNLOADS_DIR` | Save directory |
+| `max_size` | `int` | `None` | Max bytes (default 5 MB) |
 | `convert_to_markdown` | `bool` | `False` | Convert HTML to markdown |
 
-**Returns:** `file_path`, `metadata` (mime_type, size_bytes), optionally `content` (markdown).
+**Returns:** `file_path`, `metadata` (mime_type, size_bytes), optionally a markdown version.
 
 ### `get_current_weather(reason, location)`
 
@@ -677,7 +659,7 @@ Current weather via Open-Meteo (no API key).
 }
 ```
 
-### Finance Tools (FINANCE category)
+### Finance Tools (routed via `ax` family `finance`)
 
 #### `fetch_current_stock_price(reason, ticker)`
 
@@ -695,7 +677,7 @@ Recent news. Returns `articles[{title, publisher, link, publish_time}]`. Max 50 
 
 ## 13. Shell Tools
 
-**Package:** `aria.tools.shell` -- **Category:** CORE (always loaded)
+**Package:** `aria.tools.shell` -- **Category:** `CORE` (worker) / `CORE_LITE` (Aria agent)
 
 Execute shell commands with timeout handling, output capture, and security constraints.
 
@@ -770,9 +752,9 @@ shell("Building", commands=[
 
 ## 14. ax Dispatcher
 
-**Module:** `aria.tools.ax` -- **Agent interface** (not exposed as a LlamaIndex tool)
+**Module:** `aria.tools.ax` -- **Category:** `AX` (loaded by both Aria and Worker agents)
 
-Unified dispatcher that routes `family`/`command` pairs to native Python functions. Replaces shell-based `ax <family> <command>` calls with direct function dispatch — same structured JSON responses, zero subprocess overhead.
+Unified dispatcher that routes `family`/`command` pairs to native Python functions. Replaces shell-based `ax <family> <command>` calls with direct function dispatch -- same structured JSON responses, zero subprocess overhead.
 
 ### `ax(reason, family, command, args?)`
 
@@ -783,11 +765,13 @@ Unified dispatcher that routes `family`/`command` pairs to native Python functio
 | `command` | `str` | Yes | Subcommand within the family. Use `"help"` to list available commands |
 | `args` | `Dict[str, Any]` | No | Keyword arguments for the target function (excluding `reason`) |
 
+> `reason` is always required and passed by the caller. For families with `inject_action` enabled (`knowledge`, `processes`, `worker`), `action` is set automatically from `command` -- do not pass it in `args`. The dispatcher strips unknown kwargs that the target function does not accept.
+
 ### Command Matrix
 
 | Family | Commands | Description |
 |--------|----------|-------------|
-| `web` | `search`, `fetch`, `open`, `click`, `close`, `weather`, `youtube` | Web search, page browsing, content download, weather, YouTube transcripts |
+| `web` | `search`, `fetch`, `visit`, `click`, `close`, `weather`, `youtube` | Web search, page visiting, content download, weather, YouTube transcripts |
 | `knowledge` | `store`, `recall`, `search`, `list`, `update`, `delete` | Persistent key-value memory across sessions (SQLite-backed) |
 | `finance` | `stock`, `company`, `news` | Stock/crypto prices, company fundamentals, ticker news |
 | `imdb` | `search`, `movie`, `person`, `filmography`, `episodes`, `reviews`, `trivia` | Movies, shows, people via IMDb |
@@ -795,12 +779,28 @@ Unified dispatcher that routes `family`/`command` pairs to native Python functio
 | `dev` | `run` | Execute Python code or file in a sandboxed subprocess |
 | `processes` | `start`, `stop`, `status`, `logs`, `list`, `restart`, `signal` | Manage background processes (dev servers, build watchers, pipelines) |
 | `check` | `extras` | Discover additional CLI tools available in the virtual environment |
+| `worker` | `spawn`, `list`, `status`, `logs`, `cancel`, `clean` | Manage background worker agents |
+
+### Web command arguments
+
+| Command | Required | Optional |
+|---------|----------|----------|
+| `search` | `query` | `category`, `time_range`, `max_results` |
+| `fetch` | `url` | `output`, `convert_to_markdown`, `custom_headers`, `max_size` |
+| `visit` | `url` | -- |
+| `click` | `selector` | -- |
+| `close` | -- | -- |
+| `weather` | `location` | -- |
+| `youtube` | `url` | `languages` |
 
 ### Examples
 
 ```python
 # Web search
 ax(reason="Find Python tutorials", family="web", command="search", args={"query": "python asyncio tutorial"})
+
+# Visit a page (renders JS)
+ax(reason="Reading docs", family="web", command="visit", args={"url": "https://example.com"})
 
 # Stock price
 ax(reason="Check AAPL price", family="finance", command="stock", args={"ticker": "AAPL"})
@@ -810,6 +810,9 @@ ax(reason="Save preference", family="knowledge", command="store", args={"key": "
 
 # Process management
 ax(reason="Start dev server", family="processes", command="start", args={"name": "dev", "command": "python", "args": ["-m", "http.server"]})
+
+# Spawn a worker
+ax(reason="Delegate research", family="worker", command="spawn", args={"prompt": "...", "expected": "report.md"})
 
 # Discover available CLI tools
 ax(reason="Check available tools", family="check", command="extras")
@@ -822,154 +825,68 @@ ax(reason="List web commands", family="web", command="help")
 
 | Error Code | Meaning |
 |------------|---------|
+| `missing_reason` | The `reason` argument was not provided. |
+| `missing_required_args` | `family` and/or `command` missing. |
 | `unknown_family` | Invalid family name. Lists available families. |
 | `unknown_command` | Invalid command for the family. Lists available commands. |
 | `import_error` | Could not load the target module. |
 | `invalid_args` | Wrong arguments passed to the target function. |
+| `dispatch_error` | `AxDispatchError` raised by the target. |
 | `execution_error` | Runtime error in the target function. |
-
----
-
-## Architecture Diagram
-
-```mermaid
-graph TB
-    subgraph Registry[Tool Registry - aria.tools.registry]
-        direction TB
-        GT[get_tools]
-        GCT[get_core_tools]
-        GFT[get_file_tools]
-        GDT[get_domain_tools]
-    end
-
-    subgraph Always[Always Loaded]
-        direction TB
-        subgraph Core[CORE - 8 tools]
-            reasoning
-            plan
-            knowledge
-            scratchpad
-            web_search
-            download
-            get_current_weather
-            shell
-        end
-        subgraph FilesCat[FILES - 9 tools]
-            read_file
-            write_file
-            edit_file
-            file_info
-            list_files_tool[list_files]
-            search_files_tool[search_files]
-            copy_file
-            delete_file
-            rename_file
-        end
-    end
-
-    subgraph OnDemand[On-Demand]
-        direction TB
-        subgraph Web[WEB]
-            open_url
-            browser_click
-        end
-        subgraph Dev[DEVELOPMENT]
-            python_tool[python]
-        end
-        subgraph Fin[FINANCE]
-            fetch_current_stock_price
-            fetch_company_information
-            fetch_ticker_news
-        end
-        subgraph Ent[ENTERTAINMENT]
-            search_imdb_titles
-            get_movie_details
-            get_person_details
-            get_person_filmography
-            get_all_series_episodes
-            get_movie_reviews
-            get_movie_trivia
-            get_youtube_video_transcription
-        end
-        subgraph Sys[SYSTEM]
-            http_request
-            process_tool[process]
-        end
-    end
-
-    subgraph Infra[Core Infrastructure]
-        constants
-        decorators
-        utils
-        errors
-        retry
-    end
-
-    GT --> Always
-    GT --> OnDemand
-    GCT --> Core
-    GFT --> FilesCat
-    GDT --> OnDemand
-
-    Core -.-> Infra
-    FilesCat -.-> Infra
-    OnDemand -.-> Infra
-```
 
 ---
 
 ## CLI Access
 
-Domain tools are accessible via two interfaces:
+The `aria` CLI mirrors several `ax` families as `aria web ...` subcommands:
 
-1. **`ax` dispatcher** (preferred) — Direct Python function dispatch, no subprocess overhead. Use `ax(family="...", command="...", args={...})`.
-2. **CLI commands** (fallback) — Via `shell` tool for commands not yet in the dispatcher.
-
-| CLI Command | Domain | Description |
-|-------------|--------|-------------|
-| `aria web search "query"` | Web | Web search |
-| `aria web fetch "url"` | Web | Fetch URL content (auto-detects file vs website) |
-| `aria web weather "city"` | Web | Weather forecast |
-| `aria web youtube "url"` | Web | YouTube transcript |
-| `aria web open "url"` | Web | Open page in browser |
-| `aria web click "selector"` | Web | Click element on current page |
-| `aria web close` | Web | Close browser page |
-| `aria knowledge store/recall/search/list` | Knowledge | Persistent knowledge store |
-| `aria dev run "code"` | Development | Execute Python code |
-| `aria system info/gpu/vram` | System | Hardware info |
-| `aria processes start/stop/status/list` | System | Background process management |
-| `aria worker spawn/list` | Workers | Background worker agents |
+| CLI Command | ax equivalent | Description |
+|-------------|---------------|-------------|
+| `aria web search "query"` | `ax web search` | Web search |
+| `aria web fetch "url"` | `ax web fetch` | Fetch URL content (auto-detects file vs website) |
+| `aria web visit "url"` | `ax web visit` | Visit a page in the browser (stays open for click) |
+| `aria web click "selector"` | `ax web click` | Click element on the current page |
+| `aria web close` | `ax web close` | Close browser page |
+| `aria web weather "city"` | `ax web weather` | Weather forecast |
+| `aria web youtube "url"` | `ax web youtube` | YouTube transcript |
 
 ---
 
 ## Quick Reference
 
-| Task | Tool | Category |
-|------|------|----------|
-| Think through a problem | `reasoning` | CORE |
-| Store working notes | `scratchpad` | CORE |
-| Create execution plan | `plan` | CORE |
-| Run shell commands | `shell` | CORE |
-| Read a file | `read_file` | FILES |
-| Write/create a file | `write_file` | FILES |
-| Edit lines in a file | `edit_file` | FILES |
-| Get file metadata | `file_info` | FILES |
-| List directory contents | `list_files` | FILES |
-| Search files by name/content | `search_files` | FILES |
-| Copy a file | `copy_file` | FILES |
-| Browse a website | `open_url` | WEB |
-| Click a web element | `browser_click` | WEB |
-| Run Python code | `python` | DEVELOPMENT |
-| Get stock prices | `fetch_current_stock_price` | FINANCE |
-| Get company info | `fetch_company_information` | FINANCE |
-| Get ticker news | `fetch_ticker_news` | FINANCE |
-| Search movies/TV | `search_imdb_titles` | ENTERTAINMENT |
-| Get movie details | `get_movie_details` | ENTERTAINMENT |
-| Get person details | `get_person_details` | ENTERTAINMENT |
-| Get filmography | `get_person_filmography` | ENTERTAINMENT |
-| Get series episodes | `get_all_series_episodes` | ENTERTAINMENT |
-| Get movie reviews | `get_movie_reviews` | ENTERTAINMENT |
-| Get movie trivia | `get_movie_trivia` | ENTERTAINMENT |
-| Get YouTube transcript | `get_youtube_video_transcription` | ENTERTAINMENT |
-| Make HTTP requests | `http_request` | SYSTEM |
-| Manage background processes | `process` | SYSTEM |
+| Task | Tool / ax command |
+|------|-------------------|
+| Think through a problem | `reasoning` |
+| Store working notes | `scratchpad` |
+| Create execution plan | `plan` (worker only) |
+| Run shell commands | `shell` |
+| Read a file | `read_file` |
+| Write/create a file | `write_file` |
+| Edit lines in a file | `edit_file` |
+| Get file metadata | `file_info` (worker only) |
+| List directory contents | `list_files` |
+| Search files by name/content | `search_files` |
+| Copy a file | `copy_file` (worker only) |
+| Search the web | `ax web search` |
+| Visit a website (render JS) | `ax web visit` |
+| Click a web element | `ax web click` |
+| Close the browser page | `ax web close` |
+| Download a file | `ax web fetch` |
+| Get weather | `ax web weather` |
+| Get a YouTube transcript | `ax web youtube` |
+| Run Python code | `ax dev run` |
+| Make HTTP requests | `ax http request` |
+| Manage background processes | `ax processes <action>` |
+| Get stock prices | `ax finance stock` |
+| Get company info | `ax finance company` |
+| Get ticker news | `ax finance news` |
+| Search movies/TV | `ax imdb search` |
+| Get movie details | `ax imdb movie` |
+| Get person details | `ax imdb person` |
+| Get filmography | `ax imdb filmography` |
+| Get series episodes | `ax imdb episodes` |
+| Get movie reviews | `ax imdb reviews` |
+| Get movie trivia | `ax imdb trivia` |
+| Persistent memory | `ax knowledge <action>` |
+| Spawn a background worker | `ax worker spawn` |
+| Discover extra CLI tools | `ax check extras` |
