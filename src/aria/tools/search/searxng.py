@@ -130,6 +130,7 @@ def searxng_web_search(
     results: list[dict[str, Any]] = []
     page_errors: list[dict[str, Any]] = []
     dropped_results = 0
+    unresponsive_engines: list[list[str]] = []
     stats: SearchPageStats = {"requested": pages, "succeeded": 0, "failed": 0}
     field_map = _CATEGORY_FIELD_MAP.get(category, _CATEGORY_FIELD_MAP["general"])
 
@@ -144,7 +145,7 @@ def searxng_web_search(
                     "q": query,
                     "pageno": page_number,
                 }
-                page_result, page_error, page_dropped = _fetch_page(
+                page_result, page_error, page_dropped, page_unresponsive = _fetch_page(
                     client=client,
                     category=category,
                     field_map=field_map,
@@ -153,6 +154,7 @@ def searxng_web_search(
                 )
 
                 dropped_results += page_dropped
+                unresponsive_engines.extend(page_unresponsive)
                 if page_error:
                     stats["failed"] += 1
                     page_errors.append(page_error)
@@ -174,6 +176,11 @@ def searxng_web_search(
     success = stats["succeeded"] > 0
     error_message = _build_error_message(stats=stats, page_errors=page_errors)
 
+    # When zero results came back but engines were unresponsive, surface
+    # that so the caller (and the LLM) can distinguish "genuinely no
+    # results exist" from "all search engines are down/suspended".
+    unresponsive_summary = _summarize_unresponsive_engines(unresponsive_engines)
+
     return tool_success_response(
         get_function_name(),
         reason,
@@ -193,6 +200,7 @@ def searxng_web_search(
             "page_stats": stats,
             "dropped_results": dropped_results,
             "page_errors": page_errors,
+            "unresponsive_engines": unresponsive_summary,
         },
     )
 
@@ -204,20 +212,26 @@ def _fetch_page(
     field_map: list[FieldSpec],
     params: dict[str, Any],
     page_number: int,
-) -> tuple[list[dict[str, Any]], dict[str, Any] | None, int]:
-    """Fetch and normalize a single search results page."""
+) -> tuple[list[dict[str, Any]], dict[str, Any] | None, int, list[list[str]]]:
+    """Fetch and normalize a single search results page.
+
+    Returns ``(rows, page_error, dropped_count, unresponsive_engines)``.
+    *unresponsive_engines* is the raw ``[["engine", "reason"], ...]`` list
+    from SearXNG so the caller can surface why zero results came back
+    (e.g. all engines rate-limited vs. genuinely no results).
+    """
     url = f"{SEARXNG_URL}/search?{urlencode(params)}"
 
     try:
         response = client.get(url)
         response.raise_for_status()
     except httpx.HTTPError as exc:
-        return [], _page_error(page_number, "http_error", str(exc)), 0
+        return [], _page_error(page_number, "http_error", str(exc)), 0, []
 
     try:
         payload = response.json()
     except ValueError as exc:
-        return [], _page_error(page_number, "invalid_json", str(exc)), 0
+        return [], _page_error(page_number, "invalid_json", str(exc)), 0, []
 
     raw_results = payload.get("results")
     if not isinstance(raw_results, list):
@@ -229,7 +243,12 @@ def _fetch_page(
                 "Missing or invalid 'results' list",
             ),
             0,
+            [],
         )
+
+    unresponsive = payload.get("unresponsive_engines") or []
+    if not isinstance(unresponsive, list):
+        unresponsive = []
 
     rows: list[dict[str, Any]] = []
     dropped_results = 0
@@ -244,7 +263,7 @@ def _fetch_page(
             continue
         rows.append(row)
 
-    return rows, None, dropped_results
+    return rows, None, dropped_results, unresponsive
 
 
 def _build_row(
@@ -289,3 +308,26 @@ def _build_error_message(
         f"Partial search failure: {stats['failed']} of {stats['requested']} "
         f"page requests failed. First error: {first_error}"
     )
+
+
+def _summarize_unresponsive_engines(
+    engines: list[list[str]],
+) -> list[dict[str, str]]:
+    """De-duplicate and format SearXNG's unresponsive-engines list.
+
+    SearXNG returns ``[["brave", "Suspended: too many requests"], ...]``.
+    We deduplicate (same engine+reason may appear across pages) and convert
+    to ``[{"engine": "brave", "reason": "..."}]`` for cleaner JSON output.
+    """
+    seen: set[tuple[str, str]] = set()
+    summary: list[dict[str, str]] = []
+    for entry in engines:
+        if not isinstance(entry, list) or len(entry) < 2:
+            continue
+        engine, reason = str(entry[0]), str(entry[1])
+        key = (engine, reason)
+        if key in seen:
+            continue
+        seen.add(key)
+        summary.append({"engine": engine, "reason": reason})
+    return summary
