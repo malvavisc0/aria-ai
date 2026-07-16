@@ -344,6 +344,7 @@ def _check_token_limit(checks: list[CheckResult]) -> None:
             requested_context=effective_ctx,
             gpu_memory_utilization=gpu_mem,
             kv_cache_dtype=VllmConfig.kv_cache_dtype,
+            tensor_parallel_size=VllmConfig.tensor_parallel_size,
         )
         if clamped < effective_ctx:
             effective_ctx = clamped
@@ -592,8 +593,9 @@ def _check_kv_cache_memory(checks: list[CheckResult]) -> None:
     from aria.helpers.memory import detect_system_ram, get_model_file_size
     from aria.helpers.nvidia import (
         _estimate_kv_cache_mb,
+        estimate_per_gpu_memory_mb,
         get_free_vram_per_gpu,
-        get_total_vram_mb,
+        get_per_gpu_vram_mb,
     )
     from aria.server.vllm import VllmServerManager
 
@@ -607,7 +609,8 @@ def _check_kv_cache_memory(checks: list[CheckResult]) -> None:
     if not isinstance(backend, str) or not backend:
         backend = "native"
 
-    total_vram_mb = get_total_vram_mb()
+    tp = max(1, VllmConfig.tensor_parallel_size)
+    per_gpu_vram_mb = get_per_gpu_vram_mb()
     free_vram_list = get_free_vram_per_gpu()
     total_ram_mb, avail_ram_mb = detect_system_ram()
 
@@ -633,15 +636,22 @@ def _check_kv_cache_memory(checks: list[CheckResult]) -> None:
 
     kv_cache_gb = kv_cache_mb / 1024
     model_size_mb = get_model_file_size(Path(Chat.model_path))
-    max_free_vram_mb = max(free_vram_list) if free_vram_list else total_vram_mb
+    # Per-GPU free VRAM — most constrained GPU for TP
+    max_free_vram_mb = min(free_vram_list) if free_vram_list else per_gpu_vram_mb
     overhead_mb = 1536  # vLLM overhead + headroom
 
-    vram_needed_mb = model_size_mb + kv_cache_mb + overhead_mb
+    # Per-GPU memory need via shared helper
+    per_gpu_model_mb, per_gpu_kv_mb, vram_needed_mb = estimate_per_gpu_memory_mb(
+        model_weights_mb=model_size_mb,
+        kv_cache_mb=kv_cache_mb,
+        tensor_parallel_size=tp,
+        overhead_mb=overhead_mb,
+    )
     vram_sufficient = max_free_vram_mb >= vram_needed_mb
 
-    # Build budget breakdown strings
-    model_gb = model_size_mb / 1024
-    kv_gb = kv_cache_mb / 1024
+    # Build budget breakdown strings (show per-GPU values)
+    model_gb = per_gpu_model_mb / 1024
+    kv_gb = per_gpu_kv_mb / 1024
     overhead_gb = overhead_mb / 1024
     needed_gb = vram_needed_mb / 1024
     free_gb = max_free_vram_mb / 1024
@@ -716,6 +726,7 @@ def _check_kv_cache_memory(checks: list[CheckResult]) -> None:
             requested_context=effective_context_size,
             gpu_memory_utilization=gpu_mem,
             kv_cache_dtype=VllmConfig.kv_cache_dtype,
+            tensor_parallel_size=VllmConfig.tensor_parallel_size,
         )
         will_be_clamped = clamped_context < effective_context_size
 

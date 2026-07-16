@@ -117,6 +117,7 @@ class TestCheckKvCacheMemory:
         mock_vllm.chat_context_size = 32768
         mock_vllm.kv_cache_dtype = "auto"
         mock_vllm.kv_offload_mode = "off"
+        mock_vllm.tensor_parallel_size = 1
 
         from aria.preflight import _check_kv_cache_memory
 
@@ -141,6 +142,7 @@ class TestCheckKvCacheMemory:
         mock_vllm.chat_context_size = 131072
         mock_vllm.kv_cache_dtype = "auto"
         mock_vllm.kv_offload_mode = "off"
+        mock_vllm.tensor_parallel_size = 1
 
         from aria.preflight import _check_kv_cache_memory
 
@@ -165,6 +167,7 @@ class TestCheckKvCacheMemory:
         mock_vllm.chat_context_size = 131072
         mock_vllm.kv_cache_dtype = "auto"
         mock_vllm.kv_offload_mode = "auto"
+        mock_vllm.tensor_parallel_size = 1
 
         from aria.preflight import _check_kv_cache_memory
 
@@ -188,6 +191,7 @@ class TestCheckKvCacheMemory:
         mock_vllm.chat_context_size = 131072
         mock_vllm.kv_cache_dtype = "auto"
         mock_vllm.kv_offload_mode = "auto"
+        mock_vllm.tensor_parallel_size = 1
 
         from aria.preflight import _check_kv_cache_memory
 
@@ -220,6 +224,7 @@ class TestCheckKvCacheMemory:
         mock_vllm.chat_context_size = 131072
         mock_vllm.kv_cache_dtype = "auto"
         mock_vllm.kv_offload_mode = "auto"
+        mock_vllm.tensor_parallel_size = 1
         mock_vllm.kv_offloading_backend = "lmcache"
 
         from aria.preflight import _check_kv_cache_memory
@@ -253,6 +258,7 @@ class TestCheckKvCacheMemory:
         mock_vllm.chat_context_size = 131072
         mock_vllm.kv_cache_dtype = "auto"
         mock_vllm.kv_offload_mode = "auto"
+        mock_vllm.tensor_parallel_size = 1
 
         from aria.preflight import _check_kv_cache_memory
 

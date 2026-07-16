@@ -137,6 +137,7 @@ class VllmServerManager:
         requested_context: int,
         gpu_memory_utilization: float,
         kv_cache_dtype: str,
+        tensor_parallel_size: int = 1,
     ) -> int:
         """Clamp ``max_model_len`` to what the GPU KV cache can hold.
 
@@ -144,16 +145,22 @@ class VllmServerManager:
         at ``max_model_len``.  KV offloading to CPU RAM only helps with
         *concurrent* requests — it cannot extend the per-request maximum.
 
-        This method estimates the available GPU KV cache memory and
+        This method estimates the available per-GPU KV cache memory and
         auto-reduces ``max_model_len`` if the requested context would
         overflow.  A warning is logged with the full breakdown so the
         user understands why the clamp occurred.
+
+        When ``tensor_parallel_size > 1``, model weights and KV cache are
+        sharded across GPUs, so per-GPU memory is divided accordingly.
 
         Args:
             model_path: Path to the model directory.
             requested_context: Desired ``max_model_len``.
             gpu_memory_utilization: vLLM ``gpu_memory_utilization`` fraction.
             kv_cache_dtype: KV cache data type (``auto``, ``fp8``, etc.).
+            tensor_parallel_size: Number of GPUs for tensor parallelism.
+                Model weights and KV cache are divided by this to get
+                per-GPU memory.  Default 1 (single GPU).
 
         Returns:
             Effective ``max_model_len`` — either the requested value or
@@ -164,12 +171,15 @@ class VllmServerManager:
         from aria.helpers.memory import get_model_file_size
         from aria.helpers.nvidia import (
             _estimate_kv_cache_mb,
-            get_total_vram_mb,
+            estimate_per_gpu_memory_mb,
+            get_per_gpu_vram_mb,
         )
 
-        total_vram_mb = get_total_vram_mb()
+        total_vram_mb = get_per_gpu_vram_mb()
         if total_vram_mb <= 0:
             return requested_context  # Cannot detect VRAM — skip check
+
+        tp = max(1, tensor_parallel_size)
 
         model_size_mb = get_model_file_size(Path(model_path))
         if model_size_mb <= 0:
@@ -179,28 +189,37 @@ class VllmServerManager:
         overhead_mb = 1536
 
         managed_vram_mb = int(total_vram_mb * gpu_memory_utilization)
-        available_kv_mb = managed_vram_mb - model_size_mb - overhead_mb
+        per_gpu_model_mb, _, _ = estimate_per_gpu_memory_mb(
+            model_weights_mb=model_size_mb,
+            kv_cache_mb=0,
+            tensor_parallel_size=tp,
+            overhead_mb=overhead_mb,
+        )
+        available_kv_mb = managed_vram_mb - per_gpu_model_mb - overhead_mb
 
         if available_kv_mb <= 0:
             return requested_context  # Not enough info — let vLLM handle it
 
-        # Estimate KV cache for the requested context
+        # Estimate KV cache for the requested context (total, then per-GPU)
         kv_mb = _estimate_kv_cache_mb(model_path, requested_context, kv_cache_dtype)
         if kv_mb is None or kv_mb <= 0:
             return requested_context  # Cannot estimate — skip check
 
-        if kv_mb <= available_kv_mb:
+        per_gpu_kv_mb = kv_mb / tp
+
+        if per_gpu_kv_mb <= available_kv_mb:
             return requested_context  # Fits — no clamping needed
 
         # --- Requested context doesn't fit — find the maximum that does ---
-        # Use a small reference context to derive bytes-per-token
+        # Use a small reference context to derive bytes-per-token per GPU
         reference_ctx = 4096
         kv_ref_mb = _estimate_kv_cache_mb(model_path, reference_ctx, kv_cache_dtype)
         if kv_ref_mb is None or kv_ref_mb <= 0:
             return requested_context  # Cannot estimate — skip check
 
-        kv_bytes_per_token = (kv_ref_mb * 1024 * 1024) / reference_ctx
-        max_context = int((available_kv_mb * 1024 * 1024) / kv_bytes_per_token)
+        kv_ref_per_gpu_mb = kv_ref_mb / tp
+        kv_bytes_per_token_per_gpu = (kv_ref_per_gpu_mb * 1024 * 1024) / reference_ctx
+        max_context = int((available_kv_mb * 1024 * 1024) / kv_bytes_per_token_per_gpu)
 
         # Align down to 256 (vLLM's KV cache block size) for clean allocation
         max_context = (max_context // 256) * 256
@@ -208,7 +227,9 @@ class VllmServerManager:
         if max_context >= requested_context:
             return requested_context  # After rounding, still fits
 
-        kv_clamped_mb = int(max_context * kv_bytes_per_token / (1024 * 1024))
+        per_gpu_kv_clamped_mb = int(
+            max_context * kv_bytes_per_token_per_gpu / (1024 * 1024)
+        )
         logger.warning(
             "Auto-clamping max_model_len: {requested:,} → {clamped:,}\n"
             "  Reason: GPU KV cache cannot fit {requested:,} tokens.\n"
@@ -217,26 +238,28 @@ class VllmServerManager:
             "  only helps with concurrent requests, not per-request\n"
             "  context length.\n"
             "  ─────────────────────────────────────────────\n"
-            "  Total VRAM:          {vram:>8,} MiB\n"
+            "  Tensor parallel:     {tp:>8}\n"
+            "  VRAM per GPU:        {vram:>8,} MiB\n"
             "  GPU utilization:     {util:>8.0%}\n"
-            "  Managed VRAM:        {managed:>8,} MiB\n"
-            "  Model weights:       {model:>8,} MiB\n"
+            "  Managed VRAM/GPU:    {managed:>8,} MiB\n"
+            "  Model weights/GPU:   {model:>8,.0f} MiB\n"
             "  vLLM overhead:       {overhead:>8,} MiB\n"
-            "  Available for KV:    {avail:>8,} MiB\n"
-            "  KV needed (orig):    {kv_orig:>8,} MiB  "
+            "  Available for KV:    {avail:>8,.0f} MiB\n"
+            "  KV needed (orig):    {kv_orig:>8,.0f} MiB/GPU  "
             "({requested:,} tokens, {dtype})\n"
-            "  KV needed (clamped): {kv_clmp:>8,} MiB  "
+            "  KV needed (clamped): {kv_clmp:>8,.0f} MiB/GPU  "
             "({clamped:,} tokens, {dtype})",
             requested=requested_context,
             clamped=max_context,
+            tp=tp,
             vram=total_vram_mb,
             util=gpu_memory_utilization,
             managed=managed_vram_mb,
-            model=model_size_mb,
+            model=per_gpu_model_mb,
             overhead=overhead_mb,
             avail=available_kv_mb,
-            kv_orig=kv_mb,
-            kv_clmp=kv_clamped_mb,
+            kv_orig=per_gpu_kv_mb,
+            kv_clmp=per_gpu_kv_clamped_mb,
             dtype=kv_cache_dtype,
         )
         return max_context
@@ -613,18 +636,20 @@ class VllmServerManager:
             from aria.helpers.nvidia import (
                 calculate_gpu_memory_utilization,
                 get_free_vram_per_gpu,
-                get_total_vram_mb,
+                get_per_gpu_vram_mb,
             )
 
-            total_vram = get_total_vram_mb()
+            total_vram = get_per_gpu_vram_mb()
             free_vram_list = get_free_vram_per_gpu()
-            free_vram = sum(free_vram_list) if free_vram_list else 0
+            # Use the most-constrained GPU's free VRAM (relevant for TP)
+            free_vram = min(free_vram_list) if free_vram_list else 0
             gpu_mem = calculate_gpu_memory_utilization(
                 total_vram_mb=total_vram,
                 model_path=Chat.model_path,
                 context_size=max_model_len,
                 kv_cache_dtype=VllmConfig.kv_cache_dtype,
                 free_vram_mb=free_vram,
+                tensor_parallel_size=VllmConfig.tensor_parallel_size,
             )
 
         # --- Clamp max_model_len to GPU KV cache capacity ---
@@ -636,6 +661,7 @@ class VllmServerManager:
             requested_context=max_model_len,
             gpu_memory_utilization=gpu_mem,
             kv_cache_dtype=VllmConfig.kv_cache_dtype,
+            tensor_parallel_size=VllmConfig.tensor_parallel_size,
         )
 
         # --- Resolve KV offload size ---

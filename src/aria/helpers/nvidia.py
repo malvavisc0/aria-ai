@@ -210,6 +210,41 @@ def get_total_vram_mb() -> int:
         return 0
 
 
+def get_per_gpu_vram_mb() -> int:
+    """Get VRAM of a single GPU (assumes homogeneous GPUs for TP).
+
+    Queries per-GPU VRAM directly via a single ``nvidia-smi`` call.
+    For single-GPU systems this is identical to ``get_total_vram_mb()``.
+    For multi-GPU systems this returns the per-GPU VRAM, which is what
+    vLLM's ``--gpu-memory-utilization`` actually applies to.
+
+    Returns:
+        Per-GPU VRAM in MiB, or 0 if nvidia-smi is unavailable.
+    """
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=memory.total",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        vram_values = [
+            int(vram.strip())
+            for vram in result.stdout.strip().split("\n")
+            if vram.strip()
+        ]
+        if not vram_values:
+            return 0
+        # Return the minimum per-GPU VRAM (most constrained for TP)
+        return min(vram_values)
+    except (subprocess.CalledProcessError, FileNotFoundError, ValueError):
+        return 0
+
+
 def check_gpu_memory_usage(gpu_index: int, usage_threshold: float) -> bool:
     """
     Check if a specific GPU's memory usage is below a specified threshold.
@@ -631,6 +666,35 @@ def _estimate_kv_cache_mb(
     return kv_mb
 
 
+def estimate_per_gpu_memory_mb(
+    model_weights_mb: int | float,
+    kv_cache_mb: int | float,
+    tensor_parallel_size: int = 1,
+    overhead_mb: int = 1536,
+) -> tuple[float, float, float]:
+    """Estimate per-GPU memory for sharded model weights and KV cache.
+
+    When ``tensor_parallel_size > 1``, model weights and KV cache are
+    sharded evenly across GPUs.  vLLM overhead (CUDA graphs, scratch
+    buffers, headroom) is per-GPU and not sharded.
+
+    Args:
+        model_weights_mb: Total model weight size in MiB.
+        kv_cache_mb: Total KV cache size in MiB.
+        tensor_parallel_size: Number of GPUs for tensor parallelism.
+        overhead_mb: Per-GPU fixed overhead (CUDA graphs + headroom).
+
+    Returns:
+        Tuple of ``(per_gpu_weights_mb, per_gpu_kv_mb, per_gpu_total_mb)``
+        where ``per_gpu_total_mb`` includes the overhead.
+    """
+    tp = max(1, tensor_parallel_size)
+    per_gpu_weights = model_weights_mb / tp
+    per_gpu_kv = kv_cache_mb / tp
+    per_gpu_total = per_gpu_weights + per_gpu_kv + overhead_mb
+    return per_gpu_weights, per_gpu_kv, per_gpu_total
+
+
 def calculate_gpu_memory_utilization(
     total_vram_mb: int,
     model_path: str = "",
@@ -640,6 +704,7 @@ def calculate_gpu_memory_utilization(
     headroom_mb: int = 1024,
     vllm_overhead_mb: int = 512,
     free_vram_mb: int = 0,
+    tensor_parallel_size: int = 1,
 ) -> float:
     """Calculate the optimal ``gpu_memory_utilization`` fraction for vLLM.
 
@@ -648,17 +713,24 @@ def calculate_gpu_memory_utilization(
     ``config.json``).  Falls back to a conservative heuristic when the
     config is unavailable.
 
+    ``total_vram_mb`` should be the **per-GPU** VRAM (not the sum across
+    all GPUs).  vLLM applies ``--gpu-memory-utilization`` to each GPU
+    individually.  When ``tensor_parallel_size > 1``, model weights and
+    KV cache are sharded across GPUs, so the per-GPU memory need is
+    divided accordingly.
+
     The formula is::
 
-        kv_cache    = 2 × layers × kv_heads × head_dim × ctx × bytes_per_elem
-        needed      = (model_weights + kv_cache + overhead + headroom) × safety
-        utilization = needed / total_vram
+        per_gpu_weights = model_weights / tp
+        per_gpu_kv      = kv_cache / tp
+        needed          = (per_gpu_weights + per_gpu_kv + overhead + headroom) × safety
+        utilization     = needed / per_gpu_vram
 
     This means a small quantized model on a large GPU gets a low utilization
     (leaving headroom), instead of always reserving ~90%.
 
     Args:
-        total_vram_mb: Total GPU VRAM in MiB (from ``get_total_vram_mb()``).
+        total_vram_mb: Per-GPU VRAM in MiB (from ``get_per_gpu_vram_mb()``).
         model_path: Local path to the model directory.  Used to read
             ``config.json`` for architecture info and measure weight size.
         context_size: Target maximum sequence length (from
@@ -672,6 +744,10 @@ def calculate_gpu_memory_utilization(
             headroom.  Default 1024 MiB (1 GiB).
         vllm_overhead_mb: Fixed overhead for vLLM CUDA kernels, buffers,
             and scratch memory.  Default 512 MiB.
+        free_vram_mb: Per-GPU free VRAM (not summed across GPUs).
+        tensor_parallel_size: Number of GPUs for tensor parallelism.
+            Model weights and KV cache are divided by this value to get
+            per-GPU memory.  Default 1 (single GPU).
 
     Returns:
         Float in [0.50, 0.95] suitable for ``--gpu-memory-utilization``.
@@ -734,8 +810,14 @@ def calculate_gpu_memory_utilization(
         context_factor = context_size / 32768
         kv_cache_mb = int(model_size_mb * context_factor * kv_dtype_factor)
 
-    # --- Step 3: Compute total memory needed ---
-    raw_needed_mb = model_size_mb + kv_cache_mb + vllm_overhead_mb + headroom_mb
+    # --- Step 3: Compute per-GPU memory needed (shard by TP) ---
+    per_gpu_weights_mb, per_gpu_kv_mb, raw_needed_mb = estimate_per_gpu_memory_mb(
+        model_weights_mb=model_size_mb,
+        kv_cache_mb=kv_cache_mb,
+        tensor_parallel_size=tensor_parallel_size,
+        overhead_mb=vllm_overhead_mb + headroom_mb,
+    )
+    tp = max(1, tensor_parallel_size)
     needed_mb = int(raw_needed_mb * safety_factor)
 
     # --- Step 4: Calculate utilization ---
@@ -771,19 +853,23 @@ def calculate_gpu_memory_utilization(
     # --- Step 5: Log the reasoning ---
     logger.info(
         "Auto-calculated gpu_memory_utilization={util:.2f}\n"
-        "  VRAM total:        {vram:>8,} MiB\n"
-        "  Model weights:     {model:>8,} MiB\n"
-        "  KV cache estimate: {kv:>8,} MiB  "
+        "  VRAM per GPU:      {vram:>8,} MiB\n"
+        "  Tensor parallel:   {tp:>8}\n"
+        "  Model weights:     {model:>8,} MiB  ({per_gpu_model:>8,.0f} MiB/GPU)\n"
+        "  KV cache estimate: {kv:>8,} MiB  ({per_gpu_kv:>8,.0f} MiB/GPU)  "
         "(ctx={ctx:,}, dtype={kv_dtype}, source={src})\n"
         "  vLLM overhead:     {over:>8,} MiB\n"
         "  Headroom:          {head:>8,} MiB\n"
-        "  Raw needed:        {raw:>8,} MiB\n"
-        "  With safety (×{sf}): {needed:>8,} MiB\n"
-        "  → vLLM will use    {used:>8,} MiB ({pct:.0f}% of VRAM)",
+        "  Raw needed/GPU:    {raw:>8,.0f} MiB\n"
+        "  With safety (×{sf}): {needed:>8,.0f} MiB\n"
+        "  → vLLM will use    {used:>8,} MiB ({pct:.0f}% of VRAM/GPU)",
         util=utilization,
         vram=total_vram_mb,
+        tp=tp,
         model=model_size_mb,
+        per_gpu_model=per_gpu_weights_mb,
         kv=kv_cache_mb,
+        per_gpu_kv=per_gpu_kv_mb,
         ctx=context_size,
         kv_dtype=kv_cache_dtype,
         src=kv_source,
