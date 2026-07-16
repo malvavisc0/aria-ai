@@ -24,13 +24,6 @@ services:
       - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
     restart: unless-stopped
 
-  # ── Byparr — headless browser proxy for search engines ─────────────────────
-  # Optional. Set BYPARR_API_URL=http://byparr:8191 in .env to use.
-  byparr:
-    image: ghcr.io/byparr/byparr:latest
-    container_name: byparr
-    restart: unless-stopped
-
   # ── Aria (CUDA / CPU — local vLLM) ───────────────────────────────────────
   aria:
     image: ghcr.io/malvavisc0/aria-ai-cuda:latest
@@ -42,7 +35,6 @@ services:
       - ./.env:/app/.env:ro
     depends_on:
       - searxng
-      - byparr
     deploy:
       resources:
         reservations:
@@ -64,7 +56,6 @@ services:
       - ./.env:/app/.env:ro
     depends_on:
       - searxng
-      - byparr
     restart: unless-stopped
 
   # ── Aria ARM64 (Raspberry Pi 4 — remote LLM or CPU-only) ────────────────
@@ -79,7 +70,6 @@ services:
       - ./.env:/app/.env:ro
     depends_on:
       - searxng
-      - byparr
     restart: unless-stopped
 
   # ── Aria ROCm (AMD GPUs) ──────────────────────────────────────────────────
@@ -96,7 +86,6 @@ services:
       - ./.env:/app/.env:ro
     depends_on:
       - searxng
-      - byparr
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri
