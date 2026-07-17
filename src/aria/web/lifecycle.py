@@ -159,9 +159,43 @@ def _init_database() -> None:
     Base.metadata.create_all(_state.db_engine)
 
 
+def _is_chat_vllm_healthy(timeout: float = 2.0) -> bool:
+    """Return True if the local vLLM chat server responds 200 on /health.
+
+    Mirrors the local-mode branch of ``aria.cli.server._is_vllm_healthy``
+    without pulling in Typer/CLI dependencies. Used by the web lifecycle
+    to skip a redundant ``start_all()`` when the CLI already launched
+    vLLM (otherwise ``start_all()``'s preflight port check would SIGTERM
+    the healthy instance and reload the model from scratch).
+    """
+    from urllib.request import urlopen
+
+    port = ChatConfig.get_port()
+    try:
+        with urlopen(f"http://localhost:{port}/health", timeout=timeout) as resp:
+            return resp.status == 200
+    except OSError:
+        return False
+
+
 def _init_vllm_servers() -> None:
-    """Start all configured vLLM inference servers."""
+    """Start all configured vLLM inference servers.
+
+    If the chat vLLM server is already healthy on the configured port
+    (e.g. started by the CLI before launching the web UI), adopt its
+    tracked PIDs and skip ``start_all()``. This prevents the preflight
+    port check from killing the healthy instance and reloading the
+    model a second time (~12s of wasted work + log-file overwrite).
+    """
     _state.vllm_manager = VllmServerManager()
+    if _is_chat_vllm_healthy():
+        logger.info(
+            "vLLM chat server already healthy on port "
+            f"{ChatConfig.get_port()} — adopting existing process, "
+            "skipping redundant start_all()"
+        )
+        logger.info("All vLLM servers ready")
+        return
     _state.vllm_manager.start_all()
     logger.info("All vLLM servers ready")
 
