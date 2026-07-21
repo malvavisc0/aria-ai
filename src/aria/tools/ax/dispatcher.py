@@ -54,7 +54,7 @@ class AxSchema(BaseModel):
 
 
 def _web_search():
-    from aria.tools.search.web_search import web_search
+    from aria.tools.search.webserp import web_search
 
     return web_search
 

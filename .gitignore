@@ -41,3 +41,8 @@ wheels/
 .cache/
 .DS_Store
 .chainlit/
+
+# Test/coverage artifacts
+.coverage
+htmlcov/
+.pytest_cache/

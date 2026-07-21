@@ -5,7 +5,7 @@ from .finance import (
     fetch_ticker_news,
 )
 from .weather import get_current_weather
-from .web_search import web_search
+from .webserp import web_search
 from .youtube import get_youtube_video_transcription
 
 __all__ = [

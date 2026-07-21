@@ -128,7 +128,7 @@ class TestDispatch:
     async def test_dispatches_to_web_search(self):
         mock_response = '{"tool":"web_search","data":{"results":[]}}'
         with patch(
-            "aria.tools.search.web_search.web_search",
+            "aria.tools.search.webserp.web_search",
             return_value=mock_response,
         ) as mock_fn:
             result = await ax(
@@ -178,7 +178,7 @@ class TestDispatch:
     @pytest.mark.asyncio
     async def test_type_error_returns_helpful_message(self):
         with patch(
-            "aria.tools.search.web_search.web_search",
+            "aria.tools.search.webserp.web_search",
             side_effect=TypeError("missing required argument: 'query'"),
         ):
             result = await ax(reason="test", family="web", command="search", args={})
@@ -223,8 +223,8 @@ class TestDispatch:
             return '{"tool":"web_search","data":{"results":[]}}'
 
         with patch(
-            "aria.tools.ax.dispatcher._web_search",
-            return_value=fake_search,
+            "aria.tools.search.webserp.web_search",
+            new=fake_search,
         ):
             result = await ax(
                 reason="test search",

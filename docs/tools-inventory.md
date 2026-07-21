@@ -613,19 +613,17 @@ scratchpad("Clearing", key="all", operation="delete")
 
 **Package:** `aria.tools.search` -- **Routed via:** `ax` (family `web`)
 
-### `web_search(reason, query, category?, time_range?, max_results=5)`
+### `web_search(reason, query, max_results=5)`
 
-Auto-selects DuckDuckGo or SearXNG (if `SEARXNG_URL` env var is set). Both backends return their own structured JSON; the wrapper selects which to call and catches unexpected exceptions.
+Searches the web using webserp — a metasearch CLI that queries Google, DuckDuckGo, Brave, Yahoo, Mojeek, Startpage, and Presearch in parallel with browser impersonation. No API keys required.
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `reason` | `str` | -- | Why |
 | `query` | `str` | -- | Search query |
-| `category` | `str` | `None` | SearXNG only: `general`, `files`, `news`, `videos`, `images` |
-| `time_range` | `str` | `None` | SearXNG only: `day`, `week`, `month`, `year` |
 | `max_results` | `int` | `5` | Max results |
 
-**Returns:** `results[{title, url}]` (DuckDuckGo) or `findings[]` + stats (SearXNG). Returns URLs, not page content -- use `visit_url` or `download` to fetch full pages.
+**Returns:** `findings[]` with `url`, `title`, `content`, and `engine` per result. Returns URLs, not page content -- use `visit_url` or `download` to fetch full pages.
 
 ### `download(reason, url, output="auto", custom_headers?, max_size?, convert_to_markdown=False)`
 

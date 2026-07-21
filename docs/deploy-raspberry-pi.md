@@ -1,6 +1,6 @@
-# Deploy Aria on a Raspberry Pi with SearXNG
+# Deploy Aria on a Raspberry Pi
 
-This guide walks through deploying Aria on a Raspberry Pi (ARM64) using Docker, with a local SearXNG instance for privacy-respecting web search and an optional Byparr proxy for bypassing search engine blocks.
+This guide walks through deploying Aria on a Raspberry Pi (ARM64) using Docker. Web search is provided by webserp — a metasearch CLI that queries multiple search engines in parallel with browser impersonation, so no additional SearXNG service is required. An optional Byparr proxy can be added for bypassing search engine blocks.
 
 ## Table of Contents
 
@@ -10,7 +10,6 @@ This guide walks through deploying Aria on a Raspberry Pi (ARM64) using Docker, 
 - [Directory Structure](#directory-structure)
 - [Docker Compose](#docker-compose)
 - [Docker Compose Environment](#docker-compose-environment)
-- [SearXNG Configuration](#searxng-configuration)
 - [Aria Environment](#aria-environment)
 - [Deploy](#deploy)
 - [Verify the Deployment](#verify-the-deployment)
@@ -38,15 +37,15 @@ This guide walks through deploying Aria on a Raspberry Pi (ARM64) using Docker, 
 ## Architecture Overview
 
 ```
-┌──────────────────────────────────────────────────────┐
-│                  Raspberry Pi (ARM64)                 │
-│                                                      │
-│  ┌──────────┐    ┌───────────┐    ┌───────────────┐  │
-│  │  Aria    │───▶│  SearXNG  │    │   Byparr      │  │
-│  │  :9876   │    │  :8080    │    │   :8191       │  │
-│  └────┬─────┘    └───────────┘    └───────────────┘  │
-│       │                                              │
-└───────┼──────────────────────────────────────────────┘
+┌──────────────────────────────────────────┐
+│            Raspberry Pi (ARM64)          │
+│                                          │
+│  ┌──────────┐    ┌───────────────┐        │
+│  │  Aria    │───▶│   Byparr      │        │
+│  │  :9876   │    │   :8191       │        │
+│  └────┬─────┘    └───────────────┘        │
+│       │                                  │
+└───────┼──────────────────────────────────┘
         │
         ▼
   ┌───────────────┐
@@ -56,8 +55,8 @@ This guide walks through deploying Aria on a Raspberry Pi (ARM64) using Docker, 
 ```
 
 - **Aria** — the AI assistant (web UI on port 9876)
-- **SearXNG** — self-hosted metasearch engine (port 8080, internal)
 - **Byparr** — optional headless browser proxy to bypass CAPTCHA/rate-limit blocks
+- Web search is handled by **webserp** — a metasearch CLI that queries Google, DuckDuckGo, Brave, and others in parallel with browser impersonation.
 
 ---
 
@@ -83,8 +82,8 @@ docker compose version
 ### 2. Create the directory structure
 
 ```bash
-# Data directory (persistent storage for Aria and SearXNG)
-mkdir -p /home/ubuntu/docker/data/aria/searxng
+# Data directory (persistent storage for Aria)
+mkdir -p /home/ubuntu/docker/data/aria
 
 # Project directory (compose file and docker .env)
 mkdir -p /home/ubuntu/docker/projects/aria
@@ -103,12 +102,10 @@ After deployment, the data directory will look like this:
 ├── .files/             # Chainlit file storage (auto-created)
 ├── chainlit.md         # Chainlit welcome message (auto-created)
 ├── data/               # Aria runtime data (SQLite, ChromaDB, logs)
-├── searxng/
-│   └── settings.yml    # SearXNG configuration (you create this)
 └── .env                # Aria configuration (you create this)
 ```
 
-> **Note:** `.chainlit/`, `.files/`, `chainlit.md`, and `data/` are auto-created by Aria on first launch. You only need to create `searxng/settings.yml` and `.env`.
+> **Note:** `.chainlit/`, `.files/`, `chainlit.md`, and `data/` are auto-created by Aria on first launch. You only need to create `.env`.
 
 ---
 
@@ -118,16 +115,6 @@ Create `docker-compose.yml` in the project directory (`/home/ubuntu/docker/proje
 
 ```yaml
 services:
-  searxng:
-    image: searxng/searxng:latest
-    container_name: searxng
-    hostname: searxng
-    volumes:
-      - ${DATA_PATH}/aria/searxng/settings.yml:/etc/searxng/settings.yml
-    environment:
-      TZ: ${TZ:-Europe/Berlin}
-    restart: unless-stopped
-
   byparr:
     image: ghcr.io/thephaseless/byparr:main
     container_name: byparr
@@ -147,7 +134,6 @@ services:
     environment:
       TZ: ${TZ:-Europe/Berlin}
     depends_on:
-      - searxng
       - byparr
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:9876/health"]
@@ -175,68 +161,6 @@ PROJECTS_PATH=/home/ubuntu/docker/projects
 ```
 
 > **Tip:** Run `id` on the Pi to find your `UID` and `GID`.
-
----
-
-## SearXNG Configuration
-
-Create the SearXNG config file at `${DATA_PATH}/aria/searxng/settings.yml` (i.e., `/home/ubuntu/docker/data/aria/searxng/settings.yml`).
-
-> **Important:** SearXNG refuses to start with the default `ultrasecretkey`. You must set a unique `secret_key` under `server:`. Generate one with:
->
-> ```bash
-> python3 -c "import secrets; print(secrets.token_hex(32))"
-> ```
-
-```yaml
-use_default_settings: true
-
-search:
-  formats:
-    - html
-    - csv
-    - json  # Required for agents to search
-
-server:
-  secret_key: "<your-generated-secret>"
-  limiter: false      # Disable rate limiting on internal Docker network
-  image_proxy: true
-```
-
-### Customizing SearXNG
-
-You can edit `settings.yml` to:
-
-- **Enable/disable search engines**: Add an `engines` section to cherry-pick which backends SearXNG queries
-- **Set a default language**: Add `search.default_lang: en` under `search:`
-- **Enable SafeSearch**: Change `safesearch` in Aria's tool calls (the config default is `0` = off)
-
-Example with engine filtering:
-
-```yaml
-use_default_settings: true
-
-search:
-  formats:
-    - html
-    - json
-  default_lang: en
-
-server:
-  secret_key: "<your-generated-secret>"
-  limiter: false
-  image_proxy: true
-
-engines:
-  - name: google
-    disabled: false
-  - name: duckduckgo
-    disabled: false
-  - name: wikipedia
-    disabled: false
-  - name: bing
-    disabled: true
-```
 
 ---
 
@@ -284,8 +208,7 @@ EMBEDDINGS_CONTEXT_SIZE = 512
 ARIA_DB_FILENAME = aria.db
 CHROMADB_PERSISTENT_PATH = chromadb
 
-# ── SearXNG & Byparr ───────────────────────────────────────────────────────
-SEARXNG_URL = http://searxng:8080
+# ── Byparr (optional — remove if not using) ──────────────────────────────
 BYPARR_API_URL = http://byparr:8191
 ```
 
@@ -327,7 +250,6 @@ ARIA_VLLM_REMOTE = true
 |----------|-------------|
 | `ARIA_HOME = /app` | Must match the container volume mount path |
 | `SERVER_HOST = 0.0.0.0` | Must bind to all interfaces inside Docker |
-| `SEARXNG_URL = http://searxng:8080` | Uses Docker hostname `searxng` and SearXNG's internal port |
 | `BYPARR_API_URL = http://byparr:8191` | Uses Docker hostname `byparr` |
 | `ARIA_VLLM_REMOTE = true` | Required for remote LLM endpoints (no local GPU) |
 | `TOKEN_LIMIT_RATIO = 0.90` | Fraction of context window for memory (0.90 = 90%) |
@@ -342,10 +264,6 @@ ARIA_VLLM_REMOTE = true
 Docker cannot mount files that don't exist. Create them first:
 
 ```bash
-# Create the SearXNG settings
-mkdir -p /home/ubuntu/docker/data/aria/searxng
-nano /home/ubuntu/docker/data/aria/searxng/settings.yml
-
 # Create the Aria .env
 nano /home/ubuntu/docker/data/aria/.env
 ```
@@ -374,15 +292,14 @@ cd /home/ubuntu/docker/projects/aria
 docker compose up -d
 ```
 
-This starts all three services: Aria, SearXNG, and Byparr. The `aria` service depends on `searxng` and `byparr`, so Docker Compose starts them automatically.
+This starts Aria and optionally Byparr. If Byparr is present in `docker-compose.yml`, the `aria` service depends on it.
 
 ### What gets launched
 
 | Container | Image | Port | Purpose |
 |-----------|-------|------|---------|
 | `aria` | `ghcr.io/malvavisc0/aria-ai-arm64:latest` | `9876` | Aria web UI |
-| `searxng` | `searxng/searxng:latest` | `8080` (internal) | Metasearch engine |
-| `byparr` | `ghcr.io/thephaseless/byparr:main` | `8191` (internal) | Browser proxy |
+| `byparr` | `ghcr.io/thephaseless/byparr:main` | `8191` (internal) | Browser proxy (optional) |
 
 ### Check status
 
@@ -393,8 +310,6 @@ docker compose ps
 # Follow Aria logs
 docker compose logs -f aria
 
-# Follow SearXNG logs
-docker compose logs -f searxng
 ```
 
 ---
@@ -455,58 +370,17 @@ docker exec -it aria aria users delete
 
 ## Running Without Docker
 
-If you prefer to run Aria directly on the Pi (without Docker), you can install SearXNG separately and run Aria from uv.
-
-### 1. Install SearXNG natively
-
-Follow the [SearXNG installation docs](https://docs.searxng.org/dev/installation.html). The simplest method:
+If you prefer to run Aria directly on the Pi (without Docker), install it from uv:
 
 ```bash
-# Install dependencies
-sudo apt-get install -y python3 git
-
-# Install uv
+# Install uv if you haven't already
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone SearXNG
-git clone https://github.com/searxng/searxng.git ~/searxng
-cd ~/searxng
-
-# Create venv and install
-uv venv
-source .venv/bin/activate
-uv pip install -e .
-
-# Copy and edit the config
-mkdir -p ~/.config/searxng
-cp /path/to/settings.yml ~/.config/searxng/settings.yml
-
-# Run SearXNG (binds to 0.0.0.0:8080)
-python3 -m searx.webapp
-```
-
-### 2. Install Aria
-
-```bash
+# Install Aria
 uv tool install aria-ai
 ```
 
-### 3. Configure `.env`
-
-Point `SEARXNG_URL` at the local SearXNG instance:
-
-```bash
-SEARXNG_URL=http://localhost:8080
-ARIA_VLLM_REMOTE=true
-CHAT_OPENAI_API=http://YOUR-GPU-SERVER:9090/v1
-ARIA_VLLM_API_KEY=sk-aria
-```
-
-### 4. Start Aria
-
-```bash
-aria server run
-```
+No additional search service is needed — webserp is bundled as a dependency and runs as a subprocess.
 
 ---
 
@@ -533,7 +407,7 @@ Aria's `.env`, then re-run the pre-download step.
 
 ### Raspberry Pi 5 (4–8 GB RAM)
 
-- The Pi 5's faster CPU and I/O will noticeably improve SearXNG response times
+- The Pi 5's faster CPU and I/O will noticeably improve search response times
 - Use a USB SSD instead of a microSD card for better database and Docker performance
 
 ### Storage
@@ -548,7 +422,7 @@ volumes:
 
 ### Network
 
-For best results, use a wired Ethernet connection. SearXNG makes outbound HTTP requests to multiple search engines — Wi-Fi latency compounds across backends.
+For best results, use a wired Ethernet connection. Webserp makes outbound HTTP requests to multiple search engines in parallel — Wi-Fi latency compounds across backends.
 
 ### Reduce memory usage
 
@@ -587,41 +461,12 @@ docker image prune -f
 uv tool upgrade aria-ai
 ```
 
-### SearXNG (non-Docker)
-
-```bash
-cd ~/searxng
-git pull
-source .venv/bin/activate
-uv pip install -e .
-# Restart the service
-```
-
----
-
 ## Troubleshooting
 
-### SearXNG returns no results
+### Web search returns no results
 
-1. Check SearXNG is running: `docker compose logs searxng`
-2. Some engines block ARM64/datacenter IPs — edit `settings.yml` to disable problematic engines
-3. If SearXNG shows CAPTCHA errors, ensure `BYPARR_API_URL=http://byparr:8191` is set in Aria's `.env`
-
-### SearXNG fails to start with `ultrasecretkey` error
-
-You must set a unique `secret_key` in `settings.yml`. See [SearXNG Configuration](#searxng-configuration).
-
-### Aria can't reach SearXNG
-
-The SearXNG URL must use the Docker hostname, not `localhost`:
-
-```bash
-# Correct (inside Docker network — matches hostname: searxng)
-SEARXNG_URL = http://searxng:8080
-
-# Wrong (would only work outside Docker)
-SEARXNG_URL = http://localhost:8080
-```
+1. Some engines block ARM64/datacenter IPs — try using Byparr (headless browser proxy) to bypass CAPTCHA blocks
+2. If using Byparr, ensure `BYPARR_API_URL=http://byparr:8191` is set in Aria's `.env`
 
 ### Aria can't reach the remote LLM
 

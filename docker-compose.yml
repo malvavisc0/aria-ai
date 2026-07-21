@@ -14,16 +14,6 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:
-  # ── SearXNG — privacy-respecting metasearch engine ─────────────────────────
-  # Required for web search when SEARXNG_URL is set in .env.
-  # JSON output is enabled via searxng/settings.yml.
-  searxng:
-    image: searxng/searxng:latest
-    container_name: searxng
-    volumes:
-      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
-    restart: unless-stopped
-
   # ── Aria (CUDA / CPU — local vLLM) ───────────────────────────────────────
   aria:
     image: ghcr.io/malvavisc0/aria-ai-cuda:latest
@@ -33,8 +23,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env:ro
-    depends_on:
-      - searxng
     deploy:
       resources:
         reservations:
@@ -54,8 +42,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env:ro
-    depends_on:
-      - searxng
     restart: unless-stopped
 
   # ── Aria ARM64 (Raspberry Pi 4 — remote LLM or CPU-only) ────────────────
@@ -68,8 +54,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env:ro
-    depends_on:
-      - searxng
     restart: unless-stopped
 
   # ── Aria ROCm (AMD GPUs) ──────────────────────────────────────────────────
@@ -84,8 +68,6 @@ services:
     volumes:
       - ./data:/app/data
       - ./.env:/app/.env:ro
-    depends_on:
-      - searxng
     devices:
       - /dev/kfd:/dev/kfd
       - /dev/dri:/dev/dri

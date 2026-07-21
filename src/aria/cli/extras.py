@@ -147,7 +147,7 @@ _CATEGORIES: dict[str, list[str]] = {
         "websockets",
     ],
     "Search": [
-        "ddgs",
+        "webserp",
         "markitdown",
         "markdownify",
         "markdown-it",

@@ -10,7 +10,6 @@ requires-python = ">=3.12"
 dependencies = [
     "chainlit",
     "chromadb",
-    "ddgs",
     "markdownify",
     "httpx",
     "huggingface-hub",
@@ -34,6 +33,7 @@ dependencies = [
     "yfinance",
     "youtube-transcript-api",
     "llama-index-embeddings-huggingface",
+    "webserp",
 ]
 
 [project.optional-dependencies]
