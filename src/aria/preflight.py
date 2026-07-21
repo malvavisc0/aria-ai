@@ -356,14 +356,11 @@ def _check_token_limit(checks: list[CheckResult]) -> None:
     max_safe_ratio = 0.90
 
     # Build context chain description
-    def _k(n: int) -> str:
-        return f"{n // 1000}K"
-
-    ctx_parts = [f"effective {_k(effective_ctx)}"]
+    ctx_parts = [f"effective {_format_context_size(effective_ctx)}"]
     if model_max_ctx is not None and model_max_ctx != effective_ctx:
-        ctx_parts.append(f"model max {_k(model_max_ctx)}")
+        ctx_parts.append(f"model max {_format_context_size(model_max_ctx)}")
     if requested_ctx != effective_ctx:
-        ctx_parts.append(f"configured {_k(requested_ctx)}")
+        ctx_parts.append(f"configured {_format_context_size(requested_ctx)}")
     if ctx_was_clamped:
         ctx_parts.append("GPU KV clamped")
     ctx_detail = ", ".join(ctx_parts)
@@ -386,8 +383,8 @@ def _check_token_limit(checks: list[CheckResult]) -> None:
             )
         )
     else:
-        limit_k = _k(token_limit)
-        ctx_k = _k(effective_ctx)
+        limit_k = _format_context_size(token_limit)
+        ctx_k = _format_context_size(effective_ctx)
         checks.append(
             CheckResult(
                 name="Token limit",
@@ -572,6 +569,20 @@ def _check_memory_requirements(checks: list[CheckResult]) -> None:
             )
 
 
+def _format_context_size(tokens: int) -> str:
+    """Format a token count using binary K/M units (e.g. 1048576 -> "1M").
+
+    Uses 1024-based (KiB/MiB-style) division so that common power-of-two
+    context sizes like 1048576 render as "1M" instead of the misleading
+    "1048K" produced by decimal (// 1000) division.
+    """
+    if tokens % (1024 * 1024) == 0:
+        return f"{tokens // (1024 * 1024)}M"
+    if tokens % 1024 == 0:
+        return f"{tokens // 1024}K"
+    return str(tokens)
+
+
 def _check_kv_cache_memory(checks: list[CheckResult]) -> None:
     """Check if KV cache fits in VRAM or can be offloaded to RAM.
 
@@ -658,7 +669,7 @@ def _check_kv_cache_memory(checks: list[CheckResult]) -> None:
     dtype_label = (
         VllmConfig.kv_cache_dtype if VllmConfig.kv_cache_dtype != "auto" else "fp16"
     )
-    ctx_label = f"{effective_context_size // 1000}K"
+    ctx_label = _format_context_size(effective_context_size)
 
     if vram_sufficient:
         checks.append(
@@ -744,15 +755,15 @@ def _check_kv_cache_memory(checks: list[CheckResult]) -> None:
                 )
             )
         elif ram_sufficient and will_be_clamped:
-            req_k = effective_context_size // 1000
-            clamped_k = clamped_context // 1000
+            req_k = _format_context_size(effective_context_size)
+            clamped_k = _format_context_size(clamped_context)
             checks.append(
                 CheckResult(
                     name="KV cache memory",
                     passed=True,  # Will auto-clamp at launch
                     category="hardware",
                     details=(
-                        f"Context {req_k}K → ~{clamped_k}K "
+                        f"Context {req_k} → ~{clamped_k} "
                         f"(GPU KV cache limit). "
                         f"RAM offload active for concurrency."
                     ),
