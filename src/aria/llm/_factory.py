@@ -55,7 +55,7 @@ def get_chat_llm(
         max_tokens=max_tokens,
         temperature=VllmConfig.temperature,
         reuse_client=True,
-        async_http_client=httpx.AsyncClient(
+        async_http_client=httpx.AsyncClient(  # type: ignore[call-arg]
             timeout=httpx.Timeout(300.0, connect=10.0),
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         ),

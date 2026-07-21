@@ -39,9 +39,11 @@ class TestPasswordAuthentication:
         retrieved_user = result.scalar_one()
 
         # Correct password should verify
+        assert retrieved_user.password is not None
         assert verify_password(password, retrieved_user.password)
 
         # Wrong password should not verify
+        assert retrieved_user.password is not None
         assert not verify_password("wrong_password", retrieved_user.password)
 
     @pytest.mark.asyncio
@@ -75,6 +77,8 @@ class TestPasswordAuthentication:
         assert str(user1.password) != str(user2.password)
 
         # But both should verify with the same password
+        assert user1.password is not None
+        assert user2.password is not None
         assert verify_password(password, user1.password)
         assert verify_password(password, user2.password)
 
@@ -131,6 +135,7 @@ class TestPasswordAuthentication:
         retrieved_user = result.scalar_one()
 
         # Old password should not work
+        assert retrieved_user.password is not None
         assert not verify_password(old_password, retrieved_user.password)
 
         # New password should work

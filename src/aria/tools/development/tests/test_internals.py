@@ -227,7 +227,7 @@ class TestValidateInputs:
     def test_validate_inputs_non_string_code(self):
         """Test validation with non-string code"""
         with pytest.raises(PythonSecurityError, match="Code must be a string"):
-            _validate_inputs(code=123)
+            _validate_inputs(code=123)  # type: ignore[arg-type]
 
     def test_validate_inputs_large_code(self):
         """Test validation with extremely large code"""
@@ -240,7 +240,7 @@ class TestValidateInputs:
     def test_validate_inputs_non_integer_timeout(self):
         """Test validation with non-integer timeout"""
         with pytest.raises(ValueError, match="Timeout must be an integer"):
-            _validate_inputs(timeout="10")
+            _validate_inputs(timeout="10")  # type: ignore[arg-type]
 
     def test_validate_inputs_negative_timeout(self):
         """Test validation with negative timeout"""
@@ -260,7 +260,7 @@ class TestValidateInputs:
     def test_validate_inputs_non_string_filename(self):
         """Test validation with non-string filename"""
         with pytest.raises(PythonSecurityError, match="Filename must be a string"):
-            _validate_inputs(filename=123)
+            _validate_inputs(filename=123)  # type: ignore[arg-type]
 
     def test_validate_inputs_path_traversal_filename(self):
         """Test validation with path traversal in filename"""
@@ -272,7 +272,7 @@ class TestValidateInputs:
     def test_validate_inputs_non_string_file_path(self):
         """Test validation with non-string file_path"""
         with pytest.raises(PythonSecurityError, match="File path must be a string"):
-            _validate_inputs(file_path=123)
+            _validate_inputs(file_path=123)  # type: ignore[arg-type]
 
     def test_validate_inputs_empty_file_path(self):
         """Test validation with empty file_path"""

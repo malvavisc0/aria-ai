@@ -8,7 +8,7 @@ import pytest
 
 
 @pytest.fixture(autouse=True)
-def _reset_env_and_cache(monkeypatch: pytest.MonkeyPatch) -> None:
+def _reset_env_and_cache(monkeypatch: pytest.MonkeyPatch):
     """Remove any ARIA_COMPRESS_* env vars and clear threshold cache."""
     from aria.llm._compress import _reset_threshold_cache
 

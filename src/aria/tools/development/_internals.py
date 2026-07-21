@@ -37,7 +37,7 @@ def _build_response(
     """
     from aria.tools import tool_response
 
-    metadata = {"timestamp": utc_timestamp()}
+    metadata: dict[str, Any] = {"timestamp": utc_timestamp()}
     if error:
         metadata["error"] = error
     metadata.update(metadata_fields)

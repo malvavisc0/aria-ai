@@ -1,5 +1,7 @@
 """Tests for WorkerAgent factory."""
 
+from llama_index.core.tools import FunctionTool
+
 from aria.agents.worker import WorkerAgent, get_worker_agent
 
 
@@ -60,13 +62,16 @@ class TestGetWorkerAgent:
         """Agent should have tools loaded."""
         mock_llm = _make_mock_llm()
         agent = get_worker_agent(llm=mock_llm)
+        assert agent.tools is not None
         assert len(agent.tools) > 0
 
     def test_agent_has_core_and_file_tools(self):
         """Agent should have core + file tools (11 total)."""
         mock_llm = _make_mock_llm()
         agent = get_worker_agent(llm=mock_llm)
-        names = {t.metadata.name for t in agent.tools}
+        assert agent.tools is not None
+        tools = [t for t in agent.tools if isinstance(t, FunctionTool)]
+        names = {t.metadata.name for t in tools}
         assert "reasoning" in names
         assert "shell" in names
         assert "read_file" in names
@@ -76,4 +81,5 @@ class TestGetWorkerAgent:
         """Agent system prompt should include output dir."""
         mock_llm = _make_mock_llm()
         agent = get_worker_agent(llm=mock_llm, output_dir="/tmp/worker_123")
+        assert agent.system_prompt is not None
         assert "/tmp/worker_123" in agent.system_prompt

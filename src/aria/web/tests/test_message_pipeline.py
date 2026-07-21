@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -12,7 +13,7 @@ class TestStreamAgentResponse:
     """Tests for the simplified _stream_agent_response."""
 
     @staticmethod
-    def _make_handler(*events):
+    def _make_handler(*events) -> Any:
         """Build a mock handler yielding the given events."""
 
         async def _stream():
@@ -35,7 +36,7 @@ class TestStreamAgentResponse:
         return _MockHandler()
 
     @staticmethod
-    def _make_output():
+    def _make_output() -> Any:
         output = MagicMock()
         output.stream_token = AsyncMock()
         return output
@@ -288,7 +289,7 @@ class TestSanitizeMemory:
     """Tests for the _sanitize_memory helper."""
 
     @staticmethod
-    def _make_memory(*messages):
+    def _make_memory(*messages) -> Any:
         """Build a fake Memory backed by an in-memory list."""
 
         class _FakeMemory:
@@ -364,7 +365,7 @@ class TestRollbackMemory:
     """Tests for the _rollback_memory helper."""
 
     @staticmethod
-    def _make_memory(*messages):
+    def _make_memory(*messages) -> Any:
         class _FakeMemory:
             def __init__(self, msgs):
                 self._msgs = list(msgs)
@@ -512,6 +513,11 @@ class TestDescribeImage:
 # ---------------------------------------------------------------------------
 
 
+def _mock_message(**kwargs) -> Any:
+    """Create a mock cl.Message from keyword attributes."""
+    return SimpleNamespace(**kwargs)
+
+
 class TestHandleMessageVision:
     """Tests for _handle_message vision image processing."""
 
@@ -532,7 +538,7 @@ class TestHandleMessageVision:
             AsyncMock(return_value="A red circle on white background."),
         )
 
-        message = SimpleNamespace(
+        message = _mock_message(
             content="What is this?",
             command=None,
             thread_id="t1",
@@ -559,7 +565,7 @@ class TestHandleMessageVision:
         )
         monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
 
-        message = SimpleNamespace(
+        message = _mock_message(
             content="Look at this",
             command=None,
             thread_id="t1",
@@ -577,7 +583,7 @@ class TestHandleMessageVision:
         monkeypatch.setattr(pipeline, "extract_image_data", lambda msg: [])
         monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
 
-        message = SimpleNamespace(
+        message = _mock_message(
             content="Just text",
             command=None,
             thread_id="t1",
@@ -629,7 +635,7 @@ class TestHandleMessageVision:
             AsyncMock(return_value="A bar chart."),
         )
 
-        message = SimpleNamespace(
+        message = _mock_message(
             content="Analyze these",
             command=None,
             thread_id="t2",
@@ -663,7 +669,7 @@ class TestHandleMessageVision:
             AsyncMock(side_effect=Exception("connection refused")),
         )
 
-        message = SimpleNamespace(
+        message = _mock_message(
             content="What's this?",
             command=None,
             thread_id="t3",
@@ -769,7 +775,9 @@ class TestEditDetection:
         )
 
         mock_handler = MagicMock()
-        pipeline._state.agents_workflow.run = MagicMock(return_value=mock_handler)
+        workflow = pipeline._state.agents_workflow
+        assert workflow is not None
+        workflow.run = MagicMock(return_value=mock_handler)
 
         # Mock cl.Message for output
         mock_output = MagicMock()
@@ -783,7 +791,7 @@ class TestEditDetection:
         )
 
         # Create message WITH processed (simulating edit)
-        message = SimpleNamespace(
+        message = _mock_message(
             id="msg-1",
             content="Edited hello",
             command=None,
@@ -838,7 +846,9 @@ class TestEditDetection:
         )
 
         mock_handler = MagicMock()
-        pipeline._state.agents_workflow.run = MagicMock(return_value=mock_handler)
+        workflow = pipeline._state.agents_workflow
+        assert workflow is not None
+        workflow.run = MagicMock(return_value=mock_handler)
 
         mock_output = MagicMock()
         mock_output.send = AsyncMock()
@@ -851,7 +861,7 @@ class TestEditDetection:
         )
 
         # First message — no processed in metadata
-        message = SimpleNamespace(
+        message = _mock_message(
             id="msg-1",
             content="Hello",
             command=None,
@@ -906,7 +916,7 @@ class TestEditDetection:
         output.remove = AsyncMock()
         monkeypatch.setattr(pipeline.cl, "Message", lambda **kw: output)
 
-        message = SimpleNamespace(
+        message = _mock_message(
             id="msg-1",
             content="Hello",
             command=None,
@@ -968,7 +978,7 @@ class TestEditDetection:
 
         monkeypatch.setattr(pipeline.cl, "Message", _make_message)
 
-        message = SimpleNamespace(
+        message = _mock_message(
             id="msg-1",
             content="Hello",
             command=None,

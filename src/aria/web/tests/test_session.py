@@ -2,10 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
+from chainlit.types import ThreadDict
 
 from aria.web import session as session_module
+
+
+def _mock_message(**kwargs) -> Any:
+    """Create a mock cl.Message from keyword attributes."""
+    return SimpleNamespace(**kwargs)
+
+
+def _mock_element(**kwargs) -> Any:
+    """Create a mock cl.Element from keyword attributes."""
+    return SimpleNamespace(**kwargs)
 
 
 class TestExtractImageData:
@@ -16,7 +28,7 @@ class TestExtractImageData:
         img_file = tmp_path / "photo.png"
         img_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 50)
 
-        message = SimpleNamespace(
+        message = _mock_message(
             elements=[
                 SimpleNamespace(
                     path=str(img_file),
@@ -39,7 +51,7 @@ class TestExtractImageData:
         pdf_file = tmp_path / "doc.pdf"
         pdf_file.write_bytes(b"%PDF-1.4")
 
-        message = SimpleNamespace(
+        message = _mock_message(
             elements=[
                 SimpleNamespace(
                     path=str(pdf_file),
@@ -59,7 +71,7 @@ class TestExtractImageData:
         img_file = tmp_path / "shot.jpg"
         img_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20)
 
-        message = SimpleNamespace(
+        message = _mock_message(
             elements=[
                 SimpleNamespace(
                     path=str(img_file),
@@ -82,7 +94,7 @@ class TestExtractImageData:
         img1.write_bytes(b"\x89PNG" + b"\x00" * 10)
         img2.write_bytes(b"RIFF" + b"\x00" * 10)
 
-        message = SimpleNamespace(
+        message = _mock_message(
             elements=[
                 SimpleNamespace(path=str(img1), mime="image/png", name="a.png"),
                 SimpleNamespace(path=str(img2), mime="image/webp", name="b.webp"),
@@ -97,17 +109,17 @@ class TestExtractImageData:
 
     @staticmethod
     def test_returns_empty_for_no_elements() -> None:
-        message = SimpleNamespace(elements=[])
+        message = _mock_message(elements=[])
         assert session_module.extract_image_data(message) == []
 
     @staticmethod
     def test_returns_empty_when_elements_is_none() -> None:
-        message = SimpleNamespace(elements=None)
+        message = _mock_message(elements=None)
         assert session_module.extract_image_data(message) == []
 
     @staticmethod
     def test_skips_element_without_path() -> None:
-        message = SimpleNamespace(
+        message = _mock_message(
             elements=[
                 SimpleNamespace(path=None, mime="image/png", name="no.png"),
             ],
@@ -119,7 +131,7 @@ class TestExtractImageData:
     @staticmethod
     def test_handles_unreadable_file_gracefully(tmp_path: Path) -> None:
         """When the image file doesn't exist, a warning is logged and skipped."""
-        message = SimpleNamespace(
+        message = _mock_message(
             elements=[
                 SimpleNamespace(
                     path=str(tmp_path / "missing.png"),
@@ -146,7 +158,7 @@ def test_extract_file_paths_skips_image_elements(
     pdf_file = tmp_path / "doc.pdf"
     pdf_file.write_bytes(b"%PDF-1.4")
 
-    message = SimpleNamespace(
+    message = _mock_message(
         thread_id="t1",
         elements=[
             SimpleNamespace(path=str(img_file), mime="image/png", name="photo.png"),
@@ -176,7 +188,7 @@ def test_extract_file_paths_uses_unique_destination_names(
     src_a.write_text("first", encoding="utf-8")
     src_b.write_text("second", encoding="utf-8")
 
-    message = SimpleNamespace(
+    message = _mock_message(
         thread_id="thread-123",
         elements=[
             SimpleNamespace(path=str(src_a), name="report.txt"),
@@ -227,7 +239,7 @@ async def test_restore_chat_history_sorts_root_messages_chronologically(
         ],
     }
 
-    await session_module.restore_chat_history(thread)
+    await session_module.restore_chat_history(cast(ThreadDict, thread))
 
     assert [message.content for message in captured_messages] == [
         "first",
@@ -289,7 +301,7 @@ async def test_restore_chat_history_includes_child_assistant_messages(
         ],
     }
 
-    await session_module.restore_chat_history(thread)
+    await session_module.restore_chat_history(cast(ThreadDict, thread))
 
     assert [m.content for m in captured_messages] == [
         "Hello",
@@ -342,7 +354,7 @@ async def test_restore_chat_history_sanitises_consecutive_same_role(
         ],
     }
 
-    await session_module.restore_chat_history(thread)
+    await session_module.restore_chat_history(cast(ThreadDict, thread))
 
     # The first user message is dropped (consecutive duplicate → keep last).
     assert [m.content for m in captured_messages] == [
@@ -399,7 +411,7 @@ async def test_restore_chat_history_keeps_trailing_user_message(
         ],
     }
 
-    await session_module.restore_chat_history(thread)
+    await session_module.restore_chat_history(cast(ThreadDict, thread))
 
     # Trailing user message is kept on resume (no follow-up yet).
     assert [m.content for m in captured_messages] == [
@@ -451,7 +463,7 @@ class TestConvertDocumentsToMarkdown:
                     import types
 
                     m = types.ModuleType("markitdown")
-                    m.MarkItDown = FakeMarkItDown
+                    m.MarkItDown = FakeMarkItDown  # type: ignore[attr-defined]
                     return m
                 return real_import(name, *args, **kwargs)
 
@@ -534,7 +546,7 @@ class TestConvertDocumentsToMarkdown:
                 import types
 
                 m = types.ModuleType("markitdown")
-                m.MarkItDown = FakeMarkItDown
+                m.MarkItDown = FakeMarkItDown  # type: ignore[attr-defined]
                 return m
             return real_import(name, *args, **kwargs)
 
@@ -698,7 +710,7 @@ def test_sanitize_chat_history_trailing_user_dropped() -> None:
     assert [m.content for m in result] == ["a", "b"]
 
 
-def _assistant_with_tool_calls(n: int, content: str = "") -> "ChatMessage":  # noqa: F821
+def _assistant_with_tool_calls(n: int, content: str = "") -> Any:  # noqa: F821
     from llama_index.core.base.llms.types import (
         ChatMessage,
         MessageRole,
@@ -718,7 +730,7 @@ def _assistant_with_tool_calls(n: int, content: str = "") -> "ChatMessage":  # n
     return ChatMessage(role=MessageRole.ASSISTANT, blocks=blocks)
 
 
-def _tool_message(call_id: str, content: str = "ok") -> "ChatMessage":  # noqa: F821
+def _tool_message(call_id: str, content: str = "ok") -> Any:  # noqa: F821
     from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
     return ChatMessage(

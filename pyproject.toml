@@ -97,6 +97,7 @@ ignore = ["E501"]
 
 [tool.basedpyright]
 include = ["src/aria"]
+exclude = ["src/aria/gui"]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "standard"

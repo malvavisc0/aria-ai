@@ -7,6 +7,7 @@ metadata for AI agent consumption.
 """
 
 import importlib
+import importlib.util
 import json
 import os
 import tempfile

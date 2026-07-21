@@ -3,8 +3,10 @@
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
+from chainlit.step import StepDict
 from chainlit.types import Pagination, ThreadFilter
 
 from aria.db.layer import SQLiteSQLAlchemyDataLayer, _to_local_timestamp_string
@@ -114,6 +116,7 @@ class TestThreadOperations:
         # Verify metadata is merged
         thread = await data_layer.get_thread(thread_id)
         assert thread is not None
+        assert thread["metadata"] is not None
         assert thread["metadata"]["key1"] == "value1"
         assert thread["metadata"]["key2"] == "value2"
         assert thread["metadata"]["shared"] == "updated"
@@ -162,7 +165,7 @@ class TestStepOperations:
             "tags": ["api-call", "external"],
         }
 
-        await data_layer.create_step(step_dict)
+        await data_layer.create_step(cast(StepDict, step_dict))
 
         # Verify tags stored as JSON in database
         result = await raw_db_query(
@@ -191,12 +194,12 @@ class TestStepOperations:
             "metadata": {"duration": 1.5, "retries": 2},
         }
 
-        await data_layer.create_step(step_dict)
+        await data_layer.create_step(cast(StepDict, step_dict))
 
         # Retrieve and verify
         step = await data_layer.get_step(step_id)
         assert step is not None
-        assert step["metadata"] == {"duration": 1.5, "retries": 2}
+        assert step.get("metadata") == {"duration": 1.5, "retries": 2}
 
     @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
     @pytest.mark.asyncio
@@ -219,11 +222,11 @@ class TestStepOperations:
             "generation": generation,
         }
 
-        await data_layer.create_step(step_dict)
+        await data_layer.create_step(cast(StepDict, step_dict))
 
         step = await data_layer.get_step(step_id)
         assert step is not None
-        assert step["generation"] == generation
+        assert step.get("generation") == generation
 
     @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
     @pytest.mark.asyncio
@@ -247,13 +250,13 @@ class TestStepOperations:
             "generation": {"model": "gpt-4"},
         }
 
-        await data_layer.create_step(step_dict)
+        await data_layer.create_step(cast(StepDict, step_dict))
 
         step = await data_layer.get_step(step_id)
         assert step is not None
-        assert step["tags"] == ["tag1", "tag2"]
-        assert step["metadata"] == {"key": "value"}
-        assert step["generation"] == {"model": "gpt-4"}
+        assert step.get("tags") == ["tag1", "tag2"]
+        assert step.get("metadata") == {"key": "value"}
+        assert step.get("generation") == {"model": "gpt-4"}
 
     @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
     @pytest.mark.asyncio
@@ -277,17 +280,17 @@ class TestStepOperations:
             "metadata": {"original": True},
         }
 
-        await data_layer.create_step(step_dict)
+        await data_layer.create_step(cast(StepDict, step_dict))
 
         # Update step
         step_dict["output"] = "Updated output"
         step_dict["tags"] = ["updated"]
-        await data_layer.update_step(step_dict)
+        await data_layer.update_step(cast(StepDict, step_dict))
 
         step = await data_layer.get_step(step_id)
         assert step is not None
-        assert step["output"] == "Updated output"
-        assert step["tags"] == ["updated"]
+        assert step.get("output") == "Updated output"
+        assert step.get("tags") == ["updated"]
 
 
 class TestThreadRetrieval:
@@ -347,7 +350,7 @@ class TestThreadRetrieval:
             "metadata": {"step-key": "step-value"},
             "generation": {"model": "test"},
         }
-        await data_layer.create_step(step_dict)
+        await data_layer.create_step(cast(StepDict, step_dict))
 
         # Retrieve threads
         threads = await data_layer.get_all_user_threads(user_id=user_id)
@@ -360,12 +363,11 @@ class TestThreadRetrieval:
 
         step = thread["steps"][0]
         # Verify step JSON fields are deserialized
-        assert isinstance(step["tags"], list)
-        assert step["tags"] == ["step-tag"]
-        assert isinstance(step["metadata"], dict)
-        assert step["metadata"] == {"step-key": "step-value"}
-        assert isinstance(step["generation"], dict)
-        assert step["generation"] == {"model": "test"}
+        assert isinstance(step.get("tags"), list)
+        assert step.get("tags") == ["step-tag"]
+        assert isinstance(step.get("metadata"), dict)
+        assert step.get("metadata") == {"step-key": "step-value"}
+        assert isinstance(step.get("generation"), dict)
 
     @pytest.mark.asyncio
     async def test_get_all_user_threads_with_malformed_json(
@@ -543,6 +545,7 @@ class TestRoundTrip:
         thread = await data_layer.get_thread(thread_id)
         assert thread is not None
         # Compare each key individually to handle potential ordering/merging issues
+        assert thread["metadata"] is not None
         assert thread["metadata"]["level1"] == original_metadata["level1"]
         assert thread["metadata"]["boolean"] == original_metadata["boolean"]
         assert thread["metadata"]["number"] == original_metadata["number"]
@@ -569,13 +572,13 @@ class TestRoundTrip:
             "generation": {"model": "gpt-4", "tokens": 100},
         }
 
-        await data_layer.create_step(original_step)
+        await data_layer.create_step(cast(StepDict, original_step))
 
         retrieved_step = await data_layer.get_step(step_id)
         assert retrieved_step is not None
-        assert retrieved_step["tags"] == original_step["tags"]
-        assert retrieved_step["metadata"] == original_step["metadata"]
-        assert retrieved_step["generation"] == original_step["generation"]
+        assert retrieved_step.get("tags") == original_step["tags"]
+        assert retrieved_step.get("metadata") == original_step["metadata"]
+        assert retrieved_step.get("generation") == original_step["generation"]
 
     @pytest.mark.asyncio
     async def test_empty_collections_round_trip(

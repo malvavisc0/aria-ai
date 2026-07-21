@@ -387,9 +387,9 @@ class StatefulAgentWorkflow(AgentWorkflow):
 
 
 # Reuse base step metadata so overridden methods stay discoverable.
-StatefulAgentWorkflow.run_agent_step._step_config = (  # type: ignore[attr-defined]
-    AgentWorkflow.run_agent_step._step_config
+StatefulAgentWorkflow.run_agent_step._step_config = (  # type: ignore[assignment]
+    AgentWorkflow.run_agent_step._step_config  # type: ignore[attr-defined]
 )
-StatefulAgentWorkflow.call_tool._step_config = (  # type: ignore[attr-defined]
-    AgentWorkflow.call_tool._step_config
+StatefulAgentWorkflow.call_tool._step_config = (  # type: ignore[assignment]
+    AgentWorkflow.call_tool._step_config  # type: ignore[attr-defined]
 )

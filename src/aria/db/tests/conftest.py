@@ -3,11 +3,12 @@
 import uuid
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -354,6 +355,6 @@ async def raw_db_query(db_session: AsyncSession) -> Callable:
         except Exception:
             # For INSERT/UPDATE/DELETE queries
             await db_session.commit()
-            return result.rowcount
+            return cast(CursorResult[Any], result).rowcount
 
     return _execute_query

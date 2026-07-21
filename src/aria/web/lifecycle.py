@@ -328,8 +328,10 @@ def _init_agent_workflows() -> None:
     """Create the agent workflow and prompt enhancer."""
     from aria.agents import get_prompt_enhancer_agent
 
-    _state.agents_workflow = get_agent_workflow(llm=_state.llm)
-    _state.prompt_enhancer = get_prompt_enhancer_agent(llm=_state.llm)
+    llm = _state.llm
+    assert llm is not None
+    _state.agents_workflow = get_agent_workflow(llm=llm)
+    _state.prompt_enhancer = get_prompt_enhancer_agent(llm=llm)
 
 
 async def _init_browser() -> None:

@@ -117,10 +117,14 @@ def create_memory(thread_id: str) -> Memory:
     if not thread_id:
         raise ValueError("thread_id cannot be None or empty")
 
+    vector_db = _state.vector_db
+    assert vector_db is not None
+    embed_model = _state.embeddings
+    assert embed_model is not None
     return get_default_memory(
-        vector_db=_state.vector_db,
+        vector_db=vector_db,
         thread_id=thread_id,
-        embed_model=_state.embeddings,
+        embed_model=embed_model,
         token_limit=EmbeddingsConfig.token_limit,
         llm=_state.llm,
     )

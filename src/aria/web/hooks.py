@@ -127,6 +127,7 @@ async def on_chat_start_handler() -> None:
                 "description": "Enhance Prompt",
                 "button": None,
                 "persistent": True,
+                "selected": False,
             }
         ]
     )
