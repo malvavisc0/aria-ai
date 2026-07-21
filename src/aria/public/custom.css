@@ -1,159 +1,19 @@
-/* ============================================================
-   Aria – "AI Labs" Design System v2
-   Elegant · Cool · Exciting
-   Research-paper white · terminal-green prompts · purposeful motion
-   ============================================================ */
+/* Aria: a calm, compact interface layer for Chainlit. */
 
-/* ── Fonts (Geist via jsDelivr CDN) ── */
-@font-face {
-  font-family: 'Geist Sans';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.7.0/dist/fonts/geist-sans/Geist-Variable.woff2') format('woff2-variations');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist Sans';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.7.0/dist/fonts/geist-sans/Geist-Italic%5Bwght%5D.woff2') format('woff2-variations');
-  font-weight: 100 900;
-  font-style: italic;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist Mono';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.7.0/dist/fonts/geist-mono/GeistMono-Variable.woff2') format('woff2-variations');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist Mono';
-  src: url('https://cdn.jsdelivr.net/npm/geist@1.7.0/dist/fonts/geist-mono/GeistMono-Italic%5Bwght%5D.woff2') format('woff2-variations');
-  font-weight: 100 900;
-  font-style: italic;
-  font-display: swap;
-}
-
-/* ── Design tokens ── */
 :root {
-  /* Spacing (8px grid) */
-  --space-1: 0.25rem;
-  /* 4px — sub-grid */
-  --space-2: 0.5rem;
-  /* 8px */
-  --space-3: 0.75rem;
-  /* 12px */
-  --space-4: 1rem;
-  /* 16px */
-  --space-5: 1.5rem;
-  /* 24px */
-  --space-6: 2rem;
-  /* 32px */
-  --space-7: 2.5rem;
-  /* 40px */
-  --space-8: 3rem;
-  /* 48px */
-
-  /* Grid / dot pattern */
-  --aria-grid-size: 24px;
-  --aria-dot-size: 1px;
-  --aria-dot-color: rgba(0, 0, 0, 0.06);
-
-  /* Scrollbar */
-  --aria-scroll-track: rgba(0, 0, 0, 0.04);
-  --aria-scroll-thumb: rgba(0, 0, 0, 0.16);
-  --aria-scroll-thumb-hover: rgba(0, 0, 0, 0.28);
-
-  /* Elevation */
-  --elevation-1: 0 1px 2px rgba(0, 0, 0, 0.04), 0 1px 4px rgba(0, 0, 0, 0.03);
-  --elevation-2: 0 2px 8px rgba(0, 0, 0, 0.06), 0 1px 2px rgba(0, 0, 0, 0.04);
-  --elevation-3: 0 4px 16px rgba(0, 0, 0, 0.08), 0 2px 4px rgba(0, 0, 0, 0.04);
-
-  /* Semantic colors (not in theme.json) */
-  --warning: 40 95% 50%;
-  --code-background-light: 48 14% 95%;
-  --code-background-dark: 220 12% 10%;
-
-  /* Transitions */
-  --aria-ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --aria-duration: 180ms;
+  --aria-ease: cubic-bezier(0.2, 0, 0, 1);
+  --aria-duration: 160ms;
+  --aria-shadow: 0 1px 2px rgb(43 35 25 / 0.04), 0 8px 24px rgb(43 35 25 / 0.04);
+  --aria-shadow-raised: 0 12px 32px rgb(43 35 25 / 0.12);
+  --aria-scroll-track: transparent;
+  --aria-scroll-thumb: rgb(77 70 55 / 0.24);
 }
 
-/* ── Dark-mode token overrides ── */
-html.dark,
-html[data-theme="dark"],
-:root[data-theme="dark"],
-body[data-theme="dark"] {
-  --aria-dot-color: rgba(255, 255, 255, 0.04);
-  --aria-scroll-track: rgba(255, 255, 255, 0.04);
-  --aria-scroll-thumb: rgba(255, 255, 255, 0.14);
-  --aria-scroll-thumb-hover: rgba(255, 255, 255, 0.26);
-  --elevation-1: none;
-  --elevation-2: 0 2px 8px rgba(0, 0, 0, 0.3);
-  --elevation-3: 0 4px 20px rgba(0, 0, 0, 0.4);
-  color-scheme: dark;
-}
-
-html.light,
-html[data-theme="light"],
-:root[data-theme="light"],
-body[data-theme="light"] {
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  html:not(.light):not([data-theme="light"]) {
-    color-scheme: dark;
-  }
-}
-
-/* ============================================================
-   1. Page background – research-paper dot grid
-   ============================================================ */
 html,
 body {
   min-height: 100%;
 }
 
-#root,
-#__next,
-.cl-root,
-.cl-app {
-  background: transparent;
-}
-
-/* Light: warm paper + dot grid */
-html.light body,
-html[data-theme="light"] body,
-:root[data-theme="light"] body,
-body[data-theme="light"] {
-  background-color: hsl(var(--background));
-  background-image:
-    radial-gradient(var(--aria-dot-size) var(--aria-dot-size) at center,
-      var(--aria-dot-color) 50%, transparent 50%);
-  background-size: var(--aria-grid-size) var(--aria-grid-size);
-  background-attachment: fixed;
-}
-
-/* Dark: charcoal + dot grid */
-html.dark body,
-html[data-theme="dark"] body,
-:root[data-theme="dark"] body,
-body[data-theme="dark"] {
-  background-color: hsl(var(--background));
-  background-image:
-    radial-gradient(var(--aria-dot-size) var(--aria-dot-size) at center,
-      var(--aria-dot-color) 50%, transparent 50%);
-  background-size: var(--aria-grid-size) var(--aria-grid-size);
-  background-attachment: fixed;
-}
-
-/* ============================================================
-   2. Typography – Geist harmonious scale (1.25 ratio)
-   ============================================================ */
 body,
 .cl-root,
 .cl-app,
@@ -161,583 +21,300 @@ body,
 .cl-input,
 .cl-sidebar,
 .cl-settings,
-.cl-chat-profile,
-.cl-user-message,
-.cl-assistant-message {
+.cl-chat-profile {
   font-family: var(--font-sans);
-  font-size: 0.9375rem;
-  line-height: 1.6;
-  letter-spacing: -0.006em;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  letter-spacing: -0.008em;
 }
 
-/* Global heading scale — Major Third (1.25×) */
-h1 {
-  font-size: 1.75rem;
-  line-height: 1.2;
-  font-weight: 600;
+html.light body,
+html[data-theme="light"] body,
+:root[data-theme="light"] body,
+body[data-theme="light"] {
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(42 18% 93%));
+}
+
+html.dark body,
+html[data-theme="dark"] body,
+:root[data-theme="dark"] body,
+body[data-theme="dark"] {
+  background: radial-gradient(circle at top right, hsl(104 14% 15%), hsl(var(--background)) 44%);
+  color-scheme: dark;
+}
+
+/* Typography stays readable and lets assistant content lead. */
+h1,
+h2,
+h3,
+h4 {
+  color: hsl(var(--foreground));
   letter-spacing: -0.02em;
-  margin-top: var(--space-5);
-  margin-bottom: var(--space-2);
+}
+
+h1 {
+  font-size: 1.5rem;
+  line-height: 1.2;
+  font-weight: 650;
 }
 
 h2 {
-  font-size: 1.4rem;
-  line-height: 1.25;
-  font-weight: 600;
-  letter-spacing: -0.018em;
-  margin-top: var(--space-5);
-  margin-bottom: var(--space-2);
-}
-
-h3 {
-  font-size: 1.125rem;
+  font-size: 1.2rem;
   line-height: 1.3;
-  font-weight: 500;
-  letter-spacing: -0.015em;
-  margin-top: var(--space-4);
-  margin-bottom: var(--space-1);
+  font-weight: 650;
 }
 
+h3,
 h4 {
   font-size: 1rem;
   line-height: 1.4;
   font-weight: 600;
-  letter-spacing: -0.01em;
-  margin-top: var(--space-3);
-  margin-bottom: var(--space-1);
-}
-
-h5 {
-  font-size: 0.875rem;
-  line-height: 1.4;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-  margin-top: var(--space-3);
-  margin-bottom: var(--space-1);
-}
-
-h6 {
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  font-weight: 600;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: hsl(var(--muted-foreground));
-  margin-top: var(--space-2);
-  margin-bottom: var(--space-1);
-}
-
-/* Labels, badges, metadata → monospace */
-.cl-badge,
-.cl-label,
-.cl-step .cl-step-label,
-.cl-step .cl-step-status,
-.cl-message-author,
-.cl-timestamp,
-[data-testid="timestamp"],
-.cl-tag {
-  font-family: var(--font-mono) !important;
-  font-size: 0.6875rem !important;
-  letter-spacing: 0.02em;
-  text-transform: uppercase;
-}
-
-/* Code blocks → monospace, terminal feel */
-code,
-pre,
-.cl-code,
-.hljs {
-  font-family: var(--font-mono) !important;
-  font-size: 0.8125rem !important;
-  line-height: 1.55;
-}
-
-/* ============================================================
-   3. Messages – clean cards with elevation
-   ============================================================ */
-
-/* --- Light mode messages --- */
-html.light .cl-message,
-html[data-theme="light"] .cl-message,
-:root[data-theme="light"] .cl-message,
-body[data-theme="light"] .cl-message {
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius) !important;
-  box-shadow: var(--elevation-1);
-  background: hsl(var(--card));
-  padding: var(--space-4);
-  transition: border-color var(--aria-duration) var(--aria-ease),
-    box-shadow var(--aria-duration) var(--aria-ease);
-}
-
-html.light .cl-message:hover,
-html[data-theme="light"] .cl-message:hover,
-:root[data-theme="light"] .cl-message:hover,
-body[data-theme="light"] .cl-message:hover {
-  border-color: hsl(var(--primary) / 0.3);
-  box-shadow: var(--elevation-2);
-}
-
-/* --- Dark mode messages --- */
-html.dark .cl-message,
-html[data-theme="dark"] .cl-message,
-:root[data-theme="dark"] .cl-message,
-body[data-theme="dark"] .cl-message {
-  border: 1px solid hsl(var(--border));
-  border-radius: var(--radius) !important;
-  box-shadow: none;
-  background: hsl(var(--card));
-  padding: var(--space-4);
-  transition: border-color var(--aria-duration) var(--aria-ease);
-}
-
-html.dark .cl-message:hover,
-html[data-theme="dark"] .cl-message:hover,
-:root[data-theme="dark"] .cl-message:hover,
-body[data-theme="dark"] .cl-message:hover {
-  border-color: hsl(var(--primary) / 0.35);
-}
-
-/* ============================================================
-   4. Avatar – monogram-style circular with border
-   ============================================================ */
-.cl-message-avatar {
-  border-radius: 50% !important;
-  border: 2px solid hsl(var(--border));
-  width: 2rem !important;
-  height: 2rem !important;
-  object-fit: cover;
-  transition: border-color var(--aria-duration) var(--aria-ease);
-}
-
-.cl-message-avatar:hover {
-  border-color: hsl(var(--primary));
-}
-
-/* ============================================================
-   5. Input / Composer – minimal, research-notebook feel
-   ============================================================ */
-.cl-input,
-.cl-input input,
-.cl-input textarea {
-  border-radius: var(--radius) !important;
-  transition: border-color var(--aria-duration) var(--aria-ease),
-    box-shadow var(--aria-duration) var(--aria-ease);
-}
-
-/* Input focus – subtle but VISIBLE (WCAG 2.4.7) */
-.cl-input:focus-within,
-.cl-input:focus-within textarea,
-.cl-input:focus-within input {
-  border-color: hsl(var(--primary) / 0.5) !important;
-  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.08) !important;
-  outline: none !important;
-}
-
-/* Neutralize Chainlit's built-in textarea border/ring classes */
-#chat-input,
-textarea.border-input,
-textarea[class*="border-input"] {
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-#chat-input:focus,
-textarea.border-input:focus,
-textarea[class*="border-input"]:focus {
-  border: none !important;
-  box-shadow: none !important;
-  outline: none !important;
-}
-
-/* ============================================================
-   6. Buttons – flat, purposeful interaction states
-   ============================================================ */
-.cl-button,
-button {
-  border-radius: var(--radius) !important;
-  font-family: var(--font-sans);
-  font-weight: 500;
-  font-size: 0.8125rem;
-  letter-spacing: -0.005em;
-  transition: background-color var(--aria-duration) var(--aria-ease),
-    border-color var(--aria-duration) var(--aria-ease),
-    color var(--aria-duration) var(--aria-ease),
-    box-shadow var(--aria-duration) var(--aria-ease),
-    transform var(--aria-duration) var(--aria-ease);
-}
-
-/* Primary button */
-.cl-button.primary,
-button.primary {
-  background-color: hsl(var(--primary)) !important;
-  color: hsl(var(--primary-foreground)) !important;
-  border: none !important;
-  padding: var(--space-2) var(--space-4) !important;
-}
-
-.cl-button.primary:hover,
-button.primary:hover {
-  background-color: hsl(155 100% 22%) !important;
-  transform: translateY(-1px);
-  box-shadow: 0 var(--space-1) var(--space-2) hsl(var(--primary) / 0.2);
-}
-
-.cl-button.primary:active,
-button.primary:active {
-  background-color: hsl(155 100% 20%) !important;
-  transform: translateY(0);
-  box-shadow: none;
-}
-
-/* Secondary / ghost buttons */
-.cl-button:not(.primary),
-button:not(.primary) {
-  padding: var(--space-2) var(--space-3) !important;
-}
-
-.cl-button:not(.primary):hover,
-button:not(.primary):hover {
-  background-color: hsl(var(--accent)) !important;
-  border-color: hsl(var(--primary) / 0.2) !important;
-}
-
-/* Disabled buttons */
-button:disabled,
-button[disabled],
-.cl-button:disabled,
-.cl-button[disabled] {
-  opacity: 0.4 !important;
-  cursor: not-allowed !important;
-  pointer-events: none;
-  filter: grayscale(0.2);
-  transform: none !important;
-  box-shadow: none !important;
-}
-
-/* Disabled inputs */
-input:disabled,
-textarea:disabled,
-select:disabled,
-.cl-input:has(input:disabled),
-.cl-input:has(textarea:disabled) {
-  opacity: 0.5 !important;
-  cursor: not-allowed !important;
-  background: hsl(var(--muted)) !important;
-}
-
-/* ============================================================
-   7. Sidebar – clean, slightly recessed panel
-   ============================================================ */
-.cl-sidebar {
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-right: 1px solid hsl(var(--sidebar-border)) !important;
-}
-
-/* Light sidebar */
-html.light .cl-sidebar,
-html[data-theme="light"] .cl-sidebar,
-:root[data-theme="light"] .cl-sidebar {
-  background: hsl(var(--sidebar-background) / 0.92) !important;
-  box-shadow: var(--elevation-1);
-}
-
-/* Dark sidebar */
-html.dark .cl-sidebar,
-html[data-theme="dark"] .cl-sidebar,
-:root[data-theme="dark"] .cl-sidebar {
-  background: hsl(var(--sidebar-background) / 0.88) !important;
-}
-
-/* ============================================================
-   8. Steps & Tool calls – terminal-green accent strip
-   ============================================================ */
-.cl-step {
-  border-radius: calc(var(--radius) - 2px) !important;
-  border: 1px solid hsl(var(--border)) !important;
-  margin: var(--space-2) 0;
-  overflow: hidden;
-  transition: border-color var(--aria-duration) var(--aria-ease);
-}
-
-.cl-step:hover {
-  border-color: hsl(var(--primary) / 0.35) !important;
-}
-
-/* Step header bar with left green accent */
-.cl-step-header {
-  border-left: 3px solid hsl(var(--primary));
-  padding: var(--space-2) var(--space-3);
-}
-
-/* Tool call / CoT step styling */
-.cl-step-icon {
-  color: hsl(var(--primary)) !important;
-}
-
-/* Typing indicator */
-.cl-typing {
-  border-radius: var(--radius) !important;
-}
-
-/* ============================================================
-   9. Markdown content – clean research typography
-   ============================================================ */
-
-/* Widen message and welcome content containers */
-.cl-message,
-.cl-step {
-  max-width: 100% !important;
-  width: 100% !important;
 }
 
 .cl-message-content {
-  font-size: 0.9375rem;
-  line-height: 1.65;
-  letter-spacing: -0.005em;
-  max-width: none;
   width: 100%;
+  max-width: none;
+  font-size: 0.875rem;
+  line-height: 1.62;
+}
+
+/* Give the conversation more room without making long responses hard to scan. */
+.cl-chat,
+.cl-chat-container,
+.cl-message-list,
+[data-testid="message-list"],
+[data-testid="chat-messages"],
+main > div:has(.cl-message) {
+  max-width: 88rem !important;
+}
+
+.cl-message-content h1 {
+  font-size: 1.125rem;
+  margin: 1.5rem 0 0.5rem;
+}
+
+.cl-message-content h2 {
+  font-size: 1rem;
+  margin: 1.25rem 0 0.5rem;
+}
+
+.cl-message-content h3,
+.cl-message-content h4 {
+  font-size: 0.9375rem;
+  margin: 1rem 0 0.375rem;
 }
 
 .cl-message-content p {
-  margin-bottom: 0.75em;
+  margin: 0 0 0.75rem;
 }
 
 .cl-message-content p:last-child {
   margin-bottom: 0;
 }
 
-/* Content-scoped heading scale (dampened for readability in chat) */
-.cl-message-content h1 {
-  font-size: 1.0625rem;
-  line-height: 1.3;
-  font-weight: 600;
-  margin-top: var(--space-5);
-  margin-bottom: var(--space-2);
+code,
+pre,
+.cl-code,
+.cl-timestamp,
+[data-testid="timestamp"] {
+  font-family: var(--font-mono) !important;
 }
 
-.cl-message-content h2 {
-  font-size: 1rem;
-  line-height: 1.35;
-  margin-top: var(--space-4);
-  margin-bottom: var(--space-2);
+/* Keep logo treatment small and consistent across Chainlit layouts. */
+.cl-logo,
+.cl-header-logo,
+header img[src*="logo" i],
+aside img[src*="logo" i],
+img[alt*="logo" i] {
+  width: auto !important;
+  height: 1.375rem !important;
+  max-width: 7.5rem !important;
+  object-fit: contain;
 }
 
-.cl-message-content h3 {
-  font-size: 0.9375rem;
-  line-height: 1.4;
-  margin-top: var(--space-3);
-  margin-bottom: var(--space-1);
-}
-
-.cl-message-content h4 {
-  font-size: 0.9375rem;
-  line-height: 1.4;
-  font-weight: 600;
-  margin-top: var(--space-3);
-  margin-bottom: var(--space-1);
-}
-
-.cl-message-content h5 {
-  font-size: 0.8125rem;
-  line-height: 1.4;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.02em;
-}
-
-.cl-message-content h6 {
-  font-size: 0.75rem;
-  line-height: 1.4;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: hsl(var(--muted-foreground));
-}
-
-/* Code blocks – thin border, terminal feel */
-.cl-message-content pre,
-.cl-code {
-  border-radius: calc(var(--radius) - 2px) !important;
-  border: 1px solid hsl(var(--border));
-  padding: var(--space-3) var(--space-4);
-}
-
-/* Light code block */
-html.light .cl-message-content pre,
-html.light .cl-code,
-html[data-theme="light"] .cl-message-content pre,
-html[data-theme="light"] .cl-code {
-  background: hsl(var(--code-background-light)) !important;
-}
-
-/* Dark code block */
-html.dark .cl-message-content pre,
-html.dark .cl-code,
-html[data-theme="dark"] .cl-message-content pre,
-html[data-theme="dark"] .cl-code {
-  background: hsl(var(--code-background-dark)) !important;
-}
-
-/* Inline code */
-.cl-message-content code:not(pre code) {
-  border-radius: calc(var(--radius) - 2px);
-  padding: 0.125em 0.375em;
-  font-size: 0.85em;
-}
-
-html.light .cl-message-content code:not(pre code),
-html[data-theme="light"] .cl-message-content code:not(pre code) {
-  background: hsl(var(--code-background-light));
-  border: 1px solid hsl(var(--border));
-}
-
-html.dark .cl-message-content code:not(pre code),
-html[data-theme="dark"] .cl-message-content code:not(pre code) {
-  background: hsl(var(--code-background-dark));
-  border: 1px solid hsl(var(--border));
-}
-
-/* Blockquotes – left green bar */
-.cl-message-content blockquote {
-  border-left: 3px solid hsl(var(--primary));
-  padding-left: var(--space-4);
-  margin: var(--space-3) 0;
-  color: hsl(var(--muted-foreground));
-  font-style: italic;
-}
-
-/* Tables */
-.cl-message-content table {
-  border-collapse: collapse;
+/* Content surfaces use one quiet border instead of stacked visual effects. */
+.cl-message,
+.cl-card,
+.cl-step {
   width: 100%;
-  font-size: 0.875rem;
-}
-
-.cl-message-content th {
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-weight: 600;
-  padding: var(--space-2) var(--space-3);
-  text-align: left;
-  border-bottom: 2px solid hsl(var(--border));
-}
-
-.cl-message-content td {
-  padding: var(--space-2) var(--space-3);
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-/* ============================================================
-   10. Links – green on hover, subtle default
-   ============================================================ */
-.cl-message-content a,
-.cl-sidebar a,
-.cl-app a {
-  color: hsl(var(--muted-foreground));
-  text-decoration: underline;
-  text-decoration-color: hsl(var(--muted-foreground) / 0.3);
-  text-underline-offset: 2px;
-  transition: color var(--aria-duration) var(--aria-ease),
-    text-decoration-color var(--aria-duration) var(--aria-ease);
-}
-
-.cl-message-content a:hover,
-.cl-sidebar a:hover,
-.cl-app a:hover {
-  color: hsl(var(--primary));
-  text-decoration-color: hsl(var(--primary));
-}
-
-/* ============================================================
-   11. Chat thread list – minimal with green active indicator
-   ============================================================ */
-.cl-chat-profile,
-.cl-thread-item {
+  max-width: 100%;
+  border: 1px solid hsl(var(--border)) !important;
   border-radius: var(--radius) !important;
+  background: hsl(var(--card));
+  box-shadow: none !important;
+}
+
+.cl-message {
+  padding: 1rem;
+}
+
+.cl-step {
+  margin: 0.5rem 0;
+  overflow: hidden;
+}
+
+.cl-step-header {
+  padding: 0.625rem 0.75rem;
+  border-left: 2px solid hsl(var(--primary));
+}
+
+.cl-step-icon {
+  color: hsl(var(--primary)) !important;
+}
+
+html.light .cl-message:hover,
+html.light .cl-card:hover,
+html[data-theme="light"] .cl-message:hover,
+html[data-theme="light"] .cl-card:hover {
+  border-color: hsl(var(--primary) / 0.28) !important;
+  box-shadow: var(--aria-shadow) !important;
+}
+
+html.dark .cl-message,
+html.dark .cl-card,
+html.dark .cl-step,
+html[data-theme="dark"] .cl-message,
+html[data-theme="dark"] .cl-card,
+html[data-theme="dark"] .cl-step {
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.025) !important;
+}
+
+/* Composer and controls have a predictable, accessible focus treatment. */
+.cl-input,
+.cl-input input,
+.cl-input textarea,
+input,
+textarea,
+select {
+  border-radius: var(--radius) !important;
+  font-family: var(--font-sans);
+}
+
+.cl-input:focus-within {
+  border-color: hsl(var(--ring)) !important;
+  box-shadow: 0 0 0 3px hsl(var(--ring) / 0.14) !important;
+}
+
+#chat-input,
+textarea.border-input,
+textarea[class*="border-input"] {
+  border: 0 !important;
+  box-shadow: none !important;
+  outline: 0 !important;
+}
+
+button,
+.cl-button {
+  border-radius: var(--radius) !important;
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  letter-spacing: -0.006em;
+  transition: background-color var(--aria-duration) var(--aria-ease), border-color var(--aria-duration) var(--aria-ease), color var(--aria-duration) var(--aria-ease), transform var(--aria-duration) var(--aria-ease);
+}
+
+.cl-button.primary,
+button.primary {
+  padding: 0.5rem 0.875rem !important;
+  border: 0 !important;
+  background: hsl(var(--primary)) !important;
+  color: hsl(var(--primary-foreground)) !important;
+}
+
+.cl-button.primary:hover,
+button.primary:hover {
+  background: hsl(var(--primary) / 0.88) !important;
+  transform: translateY(-1px);
+}
+
+.cl-button:not(.primary):hover,
+button:not(.primary):hover {
+  background: hsl(var(--accent)) !important;
+}
+
+button:disabled,
+.cl-button:disabled {
+  opacity: 0.45 !important;
+  cursor: not-allowed;
+  transform: none !important;
+}
+
+/* Sidebar is a distinct region, not another card stack. */
+.cl-sidebar {
+  border-right: 1px solid hsl(var(--sidebar-border)) !important;
+  background: hsl(var(--sidebar-background) / 0.92) !important;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.cl-thread-item,
+.cl-chat-profile {
+  border-radius: calc(var(--radius) - 0.125rem) !important;
   transition: background-color var(--aria-duration) var(--aria-ease);
 }
 
 .cl-thread-item:hover,
-.cl-chat-profile:hover {
-  background-color: hsl(var(--accent)) !important;
-}
-
-/* Active thread */
+.cl-chat-profile:hover,
 .cl-thread-item.active {
-  border-left: 3px solid hsl(var(--primary));
+  background: hsl(var(--sidebar-accent)) !important;
 }
 
-/* ============================================================
-   12. Settings & Popovers – elevated panels
-   ============================================================ */
+.cl-thread-item.active {
+  border-left: 2px solid hsl(var(--sidebar-primary));
+}
+
+/* Supporting content stays calm and legible. */
+.cl-message-content pre,
+.cl-code {
+  padding: 0.875rem 1rem;
+  border: 1px solid hsl(var(--border));
+  border-radius: calc(var(--radius) - 0.125rem) !important;
+  background: hsl(var(--muted)) !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.55;
+}
+
+.cl-message-content code:not(pre code) {
+  padding: 0.1em 0.35em;
+  border-radius: 0.25rem;
+  background: hsl(var(--muted));
+  font-size: 0.85em;
+}
+
+.cl-message-content blockquote {
+  margin: 0.875rem 0;
+  padding-left: 0.875rem;
+  border-left: 2px solid hsl(var(--primary));
+  color: hsl(var(--muted-foreground));
+}
+
+.cl-message-content a,
+.cl-sidebar a,
+.cl-app a {
+  color: hsl(var(--primary));
+  text-decoration-color: hsl(var(--primary) / 0.35);
+  text-underline-offset: 2px;
+}
+
 .cl-settings,
 .cl-popover,
 .cl-dialog,
 .cl-dropdown {
+  border: 1px solid hsl(var(--border));
   border-radius: var(--radius) !important;
-  border: 1px solid hsl(var(--border));
-  box-shadow: var(--elevation-3);
+  box-shadow: var(--aria-shadow-raised);
 }
 
-/* ============================================================
-   13. Alerts – flat, with brand-aligned accents
-   ============================================================ */
-.cl-alert {
-  border-radius: calc(var(--radius) - 2px) !important;
-  border: 1px solid hsl(var(--border));
-}
-
-.cl-alert-info {
-  border-left: 3px solid hsl(var(--primary));
-  background-color: hsl(var(--accent)) !important;
-}
-
-.cl-alert-success {
-  border-left: 3px solid hsl(var(--primary));
-}
-
-.cl-alert-warning {
-  border-left: 3px solid hsl(var(--warning));
-}
-
-.cl-alert-error {
-  border-left: 3px solid hsl(var(--destructive));
-}
-
-/* ============================================================
-   14. Focus rings – consistent green outline (WCAG 2.4.7)
-   ============================================================ */
 *:focus-visible {
-  outline: 2px solid hsl(var(--primary)) !important;
+  outline: 2px solid hsl(var(--ring)) !important;
   outline-offset: 2px;
 }
 
-/* ============================================================
-   15. Scrollbars – both themes, thin and subtle
-   ============================================================ */
-
-/* Firefox */
-html.light *:not(pre):not(code),
-html[data-theme="light"] *:not(pre):not(code),
-:root[data-theme="light"] *:not(pre):not(code) {
+* {
   scrollbar-width: thin;
   scrollbar-color: var(--aria-scroll-thumb) var(--aria-scroll-track);
 }
 
-html.dark *:not(pre):not(code),
-html[data-theme="dark"] *:not(pre):not(code),
-:root[data-theme="dark"] *:not(pre):not(code) {
-  scrollbar-width: thin;
-  scrollbar-color: var(--aria-scroll-thumb) var(--aria-scroll-track);
-}
-
-/* Chromium/WebKit */
 *::-webkit-scrollbar {
   width: 6px;
   height: 6px;
@@ -748,186 +325,16 @@ html[data-theme="dark"] *:not(pre):not(code),
 }
 
 *::-webkit-scrollbar-thumb {
-  background-color: var(--aria-scroll-thumb);
   border-radius: 999px;
+  background: var(--aria-scroll-thumb);
 }
 
-*::-webkit-scrollbar-thumb:hover {
-  background-color: var(--aria-scroll-thumb-hover);
-}
-
-*::-webkit-scrollbar-corner {
-  background: var(--aria-scroll-track);
-}
-
-/* ============================================================
-   16. Login page – research-lab entrance
-   ============================================================ */
-.cl-login,
-.cl-auth {
-  font-family: var(--font-sans);
-}
-
-.cl-login h1,
-.cl-auth h1 {
-  font-size: 1.75rem;
-  font-weight: 600;
-  letter-spacing: -0.02em;
-  line-height: 1.2;
-}
-
-/* Light login background */
-html.light .cl-login,
-html.light .cl-auth,
-html[data-theme="light"] .cl-login,
-html[data-theme="light"] .cl-auth {
-  background: hsl(var(--background));
-}
-
-/* Dark login background */
-html.dark .cl-login,
-html.dark .cl-auth,
-html[data-theme="dark"] .cl-login,
-html[data-theme="dark"] .cl-auth {
-  background: hsl(var(--background));
-}
-
-/* ============================================================
-   17. Transitions & Animations – subtle, purposeful
-   ============================================================ */
-
-/* Smooth fade for new messages */
-.cl-message {
-  animation: aria-fade-in 280ms var(--aria-ease) both;
-}
-
-@keyframes aria-fade-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* Pulsing green dot for typing indicator */
-.cl-typing-dot {
-  animation: aria-pulse 1.4s ease-in-out infinite;
-}
-
-@keyframes aria-pulse {
-
-  0%,
-  80%,
-  100% {
-    opacity: 0.3;
-    transform: scale(0.85);
-  }
-
-  40% {
-    opacity: 1;
-    transform: scale(1);
-  }
-}
-
-/* Send button glow on hover */
-button[class*="send"],
-button[aria-label*="send"],
-button[aria-label*="Send"] {
-  transition: box-shadow var(--aria-duration) var(--aria-ease),
-    transform var(--aria-duration) var(--aria-ease) !important;
-}
-
-button[class*="send"]:hover,
-button[aria-label*="send"]:hover,
-button[aria-label*="Send"]:hover {
-  box-shadow: 0 0 var(--space-4) hsl(var(--primary) / 0.35) !important;
-  transform: scale(1.05);
-}
-
-/* ============================================================
-   18. Utility – polish edges, override Chainlit defaults
-   ============================================================ */
-
-/* Cards – light mode gets subtle elevation */
-html.light .cl-card,
-html[data-theme="light"] .cl-card {
-  box-shadow: var(--elevation-1) !important;
-  border: 1px solid hsl(var(--border));
-}
-
-html.dark .cl-card,
-html[data-theme="dark"] .cl-card {
-  box-shadow: none !important;
-  border: 1px solid hsl(var(--border));
-}
-
-/* Tooltips */
-.cl-tooltip {
-  font-family: var(--font-mono);
-  font-size: 0.6875rem;
-  border-radius: calc(var(--radius) - 2px);
-}
-
-/* File upload area */
-.cl-dropzone,
-.cl-file-upload {
-  border-radius: var(--radius) !important;
-  border: 2px dashed hsl(var(--border));
-  transition: border-color var(--aria-duration) var(--aria-ease),
-    background-color var(--aria-duration) var(--aria-ease);
-}
-
-.cl-dropzone:hover,
-.cl-file-upload:hover,
-.cl-dropzone.active,
-.cl-file-upload.active {
-  border-color: hsl(var(--primary));
-  background-color: hsl(var(--primary) / 0.04);
-}
-
-/* Override Chainlit's blue info/empty-state badge to match brand */
-.cl-badge[data-variant="info"],
-[class*="info-badge"],
-[class*="empty-state"] .cl-badge {
-  background-color: hsl(var(--accent)) !important;
-  color: hsl(var(--accent-foreground)) !important;
-  border: 1px solid hsl(var(--primary) / 0.2);
-}
-
-/* ============================================================
-   19. Form validation states
-   ============================================================ */
-input:invalid:not(:placeholder-shown),
-textarea:invalid:not(:placeholder-shown) {
-  border-color: hsl(var(--destructive)) !important;
-  box-shadow: 0 0 0 2px hsl(var(--destructive) / 0.08);
-}
-
-/* ============================================================
-   20. Responsive – grid-aligned padding on small screens
-   ============================================================ */
 @media (max-width: 768px) {
   .cl-message {
-    padding: var(--space-3) var(--space-3) !important;
+    padding: 0.75rem;
   }
 
   .cl-message-content {
     font-size: 0.875rem;
-  }
-
-  h1 {
-    font-size: 1.5rem;
-  }
-
-  h2 {
-    font-size: 1.25rem;
-  }
-
-  h3 {
-    font-size: 1.0625rem;
   }
 }
