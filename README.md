@@ -297,6 +297,8 @@ docker run -p 9876:9876 -v ./data:/app/data ghcr.io/malvavisc0/aria-ai-rocm:late
 
 ```bash
 # Copy and configure environment
+# A generic template ships at the repo root; VRAM-tuned presets live in docs/env/
+#   (e.g. cp docs/env/.env.16gb.example .env for a 16 GB GPU)
 cp .env.example .env
 
 # NVIDIA / CUDA
@@ -310,6 +312,12 @@ docker compose --profile rocm up -d aria-rocm
 |-------|------|-----|
 | `ghcr.io/malvavisc0/aria-ai-cuda:latest` | vLLM (CUDA/CPU) | NVIDIA |
 | `ghcr.io/malvavisc0/aria-ai-rocm:latest` | vLLM (ROCm) | AMD |
+
+> **First run:** the container auto-generates a `CHAINLIT_AUTH_SECRET` and
+> persists it to the data volume. You still need to create a login user:
+> ```bash
+> docker exec -it aria aria users add --identifier admin@example.com --name "Admin" --role admin
+> ```
 
 ---
 

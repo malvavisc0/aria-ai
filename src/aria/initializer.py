@@ -37,6 +37,12 @@ def is_initialized() -> bool:
     Returns True when a valid CHAINLIT_AUTH_SECRET is available — either
     already loaded into ``os.environ`` (e.g. Docker with a mounted .env)
     or present inside the ARIA_HOME ``.env`` file.
+
+    When the secret is found only in the ARIA_HOME ``.env`` file (e.g. a
+    Docker restart where the mounted ``.env`` left it blank but a previous
+    boot persisted it), it is also populated into ``os.environ`` so that
+    downstream consumers (Chainlit session signing) see it without a separate
+    ``load_dotenv`` pass.
     """
     import os
 
@@ -55,7 +61,11 @@ def is_initialized() -> bool:
         if line.startswith("CHAINLIT_AUTH_SECRET"):
             if "=" in line:
                 value = line.split("=", 1)[1].strip()
-                return _has_valid_secret(value)
+                if _has_valid_secret(value):
+                    # Populate env so Chainlit and other consumers see the
+                    # persisted secret on every boot, not just the first.
+                    os.environ["CHAINLIT_AUTH_SECRET"] = value
+                    return True
     return False
 
 
@@ -69,8 +79,9 @@ def setup_env_file() -> bool:
 
     Creates the .env file in ARIA_HOME (defaults to ~/.aria).
     If a .env was already loaded into the environment (Docker mount),
-    generates a missing CHAINLIT_AUTH_SECRET in-memory and skips
-    file creation.
+    generates a missing CHAINLIT_AUTH_SECRET and persists it to the
+    ARIA_HOME .env file (the mounted config is typically read-only) so
+    the secret survives container restarts.
     """
     import os
 
@@ -82,12 +93,19 @@ def setup_env_file() -> bool:
         return False
 
     # Docker / pre-loaded path: env vars are set but no .env in ARIA_HOME.
-    # Generate a secret in-memory and skip file creation.
+    # Generate a secret and persist it to the ARIA_HOME .env file so it
+    # survives container restarts (the mounted /app/.env is read-only and
+    # may leave CHAINLIT_AUTH_SECRET blank).  is_initialized() reloads it
+    # into os.environ on subsequent boots.
     if os.environ.get("CHAT_MODEL") or os.environ.get("CHAT_OPENAI_API"):
         if not _has_valid_secret(os.environ.get("CHAINLIT_AUTH_SECRET", "").strip()):
             secret = generate_secret()
             os.environ["CHAINLIT_AUTH_SECRET"] = secret
-            console.print("   [green]✓[/green] Auto-generated CHAINLIT_AUTH_SECRET")
+            env_file.write_text(f"CHAINLIT_AUTH_SECRET = {secret}\n")
+            env_file.chmod(0o600)
+            console.print(
+                "   [green]✓[/green] Auto-generated and persisted CHAINLIT_AUTH_SECRET"
+            )
         console.print("   [green]✓[/green] Using pre-loaded configuration")
         return True
 
@@ -110,6 +128,7 @@ def setup_env_file() -> bool:
     )
 
     env_file.write_text(content)
+    env_file.chmod(0o600)
 
     console.print("   [green]✓[/green] Created .env configuration")
     console.print("   [green]✓[/green] Generated CHAINLIT_AUTH_SECRET")
