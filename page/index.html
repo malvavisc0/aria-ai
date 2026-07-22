@@ -855,10 +855,11 @@
             <h1>An AI that lives on your hardware.</h1>
             <p class="hero-subtitle">
                 No cloud. No telemetry. Just a capable assistant with 33 tools,
-                a web UI, a CLI, and a desktop app — entirely under your control.
+                a web UI, a CLI, and a desktop app. Deploy via Docker, pip, or
+                source — entirely under your control.
             </p>
             <p class="hero-meta">
-                Python 3.12+<span class="sep">·</span>MIT License<span class="sep">·</span>GPU optional
+                Python 3.12+<span class="sep">·</span>MIT License<span class="sep">·</span>GPU optional<span class="sep">·</span>Docker ready
             </p>
             <div class="hero-actions">
                 <a href="https://github.com/malvavisc0/aria-ai" target="_blank" class="btn btn-primary">
@@ -897,8 +898,8 @@
                 </div>
                 <div class="feature-cell">
                     <i data-lucide="cpu" class="icon"></i>
-                    <h3>Local LLM</h3>
-                    <p>GPU inference with vLLM. GPTQ/AWQ quantization for 8 GB+ VRAM. No internet required.</p>
+                    <h3>vLLM-Powered LLM</h3>
+                    <p>Supports Qwen, Granite, Llama, DeepSeek and more. GPTQ/AWQ quantization for 8 GB+ VRAM — or connect to any remote OpenAI-compatible endpoint.</p>
                 </div>
                 <div class="feature-cell">
                     <i data-lucide="globe" class="icon"></i>
@@ -1016,7 +1017,7 @@
         <div class="container">
             <div class="section-header centered fade-in">
                 <h2>Get running</h2>
-                <p>Pick your install method. You'll be chatting in under a minute.</p>
+                <p>Four ways to run — Docker, pip, source, or desktop. You'll be chatting in under a minute.</p>
             </div>
             <div class="quickstart-wrapper fade-in">
                 <div class="tabs">
@@ -1042,10 +1043,17 @@
 <span class="comment"># → http://localhost:9876</span></pre>
                     </div>
                     <div class="tab-pane" id="tab-2">
-                        <pre><span class="comment"># Run with Docker (GPU required)</span>
+                        <pre><span class="comment"># GPU (NVIDIA / AMD)</span>
 <span class="cmd">docker</span> run <span class="flag">-p</span> 9876:9876 \
   <span class="flag">-v</span> ./data:/app/data \
+  --env-file .env \
   <span class="str">ghcr.io/malvavisc0/aria-ai-cuda:latest</span>
+
+<span class="comment"># CPU-only or remote LLM</span>
+<span class="cmd">docker</span> run <span class="flag">-p</span> 9876:9876 \
+  <span class="flag">-v</span> ./data:/app/data \
+  --env-file .env \
+  <span class="str">ghcr.io/malvavisc0/aria-ai-lite:latest</span>
 <span class="comment"># → http://localhost:9876</span></pre>
                     </div>
                     <div class="tab-pane" id="tab-3">
@@ -1118,7 +1126,7 @@
     <footer>
         <div class="container">
             <div class="footer-inner">
-                <span class="footer-copy">Aria · MIT License · 2025</span>
+                <span class="footer-copy">Aria · MIT License · 2026</span>
                 <div class="footer-links">
                     <a href="https://github.com/malvavisc0/aria-ai" target="_blank">GitHub</a>
                     <a href="https://github.com/malvavisc0/aria-ai/issues" target="_blank">Issues</a>
