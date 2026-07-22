@@ -503,7 +503,10 @@ class TestDescribeImage:
 
         body = call_kwargs[1]["json"]
         assert body["model"] == "test-model"
-        assert body["max_tokens"] == 256
+        # Thinking is disabled per-request so the model's CoT doesn't eat
+        # the entire token budget and leave content=null.
+        assert body["chat_template_kwargs"] == {"enable_thinking": False}
+        assert body["max_tokens"] == 1024
         content = body["messages"][0]["content"]
         assert content[1]["image_url"]["url"] == "data:image/png;base64,abc123"
 

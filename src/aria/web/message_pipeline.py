@@ -240,7 +240,12 @@ async def _describe_image(
                     ],
                 }
             ],
-            "max_tokens": 256,
+            # Disable thinking for vision description: the reasoning block
+            # otherwise consumes the entire token budget and `content` comes
+            # back null (finish_reason="length"). Image captioning is a
+            # short, deterministic task — chain-of-thought is pure waste.
+            "chat_template_kwargs": {"enable_thinking": False},
+            "max_tokens": 1024,
         },
     )
     response.raise_for_status()
