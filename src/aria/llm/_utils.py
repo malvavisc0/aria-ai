@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
+from loguru import logger
+
 
 def generate_agent_id(agent_name: str) -> str:
     """Generate a unique, human-readable identifier for an agent.
@@ -70,44 +72,27 @@ def get_instructions_extras(agent_name: str, add_agent_id: bool = True) -> str:
     shell_name = Path(shell_path).name if shell_path != "unknown" else "unknown"
 
     # Include generation token budget so the model is aware of its limit.
-    try:
-        from aria.config.api import Vllm as VllmConfig
+    from aria.config.api import Vllm as VllmConfig
 
-        max_tok = VllmConfig.max_tokens
-    except Exception:
-        max_tok = 8192
+    max_tok = VllmConfig.max_tokens
 
     # Include iteration budget so the agent can self-regulate tool usage.
-    try:
-        from aria.config.models import Chat as ChatConfig
+    from aria.config.models import Chat as ChatConfig
 
-        max_iter = ChatConfig.max_iteration
-    except Exception:
-        max_iter = 50
+    max_iter = ChatConfig.max_iteration
 
     # Vision support — so the agent knows if it can analyze images.
-    try:
-        from aria.config.api import Vllm as VllmConfig
-
-        vision = VllmConfig.vision_enabled
-    except Exception:
-        vision = False
+    vision = VllmConfig.vision_enabled
 
     # Browser availability — so the agent knows if browser tools work.
-    try:
-        from aria.config.api import Lightpanda
+    from aria.config.api import Lightpanda
 
-        browser = Lightpanda.is_available()
-    except Exception:
-        browser = False
+    browser = Lightpanda.is_available()
 
     # Workspace path so agents know their default operating directory
-    try:
-        from aria.config.folders import Workspace
+    from aria.config.folders import Workspace
 
-        workspace_path = str(Workspace.path)
-    except Exception:
-        workspace_path = "~/.aria/workspace"
+    workspace_path = str(Workspace.path)
 
     lines: list[str] = [
         "The following runtime context is always active — factor it into every response and tool use. "
@@ -125,35 +110,47 @@ def get_instructions_extras(agent_name: str, add_agent_id: bool = True) -> str:
     if add_agent_id:
         lines.append(f"- **Agent ID**: {generate_agent_id(agent_name)}")
 
-    # Aria-managed binaries directory
-    try:
-        from aria.config.folders import Bin
-
-        bin_path = Bin.path
-        bin_path.mkdir(parents=True, exist_ok=True)
-        installed = (
-            sorted(
-                f.name
-                for f in bin_path.iterdir()
-                if f.is_file() and not f.name.startswith(".")
-            )
-            if bin_path.exists()
-            else []
-        )
-        bin_listing = ", ".join(installed) if installed else "(empty)"
-        lines.append(f"- **Managed Binaries**: `{bin_path}` — {bin_listing}")
-    except Exception:
-        pass
-
-    # Inject available CLI extras from the virtual environment
-    try:
-        from aria.cli.extras import get_venv_extras
-
-        extras_md = get_venv_extras()
-        if extras_md and "No virtual environment" not in extras_md:
-            lines.append("")
-            lines.append(extras_md)
-    except Exception:
-        pass  # Never fail instructions generation over extras
+    for extra in (_managed_binaries_listing(), _venv_extras_listing()):
+        if extra is not None:
+            lines.append(extra)
 
     return "\n".join(lines)
+
+
+def _managed_binaries_listing() -> str | None:
+    """Return a markdown line listing Aria-managed binaries, or None on IO error.
+
+    The binaries directory is created during init; this only reads it.
+    """
+    from aria.config.folders import Bin
+
+    bin_path = Bin.path
+    try:
+        if not bin_path.exists():
+            return None
+        installed = sorted(
+            f.name
+            for f in bin_path.iterdir()
+            if f.is_file() and not f.name.startswith(".")
+        )
+    except OSError as e:
+        logger.warning(f"Failed to list managed binaries: {e}")
+        return None
+
+    bin_listing = ", ".join(installed) if installed else "(empty)"
+    return f"- **Managed Binaries**: `{bin_path}` — {bin_listing}"
+
+
+def _venv_extras_listing() -> str | None:
+    """Return the venv CLI extras markdown block, or None when unavailable."""
+    from aria.cli.extras import get_venv_extras
+
+    try:
+        extras_md = get_venv_extras()
+    except OSError as e:
+        logger.warning(f"Failed to list venv extras: {e}")
+        return None
+
+    if extras_md and "No virtual environment" not in extras_md:
+        return f"\n{extras_md}"
+    return None

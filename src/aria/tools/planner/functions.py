@@ -7,7 +7,9 @@ plan executions without interference.
 All plans are persisted to the database - no in-memory caching.
 """
 
+import inspect
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -158,6 +160,24 @@ def _err(
             "metadata": metadata or {},
         },
     )
+
+
+def _validate_required_fields(
+    action: str, required: list[str], kwargs: dict[str, Any]
+) -> str | None:
+    """Validate that all required fields are present for an action.
+
+    A required value counts as missing when it is absent, ``None``, or an
+    empty collection (e.g. an empty ``steps`` / ``step_ids`` list).
+
+    Returns:
+        Error message if any field is missing, otherwise None.
+    """
+    for name in required:
+        value = kwargs.get(name)
+        if value is None or (isinstance(value, (list, str)) and len(value) == 0):
+            return f"{name} is required for {action} action"
+    return None
 
 
 def _action_create(
@@ -799,6 +819,20 @@ def _action_cleanup(reason: str, agent_id: str) -> str:
         )
 
 
+_ACTION_REGISTRY: dict[str, tuple[Callable[..., str], list[str]]] = {
+    "create": (_action_create, ["task", "steps"]),
+    "get": (_action_get, ["execution_id"]),
+    "update": (_action_update, ["execution_id", "step_id"]),
+    "add": (_action_add, ["execution_id", "description"]),
+    "remove": (_action_remove, ["execution_id", "step_id"]),
+    "replace": (_action_replace, ["execution_id", "step_id", "description"]),
+    "reorder": (_action_reorder, ["execution_id", "step_ids"]),
+    "list": (_action_list, []),
+    "delete": (_action_delete, ["execution_id"]),
+    "cleanup": (_action_cleanup, []),
+}
+
+
 @log_tool_call
 def plan(
     reason: Reason,
@@ -814,166 +848,10 @@ def plan(
     execution_id: str | None = None,
     agent_id: str = "default",
 ) -> str:
-    """Create and manage ordered execution plans.
-
-    Actions: ``create``, ``get``, ``update``, ``add``, ``remove``,
-    ``replace``, ``reorder``, ``list``, ``delete``.
-
-    Args:
-        reason: Required. Brief explanation of why you are calling this tool.
-        action: Plan action to perform.
-        task: Task description for ``create``.
-        steps: Ordered step descriptions for ``create``.
-        step_id: Step ID for ``update``/``remove``/``replace``.
-        status: Step status for ``update``.
-        result: Result text for ``update``.
-        description: Step description for ``add``/``replace``.
-        after_step_id: Insert position for ``add``.
-        step_ids: New step order for ``reorder``.
-        execution_id: Plan ID for non-``create`` actions.
-        agent_id: Agent isolation key.
-
-    Returns:
-        JSON with plan data and progress.
-    """
+    """Create and manage ordered execution plans."""
     action = action.lower().strip()
 
-    if action == "create":
-        if task is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="task is required for create action",
-                metadata={"action": "create", "success": False},
-            )
-        if steps is None or len(steps) == 0:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="steps is required for create action",
-                metadata={"action": "create", "success": False},
-            )
-        return _action_create(reason, task, steps, agent_id)
-
-    elif action == "get":
-        if execution_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="execution_id is required for get action",
-                metadata={"action": "get", "success": False},
-            )
-        return _action_get(reason, execution_id)
-
-    elif action == "update":
-        if execution_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="execution_id is required for update action",
-                metadata={"action": "update", "success": False},
-            )
-        if step_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="step_id is required for update action",
-                metadata={"action": "update", "success": False},
-            )
-        return _action_update(reason, execution_id, step_id, status, result)
-
-    elif action == "add":
-        if execution_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="execution_id is required for add action",
-                metadata={"action": "add", "success": False},
-            )
-        if description is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="description is required for add action",
-                metadata={"action": "add", "success": False},
-            )
-        return _action_add(reason, execution_id, after_step_id, description)
-
-    elif action == "remove":
-        if execution_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="execution_id is required for remove action",
-                metadata={"action": "remove", "success": False},
-            )
-        if step_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="step_id is required for remove action",
-                metadata={"action": "remove", "success": False},
-            )
-        return _action_remove(reason, execution_id, step_id)
-
-    elif action == "replace":
-        if execution_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="execution_id is required for replace action",
-                metadata={"action": "replace", "success": False},
-            )
-        if step_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="step_id is required for replace action",
-                metadata={"action": "replace", "success": False},
-            )
-        if description is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="description is required for replace action",
-                metadata={"action": "replace", "success": False},
-            )
-        return _action_replace(reason, execution_id, step_id, description)
-
-    elif action == "reorder":
-        if execution_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="execution_id is required for reorder action",
-                metadata={"action": "reorder", "success": False},
-            )
-        if step_ids is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="step_ids is required for reorder action",
-                metadata={"action": "reorder", "success": False},
-            )
-        return _action_reorder(reason, execution_id, step_ids)
-
-    elif action == "list":
-        return _action_list(reason, agent_id)
-
-    elif action == "delete":
-        if execution_id is None:
-            return _err(
-                tool="plan",
-                reason=reason,
-                message="execution_id is required for delete action",
-                metadata={"action": "delete", "success": False},
-            )
-        return _action_delete(reason, execution_id)
-
-    elif action == "cleanup":
-        return _action_cleanup(reason, agent_id)
-
-    else:
+    if action not in _ACTION_REGISTRY:
         return _err(
             tool="plan",
             reason=reason,
@@ -985,10 +863,36 @@ def plan(
             metadata={
                 "action": action,
                 "success": False,
-                "how_to_fix": (
-                    "Use one of the valid actions: "
-                    "create, get, update, add, remove, replace, reorder, "
-                    "list, delete, cleanup"
-                ),
             },
         )
+
+    handler, required_fields = _ACTION_REGISTRY[action]
+
+    # Build kwargs dict from function parameters
+    kwargs: dict[str, Any] = {
+        "reason": reason,
+        "task": task,
+        "steps": steps,
+        "step_id": step_id,
+        "status": status,
+        "result": result,
+        "description": description,
+        "after_step_id": after_step_id,
+        "step_ids": step_ids,
+        "execution_id": execution_id,
+        "agent_id": agent_id,
+    }
+
+    # Validate required fields
+    if error := _validate_required_fields(action, required_fields, kwargs):
+        return _err(
+            tool="plan",
+            reason=reason,
+            message=error,
+            metadata={"action": action, "success": False},
+        )
+
+    # Call handler with only the parameters it declares.
+    accepted = inspect.signature(handler).parameters
+    filtered_kwargs = {k: v for k, v in kwargs.items() if k in accepted}
+    return handler(**filtered_kwargs)

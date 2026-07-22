@@ -19,6 +19,7 @@ Example:
 
 import importlib.util
 import json
+import math
 import os
 import socket
 import subprocess
@@ -30,6 +31,12 @@ from urllib.request import urlopen
 from loguru import logger
 
 from aria.config.folders import Data as DataConfig
+from aria.helpers.nvidia import (
+    _estimate_kv_cache_mb,
+    calculate_gpu_memory_utilization,
+    get_free_vram_per_gpu,
+    get_per_gpu_vram_mb,
+)
 from aria.server.process_utils import (
     clear_state,
     is_process_running,
@@ -37,6 +44,116 @@ from aria.server.process_utils import (
     save_state,
     stop_process_group,
 )
+
+
+def _apply_flags(cmd: list[str], flags: list[tuple[str, object, bool]]) -> None:
+    """Extend ``cmd`` from a ``(flag, value, condition)`` table.
+
+    - ``value is None`` → boolean flag (append ``flag`` only).
+    - ``value`` is a list/tuple → ``flag`` followed by each element.
+    - otherwise → ``[flag, str(value)]``.
+    """
+    for flag, value, cond in flags:
+        if not cond:
+            continue
+        if value is None:
+            cmd.append(flag)
+        elif isinstance(value, (list, tuple)):
+            cmd.append(flag)
+            cmd.extend(str(x) for x in value)
+        else:
+            cmd.append(flag)
+            cmd.append(str(value))
+
+
+def _resolve_quant_and_dtype(
+    quantization: str | None, dtype: str
+) -> tuple[str | None, str]:
+    """Resolve effective quantization (gptq→gptq_marlin) and dtype."""
+    effective_quant: str | None = None
+    if quantization:
+        # vLLM v0.20+: gptq kernel is buggy for 4-bit; use gptq_marlin
+        effective_quant = "gptq_marlin" if quantization == "gptq" else quantization
+    effective_dtype = dtype
+    # GPTQ only supports float16
+    if (
+        effective_quant is not None
+        and effective_quant.startswith("gptq")
+        and dtype == "auto"
+    ):
+        effective_dtype = "float16"
+    return effective_quant, effective_dtype
+
+
+def _kv_offloading_active(
+    kv_offload_mode: str, kv_offloading_size_gb: float | None
+) -> bool:
+    """True when KV RAM offloading is actually in effect (mode + positive size)."""
+    return (
+        kv_offload_mode in ("auto", "ram")
+        and kv_offloading_size_gb is not None
+        and kv_offloading_size_gb > 0
+    )
+
+
+def _resolve_kv_cache_flags(
+    kv_cache_dtype: str,
+    offloading_active: bool,
+    kv_offloading_backend: str,
+    vision_enabled: bool,
+) -> list[str]:
+    """Build kv-cache-dtype/attention-backend flags.
+
+    When KV offloading is active with the native backend, force
+    kv_cache_dtype to fp16 ("auto"): the OffloadingConnector doesn't support
+    HMA, so we disable it, but HMA-disabled mode requires all KV cache specs
+    to be one unified type (fp8 on GPU + fp16 offload = two types → crash).
+    """
+    flags: list[str] = []
+    if offloading_active and kv_offloading_backend == "native":
+        if kv_cache_dtype and kv_cache_dtype != "auto":
+            logger.info(
+                "KV offloading with native backend: forcing "
+                "kv_cache_dtype from {orig} to auto (fp16) — "
+                "native OffloadingConnector is incompatible with "
+                "fp8 KV cache and HMA-disabled mode.",
+                orig=kv_cache_dtype,
+            )
+            kv_cache_dtype = "auto"
+
+    if kv_cache_dtype and kv_cache_dtype != "auto":
+        flags.extend(["--kv-cache-dtype", kv_cache_dtype])
+        if kv_cache_dtype.startswith("fp8") and not vision_enabled:
+            # FlashAttention v2 doesn't support fp8 KV cache — switch to FlashInfer.
+            # Skip for vision/multimodal models where FlashInfer doesn't support
+            # partial multimodal token full attention; vLLM auto-selects a backend.
+            flags.extend(["--attention-backend", "flashinfer"])
+    return flags
+
+
+def _kv_offload_flags(
+    kv_offload_mode: str,
+    kv_offloading_size_gb: float | None,
+    kv_offloading_backend: str,
+    offloading_active: bool,
+) -> list[str]:
+    """Build the kv-offloading-size/backend/disable-hybrid flags when active."""
+    if not offloading_active or kv_offloading_size_gb is None:
+        return []
+    logger.info(
+        "KV cache offload enabled: {size} GiB via {backend} backend (mode={mode})",
+        size=kv_offloading_size_gb,
+        backend=kv_offloading_backend,
+        mode=kv_offload_mode,
+    )
+    # OffloadingConnector is incompatible with HMA (Hybrid KV Cache Manager).
+    return [
+        "--kv-offloading-size",
+        str(kv_offloading_size_gb),
+        "--kv-offloading-backend",
+        kv_offloading_backend,
+        "--disable-hybrid-kv-cache-manager",
+    ]
 
 
 class VllmServerManager:
@@ -456,7 +573,6 @@ class VllmServerManager:
         Returns:
             List of command arguments.
         """
-
         from aria.config.api import Vllm as VllmConfig
 
         cmd = [
@@ -471,146 +587,85 @@ class VllmServerManager:
             self._host,
         ]
 
-        if task == "embed":
-            cmd.extend(["--runner", "pooling", "--convert", "embed"])
-        elif task and task != "auto":
-            cmd.extend(["--convert", task])
-
-        if max_model_len:
-            cmd.extend(["--max-model-len", str(max_model_len)])
-
-        if max_num_seqs:
-            cmd.extend(["--max-num-seqs", str(max_num_seqs)])
-
-        if gpu_memory_utilization is not None:
-            cmd.extend(["--gpu-memory-utilization", str(gpu_memory_utilization)])
-
-        effective_quant: str | None = None
-        if quantization:
-            # vLLM v0.20+: gptq kernel is buggy for 4-bit; use gptq_marlin
-            effective_quant = "gptq_marlin" if quantization == "gptq" else quantization
-            cmd.extend(["--quantization", effective_quant])
-
-        # Resolve dtype: GPTQ only supports float16
-        effective_dtype = dtype
-        if (
-            effective_quant is not None
-            and effective_quant.startswith("gptq")
-            and dtype == "auto"
-        ):
-            effective_dtype = "float16"
-        cmd.extend(["--dtype", effective_dtype])
-
-        if tensor_parallel_size > 1:
-            cmd.extend(["--tensor-parallel-size", str(tensor_parallel_size)])
-
-        if chat_template_file and task != "embed":
-            cmd.extend(["--chat-template", chat_template_file])
-
-        # When KV offloading is active with the native backend, force
-        # kv_cache_dtype to fp16 ("auto").  The OffloadingConnector
-        # doesn't support HMA, so we disable it, but HMA-disabled mode
-        # requires all KV cache specs to be one unified type.  fp8 on
-        # GPU + fp16 for offloading = two types → crash.  fp16 everywhere
-        # avoids the conflict.
-        offloading_active = (
-            kv_offload_mode in ("auto", "ram")
-            and kv_offloading_size_gb is not None
-            and kv_offloading_size_gb > 0
+        effective_quant, effective_dtype = _resolve_quant_and_dtype(quantization, dtype)
+        offloading_active = _kv_offloading_active(
+            kv_offload_mode, kv_offloading_size_gb
         )
-        if offloading_active and kv_offloading_backend == "native":
-            if kv_cache_dtype and kv_cache_dtype != "auto":
-                logger.info(
-                    "KV offloading with native backend: forcing "
-                    "kv_cache_dtype from {orig} to auto (fp16) — "
-                    "native OffloadingConnector is incompatible with "
-                    "fp8 KV cache and HMA-disabled mode.",
-                    orig=kv_cache_dtype,
-                )
-                kv_cache_dtype = "auto"
 
-        if kv_cache_dtype and kv_cache_dtype != "auto":
-            cmd.extend(["--kv-cache-dtype", kv_cache_dtype])
-            if kv_cache_dtype.startswith("fp8") and not vision_enabled:
-                # FlashAttention v2 doesn't support fp8 KV cache — switch to FlashInfer.
-                # Skip for vision/multimodal models (e.g. Gemma 4) where FlashInfer
-                # doesn't support partial multimodal token full attention; vLLM
-                # will auto-select a compatible backend (e.g. triton_attn).
-                cmd.extend(["--attention-backend", "flashinfer"])
+        # ``--runner`` (embed task) and ``--convert`` (non-auto, non-embed
+        # task) are mutually exclusive — keep the conditions as written so
+        # at most one fires.
+        flags: list[tuple[str, object, bool]] = [
+            ("--runner", ["pooling", "--convert", "embed"], task == "embed"),
+            (
+                "--convert",
+                task,
+                bool(task) and task != "auto" and task != "embed",
+            ),
+            ("--max-model-len", max_model_len, bool(max_model_len)),
+            ("--max-num-seqs", max_num_seqs, bool(max_num_seqs)),
+            (
+                "--gpu-memory-utilization",
+                gpu_memory_utilization,
+                gpu_memory_utilization is not None,
+            ),
+            ("--quantization", effective_quant, effective_quant is not None),
+            ("--dtype", effective_dtype, True),
+            (
+                "--tensor-parallel-size",
+                tensor_parallel_size,
+                tensor_parallel_size > 1,
+            ),
+            (
+                "--chat-template",
+                chat_template_file,
+                bool(chat_template_file) and task != "embed",
+            ),
+            ("--served-model-name", served_model_name, bool(served_model_name)),
+            ("--enable-auto-tool-choice", None, bool(tool_call_parser)),
+            ("--tool-call-parser", tool_call_parser, bool(tool_call_parser)),
+            ("--reasoning-parser", reasoning_parser, bool(reasoning_parser)),
+            (
+                "--default-chat-template-kwargs",
+                chat_template_kwargs,
+                bool(chat_template_kwargs),
+            ),
+            ("--data-parallel-size", data_parallel_size, data_parallel_size > 1),
+            ("--enable-expert-parallel", None, expert_parallel),
+            ("--moe-backend", moe_backend, bool(moe_backend)),
+            ("--linear-backend", linear_backend, bool(linear_backend)),
+            ("--mm-encoder-tp-mode", mm_encoder_tp_mode, bool(mm_encoder_tp_mode)),
+            (
+                "--mm-processor-cache-type",
+                mm_processor_cache_type,
+                bool(mm_processor_cache_type),
+            ),
+            ("--enable-prefix-caching", None, prefix_caching),
+            ("--limit-mm-per-prompt", '{"image": 0}', not vision_enabled),
+            ("--trust-remote-code", None, True),
+            ("--api-key", api_key, True),
+            ("--enforce-eager", None, enforce_eager),
+        ]
+        _apply_flags(cmd, flags)
 
-        if served_model_name:
-            cmd.extend(["--served-model-name", served_model_name])
-
-        if tool_call_parser:
-            cmd.extend(
-                [
-                    "--enable-auto-tool-choice",
-                    "--tool-call-parser",
-                    tool_call_parser,
-                ]
-            )
-
-        if reasoning_parser:
-            cmd.extend(["--reasoning-parser", reasoning_parser])
-
-        if chat_template_kwargs:
-            cmd.extend(["--default-chat-template-kwargs", chat_template_kwargs])
-
-        if data_parallel_size > 1:
-            cmd.extend(["--data-parallel-size", str(data_parallel_size)])
-
-        if expert_parallel:
-            cmd.extend(["--enable-expert-parallel"])
-
-        if moe_backend:
-            cmd.extend(["--moe-backend", moe_backend])
-
-        if linear_backend:
-            cmd.extend(["--linear-backend", linear_backend])
-
-        if mm_encoder_tp_mode:
-            cmd.extend(["--mm-encoder-tp-mode", mm_encoder_tp_mode])
-
-        if mm_processor_cache_type:
-            cmd.extend(["--mm-processor-cache-type", mm_processor_cache_type])
-
+        # Prefix caching sets block_size to the Mamba page size (e.g. 2096);
+        # vLLM requires block_size <= max_num_batched_tokens (default 2048).
         if prefix_caching:
-            cmd.extend(["--enable-prefix-caching"])
-            # Hybrid Mamba+attention models (e.g. Qwen3 MoE) use "Mamba cache
-            # align mode" when prefix caching is on, which sets block_size to
-            # the Mamba page size (e.g. 2096). vLLM requires block_size <=
-            # max_num_batched_tokens (default 2048), so raise it to 4096.
             cmd.extend(["--max-num-batched-tokens", "4096"])
 
-        # KV cache RAM offloading
-        if kv_offload_mode in ("auto", "ram") and kv_offloading_size_gb is not None:
-            if kv_offloading_size_gb > 0:
-                cmd.extend(["--kv-offloading-size", str(kv_offloading_size_gb)])
-                cmd.extend(["--kv-offloading-backend", kv_offloading_backend])
-                # OffloadingConnector is incompatible with HMA (Hybrid
-                # KV Cache Manager) in vLLM v0.20+.
-                cmd.extend(["--disable-hybrid-kv-cache-manager"])
-                logger.info(
-                    "KV cache offload enabled: {size} GiB via {backend} "
-                    "backend (mode={mode})",
-                    size=kv_offloading_size_gb,
-                    backend=kv_offloading_backend,
-                    mode=kv_offload_mode,
-                )
-
-        if not vision_enabled:
-            # Skip multi-modal warmup — saves ~6s startup when not using vision
-            cmd.extend(["--limit-mm-per-prompt", '{"image": 0}'])
-
-        # sentence-transformers models often need trust-remote-code
-        cmd.extend(["--trust-remote-code"])
-
-        # API key for internal use — must match the client-side api_key
-        cmd.extend(["--api-key", api_key])
-
-        if enforce_eager:
-            cmd.extend(["--enforce-eager"])
-
+        cmd.extend(
+            _resolve_kv_cache_flags(
+                kv_cache_dtype, offloading_active, kv_offloading_backend, vision_enabled
+            )
+        )
+        cmd.extend(
+            _kv_offload_flags(
+                kv_offload_mode,
+                kv_offloading_size_gb,
+                kv_offloading_backend,
+                offloading_active,
+            )
+        )
         return cmd
 
     def _wait_for_ready(
@@ -675,32 +730,42 @@ class VllmServerManager:
         if not VllmConfig.remote and not is_vllm_installed():
             raise RuntimeError("vLLM is not installed. Run: aria vllm install")
 
-        # --- Preflight: detect and clean up stale vLLM processes ---
-        # This runs before any GPU-memory or context-size computation so
-        # a surviving orphan (holding VRAM + the port) doesn't silently
-        # produce a tiny context clamp or an Address-already-in-use error.
+        # Preflight runs before any GPU-memory/context-size computation so a
+        # surviving orphan (holding VRAM + the port) doesn't silently produce
+        # a tiny context clamp or an Address-already-in-use error.
         if not VllmConfig.remote:
             self._preflight_port_check(Chat.get_port())
 
-        servers: list[tuple[str, list[str], int]] = []
-
-        # --- Chat server ---
         if not Chat.model_path:
             raise RuntimeError(
                 "Chat model path is not configured. "
                 "Set CHAT_MODEL_PATH in your .env file."
             )
 
-        # --- Clamp max_model_len to the model's actual maximum ---
-        # This must happen BEFORE gpu_memory_utilization calculation so
-        # that the KV cache estimate is based on the actual context size.
-        max_model_len = VllmConfig.chat_context_size
-        max_model_len = self._resolve_max_model_len(Chat.model_path, max_model_len)
+        chat_cmd = self._prepare_chat_cmd()
+        servers: list[tuple[str, list[str], int]] = [
+            ("chat", chat_cmd, Chat.get_port())
+        ]
+
+        procs, log_files = self._launch_servers(servers)
+        self._save_pids()
+        self._await_ready(servers, procs, log_files)
+        logger.info("All vLLM server instances are ready.")
+
+    def _prepare_chat_cmd(self) -> list[str]:
+        """Resolve hardware/context/KV-offload values and build the chat cmd."""
+        from aria.config.api import Vllm as VllmConfig
+        from aria.config.models import Chat
+
+        # Clamp max_model_len to the model's actual maximum BEFORE gpu_mem
+        # calculation so the KV cache estimate uses the real context size.
+        max_model_len = self._resolve_max_model_len(
+            Chat.model_path, VllmConfig.chat_context_size
+        )
 
         backend = VllmConfig.kv_offloading_backend
         if not isinstance(backend, str) or not backend:
             backend = "native"
-
         if VllmConfig.kv_offload_mode in (
             "auto",
             "ram",
@@ -712,32 +777,11 @@ class VllmServerManager:
                 "ARIA_VLLM_KV_OFFLOADING_BACKEND=native."
             )
 
-        # --- Auto-calculate gpu_memory_utilization if not explicitly set ---
-        gpu_mem = VllmConfig.gpu_memory_utilization
-        if gpu_mem is None:
-            from aria.helpers.nvidia import (
-                calculate_gpu_memory_utilization,
-                get_free_vram_per_gpu,
-                get_per_gpu_vram_mb,
-            )
+        gpu_mem = self._resolve_gpu_mem(max_model_len)
 
-            total_vram = get_per_gpu_vram_mb()
-            free_vram_list = get_free_vram_per_gpu()
-            # Use the most-constrained GPU's free VRAM (relevant for TP)
-            free_vram = min(free_vram_list) if free_vram_list else 0
-            gpu_mem = calculate_gpu_memory_utilization(
-                total_vram_mb=total_vram,
-                model_path=Chat.model_path,
-                context_size=max_model_len,
-                kv_cache_dtype=VllmConfig.kv_cache_dtype,
-                free_vram_mb=free_vram,
-                tensor_parallel_size=VllmConfig.tensor_parallel_size,
-            )
-
-        # --- Clamp max_model_len to GPU KV cache capacity ---
-        # vLLM requires the GPU KV cache to hold at least one request at
-        # max_model_len.  KV offloading to CPU RAM helps with concurrent
-        # requests but cannot extend the per-request maximum.
+        # Clamp max_model_len to GPU KV cache capacity. vLLM requires the GPU
+        # KV cache to hold at least one request at max_model_len; RAM offload
+        # helps concurrency but cannot extend the per-request maximum.
         max_model_len = self._clamp_context_to_gpu_kv(
             model_path=Chat.model_path,
             requested_context=max_model_len,
@@ -746,29 +790,9 @@ class VllmServerManager:
             tensor_parallel_size=VllmConfig.tensor_parallel_size,
         )
 
-        # --- Resolve KV offload size ---
-        # Explicit value > auto-calculated from model config > None
-        kv_offload_size = VllmConfig.kv_offloading_size_gb
-        if VllmConfig.kv_offload_mode in ("auto", "ram") and kv_offload_size is None:
-            import math
+        kv_offload_size = self._resolve_kv_offload_size(max_model_len)
 
-            from aria.helpers.nvidia import _estimate_kv_cache_mb
-
-            kv_mb = _estimate_kv_cache_mb(
-                Chat.model_path,
-                max_model_len,
-                VllmConfig.kv_cache_dtype,
-            )
-            if kv_mb is not None and kv_mb > 0:
-                kv_offload_size = math.ceil(kv_mb / 1024)  # MiB → GiB
-                logger.info(
-                    "Auto-calculated KV offload size: {size} GiB "
-                    "(estimated KV cache: {kv_mb} MiB)",
-                    size=kv_offload_size,
-                    kv_mb=kv_mb,
-                )
-
-        chat_cmd = self._build_vllm_cmd(
+        return self._build_vllm_cmd(
             model_path=Chat.model_path,
             port=Chat.get_port(),
             max_model_len=max_model_len,
@@ -801,18 +825,64 @@ class VllmServerManager:
             kv_offloading_backend=backend,
             enforce_eager=VllmConfig.enforce_eager,
         )
-        servers.append(("chat", chat_cmd, Chat.get_port()))
 
-        # --- Embeddings server (skipped) ---
-        # Embeddings are now loaded in-process via HuggingFaceEmbedding.
-        # No separate vLLM server is needed.
+    def _resolve_gpu_mem(self, max_model_len: int) -> float:
+        """Return the explicit gpu_memory_utilization, or auto-calculate it."""
+        from aria.config.api import Vllm as VllmConfig
+        from aria.config.models import Chat
 
+        gpu_mem = VllmConfig.gpu_memory_utilization
+        if gpu_mem is not None:
+            return gpu_mem
+
+        total_vram = get_per_gpu_vram_mb()
+        free_vram_list = get_free_vram_per_gpu()
+        # Use the most-constrained GPU's free VRAM (relevant for TP)
+        free_vram = min(free_vram_list) if free_vram_list else 0
+        return calculate_gpu_memory_utilization(
+            total_vram_mb=total_vram,
+            model_path=Chat.model_path,
+            context_size=max_model_len,
+            kv_cache_dtype=VllmConfig.kv_cache_dtype,
+            free_vram_mb=free_vram,
+            tensor_parallel_size=VllmConfig.tensor_parallel_size,
+        )
+
+    def _resolve_kv_offload_size(self, max_model_len: int) -> float | None:
+        """Resolve KV offload size: explicit > auto-calculated > None."""
+        from aria.config.api import Vllm as VllmConfig
+        from aria.config.models import Chat
+
+        kv_offload_size = VllmConfig.kv_offloading_size_gb
+        if (
+            VllmConfig.kv_offload_mode not in ("auto", "ram")
+            or kv_offload_size is not None
+        ):
+            return kv_offload_size
+
+        kv_mb = _estimate_kv_cache_mb(
+            Chat.model_path, max_model_len, VllmConfig.kv_cache_dtype
+        )
+        if kv_mb is None or kv_mb <= 0:
+            return None
+        size = math.ceil(kv_mb / 1024)  # MiB → GiB
+        logger.info(
+            "Auto-calculated KV offload size: {size} GiB "
+            "(estimated KV cache: {kv_mb} MiB)",
+            size=size,
+            kv_mb=kv_mb,
+        )
+        return size
+
+    def _launch_servers(
+        self, servers: list[tuple[str, list[str], int]]
+    ) -> tuple[dict[str, subprocess.Popen], dict[str, Path]]:
+        """Spawn each server process, returning procs and log-file paths."""
+        from aria.config.api import Vllm as VllmConfig
         from aria.config.folders import Debug as DebugConfig
+        from aria.config.folders import get_augmented_env
 
-        # Ensure log directory exists (may not be created if initialization was skipped)
         DebugConfig.path.mkdir(parents=True, exist_ok=True)
-
-        # Start all processes with stderr redirected to log files
         procs: dict[str, subprocess.Popen] = {}
         log_files: dict[str, Path] = {}
         for role, cmd, port in servers:
@@ -822,14 +892,11 @@ class VllmServerManager:
             logger.info(f"  stderr → {log_file}")
 
             log_fh = open(log_file, "w")
-            from aria.config.api import Vllm as VllmConfig
-            from aria.config.folders import get_augmented_env
-
             env = get_augmented_env()
-            # Prepend the vLLM venv bin dir so JIT build tools (ninja,
-            # cc, etc.) are discoverable by worker subprocesses spawned
-            # during profiling/warmup. flashinfer's sampling kernel and
-            # Triton both shell out to these tools at runtime.
+            # Prepend the vLLM venv bin dir so JIT build tools (ninja, cc, …)
+            # are discoverable by worker subprocesses spawned during
+            # profiling/warmup. flashinfer's sampling kernel and Triton both
+            # shell out to these tools at runtime.
             vllm_bin = VllmConfig.get_venv_path() / "bin"
             if vllm_bin.is_dir():
                 env["PATH"] = f"{vllm_bin}{os.pathsep}{env['PATH']}"
@@ -845,36 +912,42 @@ class VllmServerManager:
             self._pids[role] = proc.pid
             procs[role] = proc
 
-            # Brief check: if the process exits immediately it failed validation
+            # If the process exits immediately it failed validation.
             time.sleep(3)
             if proc.poll() is not None:
-                stderr_output = ""
-                if log_file.exists():
-                    stderr_output = log_file.read_text().strip()[-2000:]
+                stderr_output = (
+                    log_file.read_text().strip()[-2000:] if log_file.exists() else ""
+                )
                 raise RuntimeError(
                     f"vLLM server for '{role}' exited immediately "
                     f"(exit code {proc.returncode}). "
                     f"Log: {log_file}\n"
                     f"stderr: {stderr_output or '(none)'}"
                 )
+        return procs, log_files
 
-        self._save_pids()
-
-        # Wait for all servers to become ready
-        failed = []
+    def _await_ready(
+        self,
+        servers: list[tuple[str, list[str], int]],
+        procs: dict[str, subprocess.Popen],
+        log_files: dict[str, Path],
+    ) -> None:
+        """Wait for every server to become ready; stop_all and raise on failure."""
+        failed: list[str] = []
         for role, _, port in servers:
             logger.info(f"Waiting for {role} server on port {port}...")
-            if not self._wait_for_ready(self._host, port, proc=procs.get(role)):
-                failed.append(role)
-                log_tail = ""
-                lf = log_files.get(role)
-                if lf and lf.exists():
-                    log_tail = lf.read_text().strip()[-2000:]
-                logger.error(
-                    f"{role} server failed to become ready on port {port}. "
-                    f"Log: {lf}\n"
-                    f"Last output: {log_tail or '(empty)'}"
-                )
+            if self._wait_for_ready(self._host, port, proc=procs.get(role)):
+                continue
+            failed.append(role)
+            log_tail = ""
+            lf = log_files.get(role)
+            if lf and lf.exists():
+                log_tail = lf.read_text().strip()[-2000:]
+            logger.error(
+                f"{role} server failed to become ready on port {port}. "
+                f"Log: {lf}\n"
+                f"Last output: {log_tail or '(empty)'}"
+            )
 
         if failed:
             self.stop_all()
@@ -882,8 +955,6 @@ class VllmServerManager:
                 f"The following servers failed to start: {', '.join(failed)}. "
                 f"Check logs: {', '.join(str(log_files[f]) for f in failed)}"
             )
-
-        logger.info("All vLLM server instances are ready.")
 
     def stop_all(self, timeout: float = 10.0, skip_vllm: bool = False) -> None:
         """Stop all running vLLM server processes.

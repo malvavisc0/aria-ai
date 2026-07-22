@@ -28,9 +28,9 @@ from aria.tools.files.decorators import with_file_operation_error_handling
 from aria.tools.files.exceptions import FileOperationError
 from aria.tools.utils import _truncate_json
 
-# ---------------------------------------------------------------------------
-# Explicit schemas exposed to the LLM (mirrors ShellToolSchema pattern).
-# ---------------------------------------------------------------------------
+MAX_CONTENT_FILE_SIZE = 1024 * 1024  # 1MB
+MAX_FILES_SEARCH = 100
+MAX_LINES_PER_FILE = 10000
 
 
 class ReadFileSchema(BaseModel):
@@ -625,6 +625,160 @@ def list_files(
         )
 
 
+def _search_names(
+    resolved_path: Path,
+    regex: re.Pattern[str],
+    recursive: bool,
+    max_results: int,
+) -> tuple[list[str], bool]:
+    """Search file names matching ``regex`` under ``resolved_path``."""
+    matches: list[str] = []
+    paths = resolved_path.rglob("*") if recursive else resolved_path.glob("*")
+    for file_path in paths:
+        if not (file_path.is_file() and regex.search(file_path.name)):
+            continue
+        try:
+            matches.append(str(file_path.relative_to(resolved_path)))
+        except ValueError:
+            continue
+        if len(matches) >= max_results:
+            break
+    return matches, len(matches) >= max_results
+
+
+def _match_line(
+    lines: list[str],
+    regex: re.Pattern[str],
+    line_num: int,
+    context_lines: int,
+) -> dict[str, Any] | None:
+    """Return a match dict for ``line_num`` if ``regex`` hits, else None."""
+    if not regex.search(lines[line_num]):
+        return None
+    start = max(0, line_num - context_lines)
+    end = min(len(lines), line_num + context_lines + 1)
+    return {
+        "line_number": line_num + 1,
+        "line_content": lines[line_num].rstrip("\n\r"),
+        "context_before": [lines[i].rstrip("\n\r") for i in range(start, line_num)],
+        "context_after": [lines[i].rstrip("\n\r") for i in range(line_num + 1, end)],
+    }
+
+
+def _iter_candidate_files(resolved_path: Path, file_pattern: str, recursive: bool):
+    """Yield candidate files under size limit matching ``file_pattern``."""
+    paths = (
+        resolved_path.rglob(file_pattern)
+        if recursive
+        else resolved_path.glob(file_pattern)
+    )
+    for file_path in paths:
+        if not file_path.is_file():
+            continue
+        try:
+            size = file_path.stat().st_size
+        except OSError:
+            continue
+        if size > MAX_CONTENT_FILE_SIZE:
+            logger.debug(
+                f"Skipping {file_path}: size {size} exceeds "
+                f"limit {MAX_CONTENT_FILE_SIZE}"
+            )
+            continue
+        yield file_path
+
+
+def _read_lines(file_path: Path) -> list[str] | None:
+    """Read up to ``MAX_LINES_PER_FILE`` lines; None on read error."""
+    try:
+        lines: list[str] = []
+        with open(file_path, encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                lines.append(line)
+                if len(lines) > MAX_LINES_PER_FILE:
+                    break
+        return lines
+    except (OSError, UnicodeDecodeError):
+        return None
+
+
+def _search_content(
+    resolved_path: Path,
+    file_pattern: str,
+    regex: re.Pattern[str],
+    recursive: bool,
+    max_results: int,
+    context_lines: int,
+) -> tuple[list[dict[str, Any]], int, bool]:
+    """Search file contents matching ``regex`` under ``resolved_path``."""
+    matches: list[dict[str, Any]] = []
+    files_searched = 0
+    for file_path in _iter_candidate_files(resolved_path, file_pattern, recursive):
+        if files_searched >= MAX_FILES_SEARCH:
+            break
+        files_searched += 1
+        lines = _read_lines(file_path)
+        if lines is None:
+            continue
+        rel_path = str(file_path.relative_to(resolved_path))
+        for line_num in range(len(lines)):
+            if len(matches) >= max_results:
+                break
+            hit = _match_line(lines, regex, line_num, context_lines)
+            if hit is not None:
+                matches.append({"file": rel_path, **hit})
+        if len(matches) >= max_results:
+            break
+
+    truncated = len(matches) >= max_results or files_searched >= MAX_FILES_SEARCH
+    return matches, files_searched, truncated
+
+
+def _prepare_search(
+    reason: str, path_value: str, pattern: str
+) -> tuple[Path, re.Pattern[str]] | str:
+    """Resolve the search path and compile the regex, or return an error."""
+    resolved_path = _secure_resolve_dir(path_value)
+    if not resolved_path.exists():
+        resolved_path = _secure_resolve_path(path_value, check_exists=False)
+    if not resolved_path.exists():
+        return _err(
+            tool="search_files",
+            reason=reason,
+            message=f"Path does not exist: {path_value}",
+            path=path_value,
+        )
+    try:
+        regex = re.compile(pattern)
+    except re.error as exc:
+        return _err(
+            tool="search_files",
+            reason=reason,
+            message=f"Invalid regex pattern: {exc}",
+            pattern=pattern,
+        )
+    return resolved_path, regex
+
+
+def _search_params(
+    mode: str | None,
+    file_pattern: str | None,
+    recursive: bool | None,
+    max_results: int | None,
+    context_lines: int | None,
+    path: str | None,
+) -> tuple[str, str, bool, int, int, str]:
+    """Apply defaults to the search_files parameters."""
+    return (
+        mode or "name",
+        file_pattern or "**/*",
+        True if recursive is None else recursive,
+        500 if max_results is None else max_results,
+        2 if context_lines is None else context_lines,
+        path or ".",
+    )
+
+
 @tool_function(
     "search_files",
     error_handler=with_file_operation_error_handling,
@@ -654,15 +808,14 @@ def search_files(
     Returns:
         JSON with matches[] (file, line, context), count.
     """
-    # Maximum file size for content search (1MB) to prevent RAM exhaustion
-    MAX_CONTENT_FILE_SIZE = 1024 * 1024
-
-    mode_value = mode or "name"
-    file_pattern_value = file_pattern or "**/*"
-    recursive_value = True if recursive is None else recursive
-    max_results_value = 500 if max_results is None else max_results
-    context_lines_value = 2 if context_lines is None else context_lines
-    path_value = path or "."
+    (
+        mode_value,
+        file_pattern_value,
+        recursive_value,
+        max_results_value,
+        context_lines_value,
+        path_value,
+    ) = _search_params(mode, file_pattern, recursive, max_results, context_lines, path)
 
     logger.info(
         f"Searching files: path={path_value}, pattern={pattern}, "
@@ -670,46 +823,15 @@ def search_files(
     )
 
     try:
-        resolved_path = _secure_resolve_dir(path_value)
-        if not resolved_path.exists():
-            resolved_path = _secure_resolve_path(path_value, check_exists=False)
-
-        if not resolved_path.exists():
-            return _err(
-                tool="search_files",
-                reason=reason,
-                message=f"Path does not exist: {path_value}",
-                path=path_value,
-            )
-
-        try:
-            regex = re.compile(pattern)
-        except re.error as exc:
-            return _err(
-                tool="search_files",
-                reason=reason,
-                message=f"Invalid regex pattern: {exc}",
-                pattern=pattern,
-            )
+        prepared = _prepare_search(reason, path_value, pattern)
+        if isinstance(prepared, str):
+            return prepared
+        resolved_path, regex = prepared
 
         if mode_value == "name":
-            matches = []
-            paths = (
-                resolved_path.rglob("*") if recursive_value else resolved_path.glob("*")
+            matches, truncated = _search_names(
+                resolved_path, regex, recursive_value, max_results_value
             )
-
-            for file_path in paths:
-                if file_path.is_file() and regex.search(file_path.name):
-                    try:
-                        rel_path = file_path.relative_to(resolved_path)
-                        matches.append(str(rel_path))
-                        if len(matches) >= max_results_value:
-                            break
-                    except ValueError:
-                        continue
-
-            truncated = len(matches) >= max_results_value
-
             return _ok(
                 tool="search_files",
                 reason=reason,
@@ -724,83 +846,15 @@ def search_files(
                 pattern=pattern,
             )
 
-        elif mode_value == "content":
-            matches = []
-            files_searched = 0
-            max_files = 100
-
-            paths = list(
-                resolved_path.rglob(file_pattern_value)
-                if recursive_value
-                else resolved_path.glob(file_pattern_value)
+        if mode_value == "content":
+            matches, files_searched, truncated = _search_content(
+                resolved_path,
+                file_pattern_value,
+                regex,
+                recursive_value,
+                max_results_value,
+                context_lines_value,
             )
-
-            for file_path in paths:
-                if not file_path.is_file() or files_searched >= max_files:
-                    if files_searched >= max_files:
-                        break
-                    continue
-
-                # Skip files that are too large to prevent RAM exhaustion
-                try:
-                    file_size = file_path.stat().st_size
-                    if file_size > MAX_CONTENT_FILE_SIZE:
-                        logger.debug(
-                            f"Skipping {file_path}: size {file_size} exceeds "
-                            f"limit {MAX_CONTENT_FILE_SIZE}"
-                        )
-                        continue
-                except OSError:
-                    continue
-
-                files_searched += 1
-
-                try:
-                    rel_path = str(file_path.relative_to(resolved_path))
-
-                    lines = []
-                    with open(file_path, encoding="utf-8", errors="ignore") as f:
-                        for line in f:
-                            lines.append(line)
-                            # Safety limit on lines per file
-                            if len(lines) > 10000:
-                                break
-
-                    for line_num, line in enumerate(lines):
-                        if len(matches) >= max_results_value:
-                            break
-
-                        if regex.search(line):
-                            # Get context
-                            start = max(0, line_num - context_lines_value)
-                            end = min(len(lines), line_num + context_lines_value + 1)
-
-                            context_before = [
-                                lines[i].rstrip("\n\r") for i in range(start, line_num)
-                            ]
-                            context_after = [
-                                lines[i].rstrip("\n\r")
-                                for i in range(line_num + 1, end)
-                            ]
-
-                            matches.append(
-                                {
-                                    "file": rel_path,
-                                    "line_number": line_num + 1,
-                                    "line_content": line.rstrip("\n\r"),
-                                    "context_before": context_before,
-                                    "context_after": context_after,
-                                }
-                            )
-
-                    if len(matches) >= max_results_value:
-                        break
-
-                except (OSError, UnicodeDecodeError):
-                    continue
-
-            truncated = len(matches) >= max_results_value or files_searched >= max_files
-
             return _ok(
                 tool="search_files",
                 reason=reason,
@@ -816,13 +870,12 @@ def search_files(
                 pattern=pattern,
             )
 
-        else:
-            return _err(
-                tool="search_files",
-                reason=reason,
-                message=(f"Invalid mode '{mode_value}'. Use 'name' or 'content'."),
-                pattern=pattern,
-            )
+        return _err(
+            tool="search_files",
+            reason=reason,
+            message=(f"Invalid mode '{mode_value}'. Use 'name' or 'content'."),
+            pattern=pattern,
+        )
 
     except Exception as exc:
         return _err(

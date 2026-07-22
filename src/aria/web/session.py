@@ -454,6 +454,95 @@ def _is_tool_message(msg: ChatMessage) -> bool:
     return msg.role == MessageRole.TOOL
 
 
+def _deduplicate_messages(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Step 1: Collapse consecutive duplicate roles (keep last of each run).
+
+    Never collapse tool messages or assistant-with-tool-call messages.
+    """
+    deduplicated: list[ChatMessage] = []
+    for msg in messages:
+        prev = deduplicated[-1] if deduplicated else None
+        can_collapse = (
+            prev is not None
+            and prev.role == msg.role
+            and not _is_tool_message(msg)
+            and _message_tool_call_count(prev) == 0
+            and _message_tool_call_count(msg) == 0
+        )
+        if can_collapse:
+            deduplicated[-1] = msg  # replace — keep latest
+        else:
+            deduplicated.append(msg)
+    return deduplicated
+
+
+def _validate_tool_groups(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Step 2: Validate tool groups.
+
+    Keep an assistant tool-call message only if exactly N matching tool
+    messages follow it; drop orphan tool messages.
+    """
+    validated: list[ChatMessage] = []
+    i = 0
+    n = len(messages)
+    while i < n:
+        msg = messages[i]
+
+        if _is_tool_message(msg):
+            # Orphan tool message — drop.
+            i += 1
+            continue
+
+        call_count = _message_tool_call_count(msg)
+        if call_count > 0:
+            # Gather the immediately following tool messages.
+            j = i + 1
+            tool_msgs: list[ChatMessage] = []
+            while j < n and _is_tool_message(messages[j]):
+                tool_msgs.append(messages[j])
+                j += 1
+
+            if len(tool_msgs) >= call_count:
+                # Keep the assistant message plus exactly call_count tool
+                # responses.
+                validated.append(msg)
+                validated.extend(tool_msgs[:call_count])
+            # else: dangling/partial group — drop.
+            i = j
+            continue
+
+        validated.append(msg)
+        i += 1
+
+    return validated
+
+
+def _trim_history(
+    messages: list[ChatMessage], drop_trailing_user: bool
+) -> list[ChatMessage]:
+    """Steps 3 & 4: Trim leading non-user and trailing incomplete.
+
+    Drop leading messages until history starts with user.
+    Drop trailing assistant with unfulfilled tool calls.
+    Drop trailing user when drop_trailing_user is True.
+    """
+    # Step 3: Ensure it starts with a user message.
+    while messages and messages[0].role != MessageRole.USER:
+        messages.pop(0)
+
+    # Step 4: Ensure it ends on a clean boundary.
+    while messages:
+        last = messages[-1]
+        if _message_tool_call_count(last) > 0:
+            messages.pop()
+        elif drop_trailing_user and last.role == MessageRole.USER:
+            messages.pop()
+        else:
+            break
+
+    return messages
+
+
 def _sanitize_chat_history(
     chat_history: list[ChatMessage],
     *,
@@ -505,79 +594,12 @@ def _sanitize_chat_history(
     if not chat_history:
         return chat_history
 
-    # Step 1: Collapse consecutive duplicate roles (keep last of each run),
-    # but never merge tool messages or assistant-with-tool-call messages.
-    deduplicated: list[ChatMessage] = []
-    for msg in chat_history:
-        prev = deduplicated[-1] if deduplicated else None
-        can_collapse = (
-            prev is not None
-            and prev.role == msg.role
-            and not _is_tool_message(msg)
-            and _message_tool_call_count(prev) == 0
-            and _message_tool_call_count(msg) == 0
-        )
-        if can_collapse:
-            deduplicated[-1] = msg  # replace — keep latest
-        else:
-            deduplicated.append(msg)
+    # Process through the pipeline
+    step1 = _deduplicate_messages(chat_history)
+    step2 = _validate_tool_groups(step1)
+    step3 = _trim_history(step2, drop_trailing_user)
 
-    # Step 2: Validate tool groups — keep an assistant tool-call message
-    # only if exactly N matching tool messages follow it; drop orphan
-    # tool messages.
-    validated: list[ChatMessage] = []
-    i = 0
-    n = len(deduplicated)
-    while i < n:
-        msg = deduplicated[i]
-
-        if _is_tool_message(msg):
-            # Orphan tool message (no preceding assistant tool-call that
-            # consumed it) — drop.
-            i += 1
-            continue
-
-        call_count = _message_tool_call_count(msg)
-        if call_count > 0:
-            # Gather the immediately following tool messages.
-            j = i + 1
-            tool_msgs: list[ChatMessage] = []
-            while j < n and _is_tool_message(deduplicated[j]):
-                tool_msgs.append(deduplicated[j])
-                j += 1
-
-            if len(tool_msgs) >= call_count:
-                # Keep the assistant message plus exactly call_count tool
-                # responses; any extra tool messages are dropped as orphans.
-                validated.append(msg)
-                validated.extend(tool_msgs[:call_count])
-            # else: dangling/partial group — drop assistant + partial tools.
-            i = j
-            continue
-
-        validated.append(msg)
-        i += 1
-
-    # Step 3: Ensure it starts with a user message.
-    while validated and validated[0].role != MessageRole.USER:
-        validated.pop(0)
-
-    # Step 4: Ensure it ends on a clean boundary. A trailing assistant
-    # message that still advertises tool calls (its responses were dropped
-    # above) is incomplete — drop it. Also drop a trailing user message so
-    # the next user turn maintains alternation — but only when a new user
-    # message is about to be appended (drop_trailing_user=True). On resume
-    # we keep the trailing user so the last user message is not lost.
-    while validated:
-        last = validated[-1]
-        if _message_tool_call_count(last) > 0:
-            validated.pop()
-        elif drop_trailing_user and last.role == MessageRole.USER:
-            validated.pop()
-        else:
-            break
-
-    return validated
+    return step3
 
 
 async def restore_chat_history(thread: ThreadDict) -> Memory:

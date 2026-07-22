@@ -115,7 +115,16 @@ _EXCLUDED_BINARIES: set[str] = {
 }
 
 # Glob patterns for excluded binaries (e.g. "pyside6*" excludes all pyside6-* binaries).
-_EXCLUDED_PATTERNS: set[str] = {"pyside6*", "gguf-*"}
+# Also excludes shell-script wrappers that aren't useful to agents.
+_EXCLUDED_PATTERNS: set[str] = {
+    "pyside6*",
+    "gguf-*",
+    "*.bat",
+    "*.csh",
+    "*.fish",
+    "*.nu",
+    "*.ps1",
+}
 
 # Binaries that require external dependencies to be useful.
 # If the dependency is not found on PATH, the binary is excluded.
@@ -217,15 +226,92 @@ def _get_venv_bin_dir() -> Path | None:
 
 def _get_aria_bin_dir() -> Path | None:
     """Return the ~/.aria/bin directory, or None if not available."""
-    try:
-        from aria.config.folders import Bin
+    from aria.config.folders import Bin
 
-        bin_path = Bin.path
-        if bin_path.exists():
-            return bin_path
-    except Exception:
-        pass
+    bin_path = Bin.path
+    if bin_path.exists():
+        return bin_path
     return None
+
+
+def _scan_venv_binaries(
+    bin_dir: Path,
+    excluded: set[str],
+    patterns: set[str],
+    filter_term: str | None,
+) -> set[str]:
+    """Return the set of usable CLI binaries found in ``bin_dir``."""
+    available: set[str] = set()
+    for entry in sorted(bin_dir.iterdir()):
+        name = entry.name
+        if _is_excluded(name, excluded, patterns):
+            continue
+        if not entry.is_file() or not os.access(entry, os.X_OK):
+            continue
+        if name in _DEPENDENCY_CHECKS and not all(
+            shutil.which(d) for d in _DEPENDENCY_CHECKS[name]
+        ):
+            continue
+        if filter_term and filter_term.lower() not in name.lower():
+            continue
+        available.add(name)
+    return available
+
+
+def _categorize(available: set[str]) -> list[tuple[str, list[str]]]:
+    """Group available binaries into ordered (category, members) rows."""
+    rows: list[tuple[str, list[str]]] = []
+    categorized: set[str] = set()
+    for category, members in _CATEGORIES.items():
+        found = sorted(m for m in members if m in available)
+        if not found:
+            continue
+        categorized.update(found)
+        rows.append((category, found))
+    uncategorized = sorted(available - categorized)
+    if uncategorized:
+        rows.append(("Other", uncategorized))
+    return rows
+
+
+def _aria_managed_section(aria_bin_dir: Path | None) -> list[str]:
+    """Build the Aria-managed binaries markdown section, if any."""
+    if not aria_bin_dir:
+        return []
+    aria_bins = sorted(
+        f.name
+        for f in aria_bin_dir.iterdir()
+        if f.is_file() and os.access(f, os.X_OK) and not f.name.startswith(".")
+    )
+    if not aria_bins:
+        return []
+    return [
+        "### Aria-Managed Binaries\n",
+        f"The binaries are installed in `{aria_bin_dir}` are "
+        "automatically on $PATH. They will be available on PATH for all shell commands",
+        "",
+        f"Download and/or additional binaries to `{aria_bin_dir}`: download → `chmod +x` → verify. Shared across agents.",
+        "",
+    ]
+
+
+def _render_extras(rows: list[tuple[str, list[str]]]) -> str:
+    """Render the categorized extras as a markdown table string."""
+    lines: list[str] = _aria_managed_section(_get_aria_bin_dir())
+    lines.append("### Virtual Environment Commands\n")
+    lines.append(
+        "You can use these commands in your active virtual environment by calling them with `shell`. "
+        "Use them when your registered tools aren't enough to get the job done.\n"
+    )
+    lines.append("| Category | Commands |")
+    lines.append("|----------|----------|")
+    for category, members in rows:
+        lines.append(f"| {category} | `{'`, `'.join(members)}` |")
+    lines.append("")
+    lines.append(
+        "Always run `<command> --help` before using any new command for the first time."
+    )
+    return "\n".join(lines)
 
 
 def get_venv_extras(
@@ -245,93 +331,15 @@ def get_venv_extras(
     if not bin_dir or not bin_dir.exists():
         return "No virtual environment detected."
 
-    all_excluded = _EXCLUDED_BINARIES | (excluded or set())
-    all_patterns = _EXCLUDED_PATTERNS
-
-    # Collect available binaries
-    available: set[str] = set()
-    for entry in sorted(bin_dir.iterdir()):
-        name = entry.name
-        if _is_excluded(name, all_excluded, all_patterns):
-            continue
-        if not entry.is_file():
-            continue
-        # Skip non-executable (but allow all on systems where everything is +x)
-        if not os.access(entry, os.X_OK):
-            continue
-        # Skip .bat/.csh files
-        if name.endswith((".bat", ".csh", ".fish", ".nu", ".ps1")):
-            continue
-        # Check dependency requirements
-        if name in _DEPENDENCY_CHECKS:
-            deps = _DEPENDENCY_CHECKS[name]
-            if not all(shutil.which(d) for d in deps):
-                continue
-        if filter_term and filter_term.lower() not in name.lower():
-            continue
-        available.add(name)
-
+    available = _scan_venv_binaries(
+        bin_dir,
+        _EXCLUDED_BINARIES | (excluded or set()),
+        _EXCLUDED_PATTERNS,
+        filter_term,
+    )
     if not available:
         return "No extra CLI tools found in the virtual environment."
-
-    # Build categorized table
-    categorized: set[str] = set()
-    rows: list[tuple[str, str]] = []
-
-    for category, members in _CATEGORIES.items():
-        found = [m for m in members if m in available]
-        if not found:
-            continue
-        categorized.update(found)
-        rows.append((category, "`, `".join(sorted(found))))
-
-    # Uncategorized binaries
-    uncategorized = sorted(available - categorized)
-    if uncategorized:
-        rows.append(("Other", "`, `".join(uncategorized)))
-
-    lines: list[str] = []
-
-    # Scan ~/.aria/bin for Aria-managed binaries
-    aria_bin_dir = _get_aria_bin_dir()
-    if aria_bin_dir:
-        aria_bins = sorted(
-            f.name
-            for f in aria_bin_dir.iterdir()
-            if f.is_file() and os.access(f, os.X_OK) and not f.name.startswith(".")
-        )
-        if aria_bins:
-            lines.append("### Aria-Managed Binaries\n")
-            lines.append(
-                f"The binaries are installed in `{aria_bin_dir}` are "
-                "automatically on $PATH. They will be available on PATH for all shell commands"
-            )
-            lines.append("")
-            lines.append(
-                f"Download and/or additional binaries to `{aria_bin_dir}`: download → `chmod +x` → verify. Shared across agents."
-            )
-            lines.append("")
-
-    lines.append("### Virtual Environment Commands\n")
-    lines.append(
-        "You can use these commands in your active virtual environment by calling them with `shell`. "
-        "Use them when your registered tools aren't enough to get the job done.\n"
-    )
-    lines.append(
-        "| Category | Commands |",
-    )
-    lines.append(
-        "|----------|----------|",
-    )
-    for category, commands in rows:
-        lines.append(f"| {category} | `{commands}` |")
-
-    lines.append("")
-    lines.append(
-        "Always run `<command> --help` before using any new command for the first time."
-    )
-
-    return "\n".join(lines)
+    return _render_extras(_categorize(available))
 
 
 def get_venv_extras_list(
@@ -342,29 +350,13 @@ def get_venv_extras_list(
     bin_dir = _get_venv_bin_dir()
     if not bin_dir or not bin_dir.exists():
         return []
-
-    all_excluded = _EXCLUDED_BINARIES | (excluded or set())
-    all_patterns = _EXCLUDED_PATTERNS
-    available: list[str] = []
-    for entry in sorted(bin_dir.iterdir()):
-        name = entry.name
-        if _is_excluded(name, all_excluded, all_patterns):
-            continue
-        if not entry.is_file():
-            continue
-        if not os.access(entry, os.X_OK):
-            continue
-        if name.endswith((".bat", ".csh", ".fish", ".nu", ".ps1")):
-            continue
-        # Check dependency requirements
-        if name in _DEPENDENCY_CHECKS:
-            deps = _DEPENDENCY_CHECKS[name]
-            if not all(shutil.which(d) for d in deps):
-                continue
-        if filter_term and filter_term.lower() not in name.lower():
-            continue
-        available.append(name)
-    return available
+    available = _scan_venv_binaries(
+        bin_dir,
+        _EXCLUDED_BINARIES | (excluded or set()),
+        _EXCLUDED_PATTERNS,
+        filter_term,
+    )
+    return sorted(available)
 
 
 def get_venv_extras_json(
@@ -381,40 +373,19 @@ def get_venv_extras_json(
     if not bin_dir or not bin_dir.exists():
         return {"categories": {}, "uncategorized": [], "total": 0}
 
-    all_excluded = _EXCLUDED_BINARIES | (excluded or set())
-    all_patterns = _EXCLUDED_PATTERNS
-
-    # Collect available binaries
-    available: set[str] = set()
-    for entry in sorted(bin_dir.iterdir()):
-        name = entry.name
-        if _is_excluded(name, all_excluded, all_patterns):
-            continue
-        if not entry.is_file():
-            continue
-        if not os.access(entry, os.X_OK):
-            continue
-        if name.endswith((".bat", ".csh", ".fish", ".nu", ".ps1")):
-            continue
-        if name in _DEPENDENCY_CHECKS:
-            deps = _DEPENDENCY_CHECKS[name]
-            if not all(shutil.which(d) for d in deps):
-                continue
-        if filter_term and filter_term.lower() not in name.lower():
-            continue
-        available.add(name)
-
-    # Build categorized result
-    categorized: set[str] = set()
+    available = _scan_venv_binaries(
+        bin_dir,
+        _EXCLUDED_BINARIES | (excluded or set()),
+        _EXCLUDED_PATTERNS,
+        filter_term,
+    )
     categories: dict[str, list[str]] = {}
-    for category, members in _CATEGORIES.items():
-        found = sorted(m for m in members if m in available)
-        if not found:
-            continue
-        categorized.update(found)
-        categories[category] = found
-
-    uncategorized = sorted(available - categorized)
+    uncategorized: list[str] = []
+    for category, members in _categorize(available):
+        if category == "Other":
+            uncategorized = members
+        else:
+            categories[category] = members
 
     return {
         "categories": categories,

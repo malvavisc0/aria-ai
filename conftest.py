@@ -31,6 +31,7 @@ os.environ.setdefault("SERVER_PORT", "9876")
 os.environ.setdefault("ARIA_DB_FILENAME", "aria.db")
 os.environ.setdefault("CHROMADB_PERSISTENT_PATH", "chromadb")
 os.environ.setdefault("CHAT_OPENAI_API", "http://localhost:9090/v1")
+os.environ.setdefault("MAX_ITERATIONS", "50")
 
 
 @atexit.register

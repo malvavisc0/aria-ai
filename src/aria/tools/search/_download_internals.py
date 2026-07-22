@@ -250,6 +250,248 @@ def _create_error_response(tool: str, reason: str, error_message: str) -> str:
     return tool_error_response(tool, reason, RuntimeError(error_message))
 
 
+def _filename_and_ext(filename: str, url: str, content_type: str) -> tuple[str, str]:
+    """Derive (base_filename, extension) from a filename, falling back to URL/CT."""
+    base = Path(filename).stem or "content"
+    ext = Path(filename).suffix or _get_file_extension(url, content_type)
+    return base, ext
+
+
+def _resolve_download_target(
+    download_path: str | None,
+    original_filename: str | None,
+    url: str,
+    content_type: str,
+) -> tuple[Path, str, str]:
+    """Resolve (download_dir, base_filename, file_ext) for a download."""
+    if not download_path:
+        download_dir = Path(tempfile.mkdtemp(prefix="aria2_download_"))
+        return download_dir, "content", _get_file_extension(url, content_type)
+
+    resolved_path = Path(download_path).expanduser().resolve()
+    if resolved_path.is_dir() or (
+        not resolved_path.suffix and not resolved_path.exists()
+    ):
+        download_dir = resolved_path
+        download_dir.mkdir(parents=True, exist_ok=True)
+        if original_filename:
+            base, ext = _filename_and_ext(original_filename, url, content_type)
+        else:
+            url_path = urlparse(url).path
+            url_filename = os.path.basename(url_path) if url_path else "content"
+            base, ext = _filename_and_ext(url_filename, url, content_type)
+        return download_dir, base, ext
+
+    resolved_path.parent.mkdir(parents=True, exist_ok=True)
+    ext = resolved_path.suffix or _get_file_extension(url, content_type)
+    return resolved_path.parent, resolved_path.stem, ext
+
+
+def _file_metadata(
+    url: str,
+    content_type: str,
+    file_ext: str,
+    *,
+    format: str,
+    parsed: bool,
+    file_size: int,
+    original_filename: str | None,
+    **extra: object,
+) -> dict:
+    """Build the metadata dict common to every save branch."""
+    metadata: dict = {
+        "url": url,
+        "content_type": content_type,
+        "file_size": file_size,
+        "file_extension": file_ext,
+        "format": format,
+        "parsed": parsed,
+        "original_filename": original_filename,
+        "timestamp": utc_timestamp(),
+    }
+    if extra:
+        metadata.update(extra)
+    return metadata
+
+
+def _save_markitdown_binary(
+    content: str | bytes,
+    content_type: str,
+    url: str,
+    file_ext: str,
+    base_filename: str,
+    download_dir: Path,
+    original_filename: str | None,
+) -> tuple[str, dict]:
+    """Save a MarkItDown-supported binary, attempting a parsed text sidecar."""
+    original_file_path = download_dir / f"{base_filename}{file_ext}"
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    with open(original_file_path, "wb") as f:
+        f.write(content)
+    try:
+        parsed_text = _markitdown(content, content_type, url)
+        parsed_file_path = download_dir / f"{base_filename}_parsed.txt"
+        with open(parsed_file_path, "w", encoding="utf-8") as f:
+            f.write(parsed_text)
+        return str(original_file_path), _file_metadata(
+            url,
+            content_type,
+            file_ext,
+            format="binary",
+            parsed=True,
+            file_size=original_file_path.stat().st_size,
+            original_filename=original_filename,
+            parsed_file_path=str(parsed_file_path),
+            parsed_file_size=parsed_file_path.stat().st_size,
+        )
+    except Exception as e:
+        return str(original_file_path), _file_metadata(
+            url,
+            content_type,
+            file_ext,
+            format="binary",
+            parsed=False,
+            file_size=original_file_path.stat().st_size,
+            original_filename=original_filename,
+            parse_error=str(e),
+        )
+
+
+def _save_plain_binary(
+    content: str | bytes,
+    content_type: str,
+    url: str,
+    file_ext: str,
+    base_filename: str,
+    download_dir: Path,
+    original_filename: str | None,
+) -> tuple[str, dict]:
+    """Save a plain binary file as-is."""
+    file_path = download_dir / f"{base_filename}{file_ext}"
+    if isinstance(content, str):
+        content = content.encode("utf-8")
+    with open(file_path, "wb") as f:
+        f.write(content)
+    return str(file_path), _file_metadata(
+        url,
+        content_type,
+        file_ext,
+        format="binary",
+        parsed=False,
+        file_size=file_path.stat().st_size,
+        original_filename=original_filename,
+    )
+
+
+def _save_html_to_markdown(
+    content: str,
+    content_type: str,
+    url: str,
+    file_ext: str,
+    base_filename: str,
+    download_dir: Path,
+    original_filename: str | None,
+) -> tuple[str, dict]:
+    """Save HTML and attempt a markdown conversion sidecar."""
+    html_file_path = download_dir / f"{base_filename}{file_ext}"
+    with open(html_file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    try:
+        logger.debug(f"Converting HTML to markdown for {url}")
+        markdown_content = _markitdown(content, content_type, url)
+        logger.debug("HTML to markdown conversion successful")
+        markdown_file_path = download_dir / f"{base_filename}.md"
+        with open(markdown_file_path, "w", encoding="utf-8") as f:
+            f.write(markdown_content)
+        return str(html_file_path), _file_metadata(
+            url,
+            content_type,
+            file_ext,
+            format="html",
+            parsed=True,
+            file_size=html_file_path.stat().st_size,
+            original_filename=original_filename,
+            parsed_file_path=str(markdown_file_path),
+            parsed_file_size=markdown_file_path.stat().st_size,
+        )
+    except Exception as e:
+        logger.error(f"Failed to convert HTML to markdown: {e}")
+        return str(html_file_path), _file_metadata(
+            url,
+            content_type,
+            file_ext,
+            format="html",
+            parsed=False,
+            file_size=html_file_path.stat().st_size,
+            original_filename=original_filename,
+            parse_error=str(e),
+        )
+
+
+def _save_text(
+    content: str,
+    content_type: str,
+    url: str,
+    output_format: str,
+    file_ext: str,
+    base_filename: str,
+    download_dir: Path,
+    original_filename: str | None,
+) -> tuple[str, dict]:
+    """Save text content as html/markdown/text depending on format."""
+    if _is_html_content(content_type):
+        format_type = "html"
+        file_name = f"{base_filename}{file_ext}"
+    elif output_format == "markdown":
+        format_type = "markdown"
+        file_name = f"{base_filename}.md"
+        try:
+            content = _markitdown(content, content_type, url)
+        except Exception as e:
+            logger.warning(f"markdown conversion skipped: {e}")
+    else:
+        format_type = "text"
+        file_name = f"{base_filename}{file_ext}"
+
+    file_path = download_dir / file_name
+    with open(file_path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return str(file_path), _file_metadata(
+        url,
+        content_type,
+        file_ext,
+        format=format_type,
+        parsed=False,
+        file_size=file_path.stat().st_size,
+        original_filename=original_filename,
+    )
+
+
+def _save_bytes_fallback(
+    content: bytes,
+    content_type: str,
+    url: str,
+    file_ext: str,
+    base_filename: str,
+    download_dir: Path,
+    original_filename: str | None,
+) -> tuple[str, dict]:
+    """Save non-binary bytes content as a binary file."""
+    file_path = download_dir / f"{base_filename}{file_ext}"
+    with open(file_path, "wb") as f:
+        f.write(content)
+    return str(file_path), _file_metadata(
+        url,
+        content_type,
+        file_ext,
+        format="binary",
+        parsed=False,
+        file_size=file_path.stat().st_size,
+        original_filename=original_filename,
+    )
+
+
 def _save_content_to_file(
     content: str | bytes,
     url: str,
@@ -259,211 +501,59 @@ def _save_content_to_file(
     download_path: str | None = None,
 ) -> tuple[str, dict]:
     """Save content to a file on disk and return the file path and metadata."""
-    if download_path:
-        resolved_path = Path(download_path).expanduser().resolve()
-        if resolved_path.is_dir() or (
-            not resolved_path.suffix and not resolved_path.exists()
-        ):
-            download_dir = resolved_path
-            download_dir.mkdir(parents=True, exist_ok=True)
-            if original_filename:
-                base_filename = Path(original_filename).stem
-                file_ext = Path(original_filename).suffix or _get_file_extension(
-                    url, content_type
-                )
-            else:
-                url_path = urlparse(url).path
-                url_filename = os.path.basename(url_path) if url_path else "content"
-                base_filename = Path(url_filename).stem or "content"
-                file_ext = Path(url_filename).suffix or _get_file_extension(
-                    url, content_type
-                )
-        else:
-            resolved_path.parent.mkdir(parents=True, exist_ok=True)
-            download_dir = resolved_path.parent
-            base_filename = resolved_path.stem
-            file_ext = resolved_path.suffix or _get_file_extension(url, content_type)
-    else:
-        download_dir = Path(tempfile.mkdtemp(prefix="aria2_download_"))
-        base_filename = "content"
-        file_ext = _get_file_extension(url, content_type)
-
+    download_dir, base_filename, file_ext = _resolve_download_target(
+        download_path, original_filename, url, content_type
+    )
     if output_format == "auto":
         output_format = _auto_detect_format(content_type)
 
-    is_markitdown_binary = _is_binary_content(
-        content_type
-    ) and _is_markitdown_supported(content_type)
-
-    if is_markitdown_binary:
-        original_file_name = f"{base_filename}{file_ext}"
-        original_file_path = download_dir / original_file_name
-
-        if isinstance(content, str):
-            content = content.encode("utf-8")
-
-        with open(original_file_path, "wb") as f:
-            f.write(content)
-
-        try:
-            parsed_text = _markitdown(content, content_type, url)
-            parsed_file_name = f"{base_filename}_parsed.txt"
-            parsed_file_path = download_dir / parsed_file_name
-
-            with open(parsed_file_path, "w", encoding="utf-8") as f:
-                f.write(parsed_text)
-
-            file_size = original_file_path.stat().st_size
-            parsed_file_size = parsed_file_path.stat().st_size
-            metadata = {
-                "url": url,
-                "content_type": content_type,
-                "file_size": file_size,
-                "file_extension": file_ext,
-                "format": "binary",
-                "parsed": True,
-                "parsed_file_path": str(parsed_file_path),
-                "parsed_file_size": parsed_file_size,
-                "original_filename": original_filename,
-                "timestamp": utc_timestamp(),
-            }
-            return str(original_file_path), metadata
-        except Exception as e:
-            file_size = original_file_path.stat().st_size
-            metadata = {
-                "url": url,
-                "content_type": content_type,
-                "file_size": file_size,
-                "file_extension": file_ext,
-                "format": "binary",
-                "parsed": False,
-                "parse_error": str(e),
-                "original_filename": original_filename,
-                "timestamp": utc_timestamp(),
-            }
-            return str(original_file_path), metadata
-
-    elif _is_binary_content(content_type):
-        file_name = f"{base_filename}{file_ext}"
-        file_path = download_dir / file_name
-
-        if isinstance(content, str):
-            content = content.encode("utf-8")
-
-        with open(file_path, "wb") as f:
-            f.write(content)
-
-        file_size = file_path.stat().st_size
-        metadata = {
-            "url": url,
-            "content_type": content_type,
-            "file_size": file_size,
-            "file_extension": file_ext,
-            "format": "binary",
-            "parsed": False,
-            "original_filename": original_filename,
-            "timestamp": utc_timestamp(),
-        }
-        return str(file_path), metadata
-
-    elif isinstance(content, str):
+    if _is_binary_content(content_type) and _is_markitdown_supported(content_type):
+        return _save_markitdown_binary(
+            content,
+            content_type,
+            url,
+            file_ext,
+            base_filename,
+            download_dir,
+            original_filename,
+        )
+    if _is_binary_content(content_type):
+        return _save_plain_binary(
+            content,
+            content_type,
+            url,
+            file_ext,
+            base_filename,
+            download_dir,
+            original_filename,
+        )
+    if isinstance(content, str):
         if _is_html_content(content_type) and output_format == "markdown":
-            html_file_name = f"{base_filename}{file_ext}"
-            html_file_path = download_dir / html_file_name
-
-            with open(html_file_path, "w", encoding="utf-8") as f:
-                f.write(content)
-
-            try:
-                logger.debug(f"Converting HTML to markdown for {url}")
-                markdown_content = _markitdown(content, content_type, url)
-                logger.debug("HTML to markdown conversion successful")
-
-                markdown_file_name = f"{base_filename}.md"
-                markdown_file_path = download_dir / markdown_file_name
-
-                with open(markdown_file_path, "w", encoding="utf-8") as f:
-                    f.write(markdown_content)
-
-                html_file_size = html_file_path.stat().st_size
-                markdown_file_size = markdown_file_path.stat().st_size
-                metadata = {
-                    "url": url,
-                    "content_type": content_type,
-                    "file_size": html_file_size,
-                    "file_extension": file_ext,
-                    "format": "html",
-                    "parsed": True,
-                    "parsed_file_path": str(markdown_file_path),
-                    "parsed_file_size": markdown_file_size,
-                    "original_filename": original_filename,
-                    "timestamp": utc_timestamp(),
-                }
-                return str(html_file_path), metadata
-
-            except Exception as e:
-                logger.error(f"Failed to convert HTML to markdown: {e}")
-                html_file_size = html_file_path.stat().st_size
-                metadata = {
-                    "url": url,
-                    "content_type": content_type,
-                    "file_size": html_file_size,
-                    "file_extension": file_ext,
-                    "format": "html",
-                    "parsed": False,
-                    "parse_error": str(e),
-                    "original_filename": original_filename,
-                    "timestamp": utc_timestamp(),
-                }
-                return str(html_file_path), metadata
-
-        elif _is_html_content(content_type):
-            format_type = "html"
-            file_name = f"{base_filename}{file_ext}"
-        elif output_format == "markdown":
-            format_type = "markdown"
-            file_name = f"{base_filename}.md"
-            try:
-                content = _markitdown(content, content_type, url)
-            except Exception:
-                pass
-        else:
-            format_type = "text"
-            file_name = f"{base_filename}{file_ext}"
-
-        file_path = download_dir / file_name
-        with open(file_path, "w", encoding="utf-8") as f:
-            f.write(content)
-
-        file_size = file_path.stat().st_size
-        metadata = {
-            "url": url,
-            "content_type": content_type,
-            "file_size": file_size,
-            "file_extension": file_ext,
-            "format": format_type,
-            "parsed": False,
-            "original_filename": original_filename,
-            "timestamp": utc_timestamp(),
-        }
-        return str(file_path), metadata
-
-    else:
-        file_name = f"{base_filename}{file_ext}"
-        file_path = download_dir / file_name
-
-        with open(file_path, "wb") as f:
-            f.write(content)
-
-        file_size = file_path.stat().st_size
-        metadata = {
-            "url": url,
-            "content_type": content_type,
-            "file_size": file_size,
-            "file_extension": file_ext,
-            "format": "binary",
-            "parsed": False,
-            "original_filename": original_filename,
-            "timestamp": utc_timestamp(),
-        }
-        return str(file_path), metadata
+            return _save_html_to_markdown(
+                content,
+                content_type,
+                url,
+                file_ext,
+                base_filename,
+                download_dir,
+                original_filename,
+            )
+        return _save_text(
+            content,
+            content_type,
+            url,
+            output_format,
+            file_ext,
+            base_filename,
+            download_dir,
+            original_filename,
+        )
+    return _save_bytes_fallback(
+        content,
+        content_type,
+        url,
+        file_ext,
+        base_filename,
+        download_dir,
+        original_filename,
+    )

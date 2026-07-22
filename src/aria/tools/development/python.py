@@ -3,6 +3,7 @@
 import ast
 import os
 import traceback
+from typing import Any
 
 from loguru import logger
 
@@ -108,6 +109,104 @@ def _python_check(
         )
 
 
+def _error_response(
+    filename: str,
+    timeout: int,
+    source: str,
+    exc: Exception,
+    error_type: str | None = None,
+    security_note: str | None = None,
+    include_tb: bool = True,
+) -> str:
+    """Build an error response for Python execution.
+
+    Args:
+        filename: Source file or block name.
+        timeout: Execution timeout in seconds.
+        source: 'code' or 'file'.
+        exc: The exception that occurred.
+        error_type: Override for exception type name.
+        security_note: Optional security-related note.
+        include_tb: Whether to include traceback.
+
+    Returns:
+        JSON response string.
+    """
+    result: dict[str, Any] = {
+        "success": False,
+        "error_type": error_type or type(exc).__name__,
+        "message": str(exc),
+        "stdout": "",
+        "stderr": "",
+    }
+    if include_tb:
+        result["traceback"] = traceback.format_exc()
+    if security_note:
+        result["security_note"] = security_note
+
+    return _build_response(
+        operation="python",
+        result=result,
+        filename=filename,
+        timeout=timeout,
+        source=source,
+    )
+
+
+# Exception type -> (error_type label, optional security note).
+_EXECUTION_ERRORS: dict[type[Exception], tuple[str, str | None]] = {
+    TimeoutError: ("TimeoutError", None),
+    NameError: ("NameError", "This may be due to restricted builtins"),
+    ImportError: ("ImportError", "Imports are restricted for security"),
+}
+
+
+def _dispatch_execution_error(
+    exc: Exception, filename: str, timeout: int, source: str
+) -> str:
+    """Build the error response for a failed Python execution."""
+    error_type, security_note = type(exc).__name__, None
+    for exc_type, (label, note) in _EXECUTION_ERRORS.items():
+        if isinstance(exc, exc_type):
+            error_type, security_note = label, note
+            break
+    logger.error(f"{error_type} in {filename}: {exc}")
+    return _error_response(
+        filename,
+        timeout,
+        source,
+        exc,
+        error_type=error_type,
+        security_note=security_note,
+    )
+
+
+def _system_exit_response(
+    exc: SystemExit, filename: str, timeout: int, source: str
+) -> str:
+    """Build the response for a script that called ``sys.exit()``."""
+    exit_code = exc.code if exc.code is not None else 0
+    logger.info(f"Script exited with code {exit_code} in {filename}")
+    message = (
+        "Script completed successfully"
+        if exit_code == 0
+        else f"Script exited with code {exit_code}"
+    )
+    return _build_response(
+        operation="python",
+        result={
+            "success": exit_code == 0,
+            "exit_code": exit_code,
+            "message": message,
+            "stdout": "",
+            "stderr": "",
+        },
+        filename=filename,
+        timeout=timeout,
+        source=source,
+    )
+
+
 def _python_execute(
     reason: str,
     code: str | None,
@@ -117,6 +216,7 @@ def _python_execute(
 ) -> str:
     """Execute Python code or file."""
     is_file = file is not None
+    source_kind = "file" if is_file else "code"
 
     if is_file:
         filename = file
@@ -125,10 +225,7 @@ def _python_execute(
         filename = "<block>"
         source = code
 
-    logger.info(
-        f"Executing Python {'file' if is_file else 'code'}: "
-        f"{filename} (timeout={timeout}s)"
-    )
+    logger.info(f"Executing Python {source_kind}: {filename} (timeout={timeout}s)")
 
     if not timeout:
         raise ValueError(
@@ -157,10 +254,8 @@ def _python_execute(
         )
 
         logger.info(
-            f"{'File' if is_file else 'Code'} executed successfully: "
-            f"{filename} "
-            f"(stdout: {len(stdout_text)} bytes, "
-            f"stderr: {len(stderr_text)} bytes)"
+            f"{source_kind.capitalize()} executed successfully: {filename} "
+            f"(stdout: {len(stdout_text)} bytes, stderr: {len(stderr_text)} bytes)"
         )
 
         return _build_response(
@@ -173,99 +268,11 @@ def _python_execute(
             },
             filename=filename,
             timeout=timeout,
-            source="file" if is_file else "code",
+            source=source_kind,
         )
 
     except SystemExit as e:
-        exit_code = e.code if e.code is not None else 0
-        logger.info(f"Script exited with code {exit_code} in {filename}")
-        return _build_response(
-            operation="python",
-            result={
-                "success": exit_code == 0,
-                "exit_code": exit_code,
-                "message": (
-                    f"Script exited with code {exit_code}"
-                    if exit_code != 0
-                    else "Script completed successfully"
-                ),
-                "stdout": "",
-                "stderr": "",
-            },
-            filename=filename,
-            timeout=timeout,
-            source="file" if is_file else "code",
-        )
-
-    except TimeoutError as e:
-        logger.error(f"Execution timeout for {filename}: {e}")
-        return _build_response(
-            operation="python",
-            result={
-                "success": False,
-                "error_type": "TimeoutError",
-                "message": str(e),
-                "stdout": "",
-                "stderr": "",
-            },
-            filename=filename,
-            timeout=timeout,
-            source="file" if is_file else "code",
-        )
-
-    except NameError as e:
-        logger.error(f"NameError in {filename} (possible security violation): {e}")
-        tb = traceback.format_exc()
-        return _build_response(
-            operation="python",
-            result={
-                "success": False,
-                "error_type": "NameError",
-                "message": str(e),
-                "traceback": tb,
-                "stdout": "",
-                "stderr": "",
-                "security_note": ("This may be due to restricted builtins"),
-            },
-            filename=filename,
-            timeout=timeout,
-            source="file" if is_file else "code",
-        )
-
-    except ImportError as e:
-        logger.error(f"ImportError in {filename} (security restriction): {e}")
-        tb = traceback.format_exc()
-        return _build_response(
-            operation="python",
-            result={
-                "success": False,
-                "error_type": "ImportError",
-                "message": str(e),
-                "traceback": tb,
-                "stdout": "",
-                "stderr": "",
-                "security_note": "Imports are restricted for security",
-            },
-            filename=filename,
-            timeout=timeout,
-            source="file" if is_file else "code",
-        )
+        return _system_exit_response(e, filename, timeout, source_kind)
 
     except Exception as e:
-        logger.error(f"Execution error in {filename}: {e}")
-        tb = traceback.format_exc()
-
-        return _build_response(
-            operation="python",
-            result={
-                "success": False,
-                "error_type": type(e).__name__,
-                "message": str(e),
-                "traceback": tb,
-                "stdout": "",
-                "stderr": "",
-            },
-            filename=filename,
-            timeout=timeout,
-            source="file" if is_file else "code",
-        )
+        return _dispatch_execution_error(e, filename, timeout, source_kind)

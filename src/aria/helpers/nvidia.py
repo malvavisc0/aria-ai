@@ -1,5 +1,7 @@
+import json
 import re
 import subprocess
+from pathlib import Path
 
 from loguru import logger
 from pydantic import BaseModel
@@ -583,6 +585,75 @@ def calculate_max_safe_context(
     return max(MIN_CONTEXT, context_size)
 
 
+# 4-bit KV cache types: 0.5 bytes per element
+_KV_BYTES_4BIT = {
+    "nvfp4",
+    "int4_per_token_head",
+    "turboquant_k8v4",
+    "turboquant_4bit_nc",
+    "turboquant_k3v4_nc",
+    "turboquant_3bit_nc",
+}
+
+
+def _cfg_lookup(cfg: dict, text_cfg: dict, *keys: str) -> int | None:
+    """Return the first truthy value for any of ``keys`` in cfg then text_cfg."""
+    for source in (cfg, text_cfg):
+        for key in keys:
+            value = source.get(key)
+            if value:
+                return value
+    return None
+
+
+def _kv_arch_params(cfg: dict) -> tuple[int, int, int] | None:
+    """Extract KV cache architecture parameters from config.
+
+    Returns:
+        Tuple of (num_layers, num_kv_heads, head_dim) or None if missing.
+    """
+    text_cfg = cfg.get("text_config") or {}
+
+    num_layers = _cfg_lookup(cfg, text_cfg, "num_hidden_layers")
+    num_kv_heads = _cfg_lookup(
+        cfg, text_cfg, "num_key_value_heads", "num_attention_heads"
+    )
+    head_dim = _cfg_lookup(cfg, text_cfg, "head_dim")
+
+    if not head_dim:
+        hidden_size = _cfg_lookup(cfg, text_cfg, "hidden_size")
+        num_heads = _cfg_lookup(cfg, text_cfg, "num_attention_heads")
+        if hidden_size and num_heads:
+            head_dim = hidden_size // num_heads
+
+    if not (num_layers and num_kv_heads and head_dim):
+        return None
+
+    return int(num_layers), int(num_kv_heads), int(head_dim)
+
+
+def _count_attn_layers(layer_types: list | None) -> int | None:
+    """Count attention layers in hybrid Mamba+attention models.
+
+    Returns:
+        Number of full_attention layers, or None if layer_types is absent.
+    """
+    if not layer_types or not isinstance(layer_types, list):
+        return None
+    return sum(
+        1 for lt in layer_types if isinstance(lt, str) and "full_attention" in lt
+    )
+
+
+def _kv_bytes_per_elem(kv_cache_dtype: str) -> float:
+    """Bytes per KV cache element for the given dtype."""
+    if kv_cache_dtype in _KV_BYTES_4BIT:
+        return 0.5
+    if kv_cache_dtype.startswith("fp8"):
+        return 1.0
+    return 2.0  # default: fp16/bf16
+
+
 def _estimate_kv_cache_mb(
     model_path: str,
     context_size: int,
@@ -604,9 +675,6 @@ def _estimate_kv_cache_mb(
     Returns:
         KV cache size in MiB, or None if config.json is unavailable.
     """
-    import json
-    from pathlib import Path
-
     config_path = Path(model_path) / "config.json" if model_path else None
     if not config_path or not config_path.is_file():
         return None
@@ -617,65 +685,23 @@ def _estimate_kv_cache_mb(
     except (json.JSONDecodeError, OSError):
         return None
 
-    # Architecture parameters may live at the top level (e.g. Llama, Mistral-7B)
-    # or nested inside "text_config" for multimodal / vision models (e.g.
-    # Mistral3 / Pixtral, LLaVA).  Check both locations.
-    text_cfg = cfg.get("text_config") or {}
-
-    num_layers = cfg.get("num_hidden_layers") or text_cfg.get("num_hidden_layers")
-    num_kv_heads = (
-        cfg.get("num_key_value_heads")
-        or cfg.get("num_attention_heads")
-        or text_cfg.get("num_key_value_heads")
-        or text_cfg.get("num_attention_heads")
-    )
-    head_dim = cfg.get("head_dim") or text_cfg.get("head_dim")
-
-    if not head_dim:
-        hidden_size = cfg.get("hidden_size") or text_cfg.get("hidden_size")
-        num_heads = cfg.get("num_attention_heads") or text_cfg.get(
-            "num_attention_heads"
-        )
-        if hidden_size and num_heads:
-            head_dim = hidden_size // num_heads
-
-    if not all((num_layers, num_kv_heads, head_dim)):
+    # Extract architecture parameters
+    params = _kv_arch_params(cfg)
+    if params is None:
         return None
+    num_layers, num_kv_heads, head_dim = params
 
-    # Type narrowing for static analysis (all() check above guarantees these)
-    assert num_layers is not None
-    assert num_kv_heads is not None
-    assert head_dim is not None
+    # Account for hybrid Mamba+attention models
+    text_cfg = cfg.get("text_config") or {}
+    attn_layers = _count_attn_layers(
+        text_cfg.get("layer_types") or cfg.get("layer_types")
+    )
+    if attn_layers:
+        num_layers = attn_layers
 
-    # Hybrid Mamba+attention models (e.g. Qwen3.5/3.6) interleave
-    # ``linear_attention`` (Mamba/SSM) layers with ``full_attention``
-    # layers.  Only ``full_attention`` layers need per-token KV cache;
-    # Mamba layers have a fixed-size state that does not scale with
-    # context length.  Count only the attention layers for KV cache
-    # estimation.  Falls back to ``num_layers`` when ``layer_types``
-    # is absent (pure-attention models).
-    layer_types = text_cfg.get("layer_types") or cfg.get("layer_types")
-    if layer_types and isinstance(layer_types, list):
-        attn_layers = sum(
-            1 for lt in layer_types if isinstance(lt, str) and "full_attention" in lt
-        )
-        if attn_layers > 0:
-            num_layers = attn_layers
+    # O(1) lookup for bytes per element
+    bytes_per_elem = _kv_bytes_per_elem(kv_cache_dtype)
 
-    # 4-bit (nvfp4, int4) = 0.5 bytes/elem; 8-bit (fp8*) = 1 byte; else 16-bit = 2
-    if kv_cache_dtype in (
-        "nvfp4",
-        "int4_per_token_head",
-        "turboquant_k8v4",
-        "turboquant_4bit_nc",
-        "turboquant_k3v4_nc",
-        "turboquant_3bit_nc",
-    ):
-        bytes_per_elem = 0.5
-    elif kv_cache_dtype.startswith("fp8"):
-        bytes_per_elem = 1
-    else:
-        bytes_per_elem = 2
     # 2 tensors (K + V) per layer
     kv_per_token = 2 * num_layers * num_kv_heads * head_dim * bytes_per_elem
     total_bytes = kv_per_token * context_size

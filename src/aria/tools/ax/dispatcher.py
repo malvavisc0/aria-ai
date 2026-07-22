@@ -276,6 +276,144 @@ def _build_help(family: str | None) -> str:
 # ---------------------------------------------------------------------------
 
 
+def _ax_error(reason: str, code: str, message: str, **extra: Any) -> str:
+    """Build a structured ax error response."""
+    err: dict[str, Any] = {"code": code, "message": message}
+    if extra:
+        err.update(extra)
+    return tool_response(tool="ax", reason=reason, data={"error": err})
+
+
+def _validate_ax_inputs(reason: str, family: str, command: str) -> str | None:
+    """Validate required ax inputs; return an error response or None."""
+    if not reason:
+        return _ax_error(
+            "missing_reason",
+            "missing_reason",
+            "The 'reason' argument is required. Explain why you are calling this tool.",
+            hint="Pass a brief reason string, e.g. reason='Search for Python tutorials'.",
+        )
+    if not family or not command:
+        return tool_response(
+            tool="ax",
+            reason=reason or "missing_args",
+            data={
+                "error": {
+                    "code": "missing_required_args",
+                    "message": "ax() requires 'family' and 'command' arguments.",
+                    "expected": {
+                        "reason": "Brief explanation of why you are calling this.",
+                        "family": "Tool family: web, knowledge, finance, imdb, http, dev, processes, check, worker",
+                        "command": "Subcommand within the family",
+                        "args": "Optional arguments dict (exclude 'reason')",
+                    },
+                }
+            },
+        )
+    return None
+
+
+def _resolve_entry(
+    reason: str, family: str, command: str
+) -> tuple[Callable, bool] | str:
+    """Resolve a (loader, inject_action) entry, or return an error response."""
+    family_commands = _DISPATCH.get(family)
+    if family_commands is None:
+        return _ax_error(
+            reason,
+            "unknown_family",
+            f"Unknown family: '{family}'",
+            available_families=list(_DISPATCH.keys()),
+            hint="Use command='help' to see all families and commands.",
+        )
+    entry = family_commands.get(command)
+    if entry is None:
+        return _ax_error(
+            reason,
+            "unknown_command",
+            f"Unknown command: '{command}' in family '{family}'",
+            available_commands=list(family_commands.keys()),
+            hint=f"Use ax(family='{family}', command='help') to see options.",
+        )
+    return entry
+
+
+def _strip_unknown_kwargs(
+    fn: Callable, kwargs: dict[str, Any], family: str, command: str
+) -> dict[str, Any]:
+    """Drop kwargs the target function does not accept (no **kwargs, real sig)."""
+    try:
+        sig = inspect.signature(fn)
+    except (ValueError, TypeError):
+        return kwargs  # Built-in or C function — can't inspect, pass everything.
+    accepted = set(sig.parameters.keys())
+    has_var_keyword = any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
+    if not accepted or has_var_keyword:
+        return kwargs
+    dropped = set(kwargs.keys()) - accepted
+    if dropped:
+        logger.debug(
+            "ax dispatch: stripping unknown args {} for {}.{}",
+            dropped,
+            family,
+            command,
+        )
+    return {k: v for k, v in kwargs.items() if k in accepted}
+
+
+def _load_target(
+    loader: Callable, reason: str, family: str, command: str
+) -> Callable | str:
+    """Run the lazy import loader; return the function or an error response."""
+    try:
+        return loader()
+    except ImportError as exc:
+        logger.warning(f"ax dispatch: import failed for {family}.{command}: {exc}")
+        return _ax_error(
+            reason,
+            "import_error",
+            f"Could not load {family}.{command}: {exc}",
+            recoverable=False,
+        )
+
+
+async def _invoke_target(
+    fn: Callable,
+    kwargs: dict[str, Any],
+    reason: str,
+    family: str,
+    command: str,
+) -> str:
+    """Call the resolved target, mapping exceptions to ax error responses."""
+    try:
+        if inspect.iscoroutinefunction(fn):
+            return await fn(**kwargs)
+        return fn(**kwargs)
+    except TypeError as exc:
+        logger.warning(f"ax dispatch: TypeError calling {family}.{command}: {exc}")
+        return _ax_error(
+            reason,
+            "invalid_args",
+            str(exc),
+            hint="Check the required arguments for this command.",
+            recoverable=True,
+        )
+    except AxDispatchError as exc:
+        return _ax_error(reason, "dispatch_error", str(exc), recoverable=False)
+    except Exception as exc:
+        logger.error(
+            f"ax dispatch: {family}.{command} raised {type(exc).__name__}: {exc}"
+        )
+        return _ax_error(
+            reason,
+            "execution_error",
+            f"{type(exc).__name__}: {exc}",
+            recoverable=True,
+        )
+
+
 @log_tool_call
 async def ax(
     reason: Reason = "",
@@ -302,169 +440,27 @@ async def ax(
     command = (command or "").lower().strip()
     call_args: dict[str, Any] = args or {}
 
-    if not reason:
-        return tool_response(
-            tool="ax",
-            reason="missing_reason",
-            data={
-                "error": {
-                    "code": "missing_reason",
-                    "message": "The 'reason' argument is required. Explain why you are calling this tool.",
-                    "hint": "Pass a brief reason string, e.g. reason='Search for Python tutorials'.",
-                }
-            },
-        )
-
-    if not family or not command:
-        return tool_response(
-            tool="ax",
-            reason=reason or "missing_args",
-            data={
-                "error": {
-                    "code": "missing_required_args",
-                    "message": "ax() requires 'family' and 'command' arguments.",
-                    "expected": {
-                        "reason": "Brief explanation of why you are calling this.",
-                        "family": "Tool family: web, knowledge, finance, imdb, http, dev, processes, check, worker",
-                        "command": "Subcommand within the family",
-                        "args": "Optional arguments dict (exclude 'reason')",
-                    },
-                }
-            },
-        )
+    err = _validate_ax_inputs(reason, family, command)
+    if err is not None:
+        return err
 
     if command == "help":
         return _build_help(family)
     if family == "help":
         return _build_help(None)
 
-    family_commands = _DISPATCH.get(family)
-    if family_commands is None:
-        available = list(_DISPATCH.keys())
-        return tool_response(
-            tool="ax",
-            reason=reason,
-            data={
-                "error": {
-                    "code": "unknown_family",
-                    "message": f"Unknown family: '{family}'",
-                    "available_families": available,
-                    "hint": "Use command='help' to see all families and commands.",
-                }
-            },
-        )
+    resolved = _resolve_entry(reason, family, command)
+    if isinstance(resolved, str):
+        return resolved
+    loader, inject_action = resolved
 
-    entry = family_commands.get(command)
-    if entry is None:
-        available_cmds = list(family_commands.keys())
-        return tool_response(
-            tool="ax",
-            reason=reason,
-            data={
-                "error": {
-                    "code": "unknown_command",
-                    "message": f"Unknown command: '{command}' in family '{family}'",
-                    "available_commands": available_cmds,
-                    "hint": f"Use ax(family='{family}', command='help') to see options.",
-                }
-            },
-        )
-
-    loader, inject_action = entry
-
-    try:
-        fn = loader()
-    except ImportError as exc:
-        logger.warning(f"ax dispatch: import failed for {family}.{command}: {exc}")
-        return tool_response(
-            tool="ax",
-            reason=reason,
-            data={
-                "error": {
-                    "code": "import_error",
-                    "message": f"Could not load {family}.{command}: {exc}",
-                    "recoverable": False,
-                }
-            },
-        )
+    fn = _load_target(loader, reason, family, command)
+    if isinstance(fn, str):
+        return fn
 
     kwargs: dict[str, Any] = {"reason": reason, **call_args}
     if inject_action:
         kwargs["action"] = command
+    kwargs = _strip_unknown_kwargs(fn, kwargs, family, command)
 
-    # Strip kwargs that the target function doesn't accept to avoid
-    # TypeError from hallucinated args (e.g. 'timeout', 'mode').
-    # Skip filtering if the signature has no params (likely a mock,
-    # wrapper, or C function we can't inspect).
-    try:
-        sig = inspect.signature(fn)
-        accepted = set(sig.parameters.keys())
-        has_var_keyword = any(
-            p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
-        )
-        # If the function accepts **kwargs, nothing to strip.
-        # If the signature is empty (mock / uninspectable), skip.
-        if accepted and not has_var_keyword:
-            filtered = {k: v for k, v in kwargs.items() if k in accepted}
-            dropped = set(kwargs.keys()) - accepted
-            if dropped:
-                logger.debug(
-                    "ax dispatch: stripping unknown args {} for {}.{}",
-                    dropped,
-                    family,
-                    command,
-                )
-            kwargs = filtered
-    except (ValueError, TypeError):
-        pass  # Built-in or C function — can't inspect, pass everything.
-
-    # Call the function (handle async targets like browser tools)
-    try:
-        if inspect.iscoroutinefunction(fn):
-            result = await fn(**kwargs)
-        else:
-            result = fn(**kwargs)
-    except TypeError as exc:
-        # Likely wrong arguments — give helpful error
-        logger.warning(f"ax dispatch: TypeError calling {family}.{command}: {exc}")
-        return tool_response(
-            tool="ax",
-            reason=reason,
-            data={
-                "error": {
-                    "code": "invalid_args",
-                    "message": str(exc),
-                    "hint": "Check the required arguments for this command.",
-                    "recoverable": True,
-                }
-            },
-        )
-    except AxDispatchError as exc:
-        return tool_response(
-            tool="ax",
-            reason=reason,
-            data={
-                "error": {
-                    "code": "dispatch_error",
-                    "message": str(exc),
-                    "recoverable": False,
-                }
-            },
-        )
-    except Exception as exc:
-        logger.error(
-            f"ax dispatch: {family}.{command} raised {type(exc).__name__}: {exc}"
-        )
-        return tool_response(
-            tool="ax",
-            reason=reason,
-            data={
-                "error": {
-                    "code": "execution_error",
-                    "message": f"{type(exc).__name__}: {exc}",
-                    "recoverable": True,
-                }
-            },
-        )
-
-    return result
+    return await _invoke_target(fn, kwargs, reason, family, command)

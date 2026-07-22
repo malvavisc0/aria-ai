@@ -11,6 +11,7 @@ import importlib.util
 import json
 import os
 import tempfile
+from pathlib import Path
 from unittest.mock import Mock, patch
 
 import httpx
@@ -30,7 +31,12 @@ from aria.tools.search._download_internals import (
     _is_html_content,
     _is_markitdown_supported,
     _markitdown,
+    _resolve_download_target,
+    _save_bytes_fallback,
     _save_content_to_file,
+    _save_html_to_markdown,
+    _save_plain_binary,
+    _save_text,
     _validate_format,
     _validate_url,
 )
@@ -540,6 +546,105 @@ class TestSaveContentToFile:
         # Should create original file
         assert metadata["format"] == "binary"
         assert metadata["parsed"] is True
+
+
+class TestSaveStrategies:
+    """Direct tests for the extracted save strategy helpers."""
+
+    def test_resolve_download_target_uses_original_filename(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            download_dir, base, ext = _resolve_download_target(
+                temp_dir, "report.pdf", "https://example.com/x", "application/pdf"
+            )
+            assert download_dir == Path(temp_dir)
+            assert base == "report"
+            assert ext == ".pdf"
+
+    def test_resolve_download_target_file_path(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            custom = os.path.join(temp_dir, "out.bin")
+            download_dir, base, ext = _resolve_download_target(
+                custom, None, "https://example.com/x", "application/octet-stream"
+            )
+            assert base == "out"
+            assert ext == ".bin"
+
+    def test_save_plain_binary_writes_bytes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path, metadata = _save_plain_binary(
+                b"\x00\x01",
+                "application/octet-stream",
+                "https://example.com/x",
+                ".bin",
+                "data",
+                Path(temp_dir),
+                None,
+            )
+            assert os.path.exists(file_path)
+            assert metadata["format"] == "binary"
+            assert metadata["parsed"] is False
+
+    def test_save_bytes_fallback_writes_bytes(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path, metadata = _save_bytes_fallback(
+                b"\x00\x01",
+                "application/octet-stream",
+                "https://example.com/x",
+                ".bin",
+                "data",
+                Path(temp_dir),
+                None,
+            )
+            assert os.path.exists(file_path)
+            assert metadata["format"] == "binary"
+
+    def test_save_text_text_mode(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path, metadata = _save_text(
+                "hello",
+                "text/plain",
+                "https://example.com/x.txt",
+                "text",
+                ".txt",
+                "content",
+                Path(temp_dir),
+                None,
+            )
+            assert metadata["format"] == "text"
+            assert Path(file_path).read_text() == "hello"
+
+    @patch("aria.tools.search._download_internals._markitdown")
+    def test_save_html_to_markdown_parsed(self, mock_markitdown):
+        mock_markitdown.return_value = "# Title"
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path, metadata = _save_html_to_markdown(
+                "<html></html>",
+                "text/html",
+                "https://example.com/x.html",
+                ".html",
+                "page",
+                Path(temp_dir),
+                None,
+            )
+            assert metadata["format"] == "html"
+            assert metadata["parsed"] is True
+            assert metadata["parsed_file_path"].endswith("page.md")
+
+    @patch("aria.tools.search._download_internals._markitdown")
+    def test_save_html_to_markdown_parse_failure(self, mock_markitdown):
+        mock_markitdown.side_effect = RuntimeError("boom")
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_path, metadata = _save_html_to_markdown(
+                "<html></html>",
+                "text/html",
+                "https://example.com/x.html",
+                ".html",
+                "page",
+                Path(temp_dir),
+                None,
+            )
+            assert metadata["parsed"] is False
+            assert metadata["parse_error"] == "boom"
 
 
 class TestResponseCreation:

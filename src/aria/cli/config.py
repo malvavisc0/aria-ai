@@ -32,7 +32,9 @@ Example:
     ```
 """
 
+import math
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated
 
@@ -254,6 +256,190 @@ def _update_env_file(env_path: Path, updates: dict[str, str]) -> list[str]:
     return changed
 
 
+KV_OFFLOAD_VRAM_THRESHOLD_MB = 12288
+
+
+@dataclass
+class HardwareInfo:
+    """Detected hardware summary used for config optimization."""
+
+    gpus: list
+    total_vram: int
+    free_vram_list: list[int]
+    total_ram_mb: int
+    avail_ram_mb: int
+    gpu_count: int
+    has_nvlink: bool
+
+
+def _collect_hardware() -> HardwareInfo:
+    """Detect GPUs, VRAM, and system RAM."""
+    from aria.helpers.memory import detect_system_ram
+    from aria.helpers.nvidia import (
+        detect_gpu_count,
+        detect_gpus_with_details,
+        detect_nvlink,
+        get_free_vram_per_gpu,
+        get_total_vram_mb,
+    )
+
+    total_ram_mb, avail_ram_mb = detect_system_ram()
+    return HardwareInfo(
+        gpus=detect_gpus_with_details(),
+        total_vram=get_total_vram_mb(),
+        free_vram_list=get_free_vram_per_gpu(),
+        total_ram_mb=total_ram_mb,
+        avail_ram_mb=avail_ram_mb,
+        gpu_count=detect_gpu_count(),
+        has_nvlink=detect_nvlink()[0],
+    )
+
+
+def _mib_str(mb: int) -> str:
+    """Format a megabyte value as ``MiB (GiB)`` or ``N/A`` when zero."""
+    return f"{mb} MiB ({mb / 1024:.1f} GiB)" if mb > 0 else "N/A"
+
+
+def _print_hardware(hw: HardwareInfo) -> None:
+    """Render the detected-hardware table."""
+    console.print("[bold]Hardware Detected[/bold]\n")
+    hw_table = Table(show_header=True, header_style="bold cyan")
+    hw_table.add_column("Component", style="cyan", width=16)
+    hw_table.add_column("Details", style="green")
+
+    if hw.gpus:
+        for i, gpu in enumerate(hw.gpus):
+            free_mb = hw.free_vram_list[i] if i < len(hw.free_vram_list) else 0
+            hw_table.add_row(
+                f"GPU {i}",
+                f"{gpu.name} — {gpu.total_memory} MB total, {free_mb} MB free",
+            )
+    else:
+        hw_table.add_row("GPU", "[yellow]No NVIDIA GPU detected[/yellow]")
+
+    hw_table.add_row("GPU Count", str(hw.gpu_count))
+    hw_table.add_row("Total VRAM", _mib_str(hw.total_vram))
+    hw_table.add_row("NVLink", "✓ Available" if hw.has_nvlink else "✗ No")
+    hw_table.add_row("System RAM", _mib_str(hw.total_ram_mb))
+    hw_table.add_row("Available RAM", f"{hw.avail_ram_mb} MiB")
+    console.print(hw_table)
+
+
+def _detect_model_sizes() -> dict[str, int]:
+    """Return model file sizes (MB) for chat and embeddings models."""
+    from aria.helpers.memory import get_model_file_size
+
+    model_files = {"chat": Chat.model_path, "embeddings": Embeddings.model_path}
+    sizes: dict[str, int] = {}
+    for alias, mp in model_files.items():
+        if mp and Path(mp).is_absolute() and Path(mp).exists():
+            sizes[alias] = get_model_file_size(Path(mp))
+        else:
+            sizes[alias] = 0
+    return sizes
+
+
+def _compute_kv_offload_size(chat_ctx: int) -> str:
+    """Estimate the KV-offload size (GiB) when auto-offload is active."""
+    from aria.helpers.nvidia import _estimate_kv_cache_mb
+
+    kv_mb = _estimate_kv_cache_mb(
+        Chat.model_path or "",
+        chat_ctx,
+        get_optional_env("ARIA_VLLM_KV_CACHE_DTYPE", "auto"),
+    )
+    if kv_mb and kv_mb > 0:
+        return str(math.ceil(kv_mb / 1024))
+    return ""
+
+
+def _compute_optimized(
+    hw: HardwareInfo, model_sizes: dict[str, int]
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Calculate optimized env values and human-readable reasons."""
+    from aria.helpers.nvidia import calculate_max_safe_context
+
+    max_free_vram = max(hw.free_vram_list) if hw.free_vram_list else 0
+    chat_ctx = calculate_max_safe_context(
+        free_vram_mb=max_free_vram,
+        model_size_mb=model_sizes.get("chat", 0),
+        is_embedding_model=False,
+    )
+    if chat_ctx == 0:
+        chat_ctx = 65536
+    embed_ctx = calculate_max_safe_context(
+        free_vram_mb=max_free_vram,
+        model_size_mb=model_sizes.get("embeddings", 0),
+        is_embedding_model=True,
+    )
+    if embed_ctx == 0:
+        embed_ctx = 8192
+
+    low_vram = hw.total_vram < KV_OFFLOAD_VRAM_THRESHOLD_MB
+    kv_offload_mode = "auto" if low_vram else "off"
+    kv_offloading_size_gb = _compute_kv_offload_size(chat_ctx) if low_vram else ""
+    token_limit = max(8192, min(chat_ctx // 4, 65536))
+
+    optimized = {
+        "CHAT_CONTEXT_SIZE": str(chat_ctx),
+        "EMBEDDINGS_CONTEXT_SIZE": str(embed_ctx),
+        "ARIA_VLLM_KV_OFFLOAD_MODE": kv_offload_mode,
+        "ARIA_VLLM_KV_OFFLOADING_SIZE_GB": kv_offloading_size_gb,
+        "TOKEN_LIMIT": str(token_limit),
+        "FORCE_CONTEXT": "true",
+    }
+    reasons = {
+        "CHAT_CONTEXT_SIZE": (
+            f"based on {max_free_vram} MB free VRAM"
+            if max_free_vram > 0
+            else "default (no GPU)"
+        ),
+        "EMBEDDINGS_CONTEXT_SIZE": (
+            f"embedding tier for {max_free_vram} MB VRAM"
+            if max_free_vram > 0
+            else "default (no GPU)"
+        ),
+        "ARIA_VLLM_KV_OFFLOAD_MODE": (
+            "auto-offload to RAM (VRAM < 12 GB)"
+            if low_vram
+            else "GPU-only (VRAM ≥ 12 GB)"
+        ),
+        "ARIA_VLLM_KV_OFFLOADING_SIZE_GB": (
+            f"auto-calculated ({kv_offloading_size_gb} GiB)"
+            if kv_offloading_size_gb
+            else "N/A (offload disabled)"
+        ),
+        "TOKEN_LIMIT": f"~1/4 of chat context ({chat_ctx})",
+        "FORCE_CONTEXT": "use calculated values exactly",
+    }
+    return optimized, reasons
+
+
+def _print_diff(
+    current: dict[str, str],
+    optimized: dict[str, str],
+    reasons: dict[str, str],
+) -> None:
+    """Render the current-vs-optimized comparison table."""
+    console.print("\n[bold]Optimized Configuration[/bold]\n")
+    opt_table = Table(show_header=True, header_style="bold cyan")
+    opt_table.add_column("Setting", style="cyan", width=24)
+    opt_table.add_column("Current", style="white", width=12)
+    opt_table.add_column("Optimized", style="green", width=12)
+    opt_table.add_column("Reason", style="dim")
+
+    for key, new_val in optimized.items():
+        old_val = current.get(key, "[dim]not set[/dim]")
+        changed = old_val != new_val
+        opt_table.add_row(
+            key,
+            str(old_val),
+            f"[bold green]{new_val}[/bold green]" if changed else str(new_val),
+            reasons.get(key, ""),
+        )
+    console.print(opt_table)
+
+
 @app.command("optimize")
 def optimize_config(
     dry_run: Annotated[
@@ -275,192 +461,16 @@ def optimize_config(
         aria config optimize --dry-run
         ```
     """
-    from aria.helpers.memory import (
-        detect_system_ram,
-        get_model_file_size,
-    )
-    from aria.helpers.nvidia import (
-        calculate_max_safe_context,
-        detect_gpu_count,
-        detect_gpus_with_details,
-        detect_nvlink,
-        get_free_vram_per_gpu,
-        get_total_vram_mb,
-    )
-
-    # ── 1. Detect Hardware ─────────────────────────────────────
-    gpus = detect_gpus_with_details()
-    total_vram = get_total_vram_mb()
-    free_vram_list = get_free_vram_per_gpu()
-    total_ram_mb, avail_ram_mb = detect_system_ram()
-    gpu_count = detect_gpu_count()
-    has_nvlink, _ = detect_nvlink()
-
-    # ── 2. Display Hardware ────────────────────────────────────
-    console.print("[bold]Hardware Detected[/bold]\n")
-
-    hw_table = Table(show_header=True, header_style="bold cyan")
-    hw_table.add_column("Component", style="cyan", width=16)
-    hw_table.add_column("Details", style="green")
-
-    if gpus:
-        for i, gpu in enumerate(gpus):
-            free_mb = free_vram_list[i] if i < len(free_vram_list) else 0
-            hw_table.add_row(
-                f"GPU {i}",
-                f"{gpu.name} — {gpu.total_memory} MB total, {free_mb} MB free",
-            )
-    else:
-        hw_table.add_row("GPU", "[yellow]No NVIDIA GPU detected[/yellow]")
-
-    hw_table.add_row("GPU Count", str(gpu_count))
-
-    hw_table.add_row(
-        "Total VRAM",
-        (
-            f"{total_vram} MiB ({total_vram / 1024:.1f} GiB)"
-            if total_vram > 0
-            else "N/A"
-        ),
-    )
-    hw_table.add_row("NVLink", "✓ Available" if has_nvlink else "✗ No")
-    hw_table.add_row(
-        "System RAM",
-        (
-            f"{total_ram_mb} MiB ({total_ram_mb / 1024:.1f} GiB)"
-            if total_ram_mb > 0
-            else "N/A"
-        ),
-    )
-    hw_table.add_row("Available RAM", f"{avail_ram_mb} MiB")
-
-    console.print(hw_table)
-
-    # ── 3. Get Model Sizes ─────────────────────────────────────
-    model_files = {
-        "chat": Chat.model_path,
-        "embeddings": Embeddings.model_path,
-    }
-
-    model_sizes_mb: dict[str, int] = {}
-    for alias, mp in model_files.items():
-        if mp:
-            p = Path(mp)
-            if p.is_absolute() and p.exists():
-                model_sizes_mb[alias] = get_model_file_size(p)
-            else:
-                model_sizes_mb[alias] = 0
-        else:
-            model_sizes_mb[alias] = 0
-
-    # ── 4. Calculate Optimal Values ────────────────────────────
-    # Use max free VRAM across GPUs for context calculation
-    max_free_vram = max(free_vram_list) if free_vram_list else 0
-
-    # Chat context: calculate based on free VRAM and chat model size
-    chat_ctx = calculate_max_safe_context(
-        free_vram_mb=max_free_vram,
-        model_size_mb=model_sizes_mb.get("chat", 0),
-        is_embedding_model=False,
-    )
-    # Fallback to default if no GPU detected
-    if chat_ctx == 0:
-        chat_ctx = 65536
-
-    # Embeddings context: use embedding tiers
-    embed_ctx = calculate_max_safe_context(
-        free_vram_mb=max_free_vram,
-        model_size_mb=model_sizes_mb.get("embeddings", 0),
-        is_embedding_model=True,
-    )
-    if embed_ctx == 0:
-        embed_ctx = 8192
-
-    # KV cache offload: auto-enable when VRAM is tight
-    kv_offload_mode = "auto" if total_vram < 12288 else "off"
-
-    # Calculate offload size when mode is auto
-    kv_offloading_size_gb = ""
-    if kv_offload_mode == "auto":
-        import math
-
-        from aria.helpers.nvidia import _estimate_kv_cache_mb
-
-        kv_mb = _estimate_kv_cache_mb(
-            Chat.model_path or "",
-            chat_ctx,
-            get_optional_env("ARIA_VLLM_KV_CACHE_DTYPE", "auto"),
-        )
-        if kv_mb and kv_mb > 0:
-            kv_offloading_size_gb = str(math.ceil(kv_mb / 1024))
-
-    # Token limit: ~1/4 of chat context, clamped to reasonable range
-    token_limit = max(8192, min(chat_ctx // 4, 65536))
-
-    # Force context: always true so our calculated values are used
-    force_context = "true"
-
-    optimized = {
-        "CHAT_CONTEXT_SIZE": str(chat_ctx),
-        "EMBEDDINGS_CONTEXT_SIZE": str(embed_ctx),
-        "ARIA_VLLM_KV_OFFLOAD_MODE": kv_offload_mode,
-        "ARIA_VLLM_KV_OFFLOADING_SIZE_GB": kv_offloading_size_gb,
-        "TOKEN_LIMIT": str(token_limit),
-        "FORCE_CONTEXT": force_context,
-    }
-
-    # ── 5. Read Current Values ─────────────────────────────────
-    env_path = Path(".env")
-    current = _read_env_file(env_path)
-
-    # ── 6. Display Comparison ──────────────────────────────────
-    console.print("\n[bold]Optimized Configuration[/bold]\n")
-
-    opt_table = Table(show_header=True, header_style="bold cyan")
-    opt_table.add_column("Setting", style="cyan", width=24)
-    opt_table.add_column("Current", style="white", width=12)
-    opt_table.add_column("Optimized", style="green", width=12)
-    opt_table.add_column("Reason", style="dim")
-
-    # Reasons for each setting
-    reasons = {
-        "CHAT_CONTEXT_SIZE": (
-            f"based on {max_free_vram} MB free VRAM"
-            if max_free_vram > 0
-            else "default (no GPU)"
-        ),
-        "EMBEDDINGS_CONTEXT_SIZE": (
-            f"embedding tier for {max_free_vram} MB VRAM"
-            if max_free_vram > 0
-            else "default (no GPU)"
-        ),
-        "ARIA_VLLM_KV_OFFLOAD_MODE": (
-            "auto-offload to RAM (VRAM < 12 GB)"
-            if total_vram < 12288
-            else "GPU-only (VRAM ≥ 12 GB)"
-        ),
-        "ARIA_VLLM_KV_OFFLOADING_SIZE_GB": (
-            f"auto-calculated ({kv_offloading_size_gb} GiB)"
-            if kv_offloading_size_gb
-            else "N/A (offload disabled)"
-        ),
-        "TOKEN_LIMIT": f"~1/4 of chat context ({chat_ctx})",
-        "FORCE_CONTEXT": "use calculated values exactly",
-    }
-
-    for key, new_val in optimized.items():
-        old_val = current.get(key, "[dim]not set[/dim]")
-        changed = old_val != new_val
-        opt_table.add_row(
-            key,
-            str(old_val),
-            f"[bold green]{new_val}[/bold green]" if changed else str(new_val),
-            reasons.get(key, ""),
+    hw = _collect_hardware()
+    if not hw.gpus:
+        raise typer.BadParameter(
+            "No GPU detected; cannot optimize. Set CHAT_CONTEXT_SIZE manually."
         )
 
-    console.print(opt_table)
+    _print_hardware(hw)
+    optimized, reasons = _compute_optimized(hw, _detect_model_sizes())
+    _print_diff(_read_env_file(Path(".env")), optimized, reasons)
 
-    # ── 7. Write or Report ─────────────────────────────────────
     if dry_run:
         console.print(
             "\n[yellow]Dry run — no changes written. "
@@ -468,8 +478,7 @@ def optimize_config(
         )
         return
 
-    changed_keys = _update_env_file(env_path, optimized)
-
+    changed_keys = _update_env_file(Path(".env"), optimized)
     if changed_keys:
         console.print(
             f"\n[green]✓ .env updated with {len(changed_keys)} "
