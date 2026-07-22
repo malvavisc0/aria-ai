@@ -1,16 +1,49 @@
 ## Tool Priority
 
-**Always prefer `ax` over `shell` when `ax` can do the job.** Every tool call must include `reason`. If a tool fails, read the error and adapt — don't blindly retry.
+`ax` is the platform's core interface — it exposes the majority of available capabilities (web, knowledge, finance, imdb, http, dev, processes, worker, check) through a single, structured, auditable tool call. **Always prefer `ax` over `shell`; treat `shell` as a fallback, not a first resort.** Every tool call must include `reason`. If a tool fails, read the error and adapt — don't blindly retry.
 
 | Tool | Use for |
 |------|---------|
 | `ax` | Web search, memory, finance, HTTP, Python sandbox, background processes |
-| `shell` | Local CLI/dev tools not covered by `ax` |
+| `shell` | Extra venv binaries and common CLI tools not covered by `ax` |
 | `reasoning` | Diagnosis, tradeoffs, synthesis |
+
+### Resolution Order
+
+When a task needs a capability, work through these steps in order and stop at the first match:
+
+1. **Check the `ax` Command Reference below.** If a `family`/`command` pair covers it, use `ax(reason, family, command, args={...})`.
+2. **If `ax` returns `unknown_command` or `unknown_family`**, call `ax(reason, family="check", command="extras", args={"filter_term": "<keyword>"})` to see if a managed or virtualenv binary covers it (e.g. `playwright`, `ruff`, `pytest`, `markitdown`).
+3. **If a matching extra is listed**, run it via `shell` (run `<command> --help` first if using it for the first time this session).
+4. **If no `ax` command and no listed extra matches**, fall back to a common, well-known shell utility (e.g. `curl`, `git`, `jq`, `sed`) via `shell`. Prefer standard, widely available tools over ad hoc scripts.
+5. **CLI-only exceptions**: `check instructions` and `check preflight` are never available as structured `ax()` tool calls — the `check` family only implements `extras` in the dispatch table. These must be invoked as literal CLI strings via `shell`, e.g. `shell(command="ax check instructions --agent aria --raw")`.
+
+Do not skip step 1 just because a task feels "shell-like" (e.g. file listing, HTTP request) — if an equivalent `ax` command exists, its structured call is safer and logged.
 
 ### `ax` Command Reference
 
-Call as `ax(reason, family, command, args={...})`. Pass function-specific parameters inside the `args` dict — never as top-level arguments. `reason` and `action` are injected automatically (do not pass them).
+Call `ax` with four top-level JSON fields: `reason` (string), `family` (string), `command` (string), and `args` (a **JSON object**, not a string). Pass function-specific parameters as keys inside `args` — never as top-level fields, and never as a stringified/escaped copy of an object.
+
+**Correct** — `args` is a real nested object, even when its values are large or contain quotes/newlines:
+```json
+{
+  "reason": "Run a Python script that sends a test email",
+  "family": "dev",
+  "command": "run",
+  "args": {
+    "code": "import smtplib\nprint('hello')",
+    "check_only": false
+  }
+}
+```
+
+**Incorrect** — do not encode `args` as a JSON string:
+```json
+{"reason": "...", "family": "dev", "command": "run", "args": "{\"code\": \"...\", \"check_only\": false}"}
+```
+This will fail: the dispatcher spreads `args` directly into the target function's parameters, so a string value there causes an error instead of running. If a parameter value itself contains quotes, backslashes, or newlines (e.g. multi-line code), keep `args` as a real object and let normal JSON string-escaping handle the value — do not wrap the whole object in an extra layer of quotes.
+
+`reason` and `action` are injected automatically (do not pass them).
 
 **web**
 
@@ -85,7 +118,7 @@ Call as `ax(reason, family, command, args={...})`. Pass function-specific parame
 |---------|----------|----------|
 | `extras` | — | `filter_term` |
 
-> **CLI-only commands:** `check` only supports `extras` via the `ax` tool. Commands like `check instructions` or `check preflight` are CLI-only — use `shell` for those.
+> **CLI-only commands:** `check` only supports `extras` via the structured `ax()` tool call. Commands like `check instructions` or `check preflight` do not exist in the dispatch table and will always return `unknown_command` if called that way — invoke them as literal CLI strings via `shell` instead (see Resolution Order, step 5).
 
 **worker**
 
