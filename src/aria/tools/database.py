@@ -19,12 +19,16 @@ _DEFAULT_DB_PATH = str(DB.path / "tools.db")
 
 
 class ToolsDatabase:
-    """Shared database engine for all tool modules.
+    """Shared database engine for all tool modules."""
 
-    Instances are created via ``get_tools_database()`` which maintains a
-    module-level singleton.  The ``__new__``-based singleton guard has been
-    removed to avoid redundant dual-singleton patterns.
-    """
+    _instance: "ToolsDatabase | None" = None
+    _initialized: bool
+
+    def __new__(cls, db_path: str = _DEFAULT_DB_PATH):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialized = False
+        return cls._instance
 
     def __init__(self, db_path: str = _DEFAULT_DB_PATH):
         if getattr(self, "_initialized", False):
@@ -62,16 +66,6 @@ class ToolsDatabase:
             logger.debug("Tools database connections closed")
 
 
-class _DatabaseHolder:
-    instance: "ToolsDatabase | None" = None
-
-    @classmethod
-    def get(cls) -> ToolsDatabase:
-        if cls.instance is None:
-            cls.instance = ToolsDatabase()
-        return cls.instance
-
-
 def get_tools_database() -> ToolsDatabase:
-    """Get the global tools database instance."""
-    return _DatabaseHolder.get()
+    """Get the shared tools database singleton."""
+    return ToolsDatabase()

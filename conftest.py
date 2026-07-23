@@ -226,17 +226,6 @@ def _reset_all_db_singletons():
     setattr(ScratchpadDatabase, "_instance", None)
     setattr(KnowledgeDatabase, "_instance", None)
 
-    import aria.tools.database as db_module
-
-    db_module._db_instance = None
-
-    # Reset lazy module-level caches
-    import aria.tools.planner.registry as planner_reg
-    import aria.tools.reasoning.registry as reasoning_reg
-
-    reasoning_reg._db = None
-    planner_reg._db = None
-
 
 @pytest.fixture()
 def test_tools_db(tmp_path):
@@ -253,7 +242,6 @@ def test_tools_db(tmp_path):
         def test_something(test_tools_db):
             ...
     """
-    import aria.tools.database as db_module
     from aria.tools.database import ToolsDatabase
 
     _reset_all_db_singletons()
@@ -261,9 +249,6 @@ def test_tools_db(tmp_path):
     db_path = str(tmp_path / "test_tools.db")
     test_db = ToolsDatabase(db_path)
     test_db.create_tables()
-
-    # Register as the global singleton so get_tools_database() returns it
-    db_module._db_instance = test_db
 
     yield test_db
 

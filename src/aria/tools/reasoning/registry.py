@@ -6,19 +6,9 @@ from .database import ReasoningDatabase, get_database
 from .session import ReasoningSession
 
 
-class _DbHolder:
-    db: ReasoningDatabase | None = None
-
-    @staticmethod
-    def get():
-        if _DbHolder.db is None:
-            _DbHolder.db = get_database()
-        return _DbHolder.db
-
-
-def _get_db():
-    """Get or create the database instance (lazy initialization)."""
-    return _DbHolder.get()
+def _get_db() -> ReasoningDatabase:
+    """Get the shared database instance."""
+    return get_database()
 
 
 def get_active_session_id(agent_id: str) -> str | None:
