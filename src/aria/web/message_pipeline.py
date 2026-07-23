@@ -214,14 +214,7 @@ async def _describe_image(
     base64_data: str,
     prompt: str = _IMAGE_DESCRIBE_PROMPT,
 ) -> str:
-    """Send an image to the vision endpoint and return a text description.
-
-    Uses the same vLLM endpoint configured for the main chat model.
-    Returns a concise description (~2-3 sentences) suitable for context.
-
-    The caller owns the ``httpx`` client so multiple images can share one
-    connection pool and run concurrently.
-    """
+    """Send an image to the vision endpoint and return a text description."""
     image_url = f"data:{mime_type};base64,{base64_data}"
     response = await client.post(
         f"{ChatConfig.api_url}/chat/completions",
@@ -414,120 +407,156 @@ class _ThinkingBlock:
         return "".join(self.parts).strip()
 
 
-async def _stream_agent_response(
-    handler: WorkflowHandler,
+async def _handle_tool_call_event(
+    event: ToolCall,
+    current_step: cl.Step | None,
+    thinking: _ThinkingBlock,
+    tools_called: list[str],
+) -> tuple[cl.Step | None, _ThinkingBlock]:
+    tools_called.append(event.tool_name or "unknown")
+    await maybe_remove_step(current_step)
+    await thinking.close()
+    new_step = await send_tool_step(event)
+    return new_step, thinking
+
+
+async def _handle_agent_stream_event(
+    event: AgentStream,
+    current_step: cl.Step | None,
+    thinking: _ThinkingBlock,
     output: cl.Message,
-) -> tuple[bool, dict]:
-    """Stream agent events to the UI and return whether output was emitted.
+) -> tuple[cl.Step | None, _ThinkingBlock, bool, bool]:
+    """Returns (current_step, thinking, emitted, content_emitted)."""
+    if event.thinking_delta:
+        if current_step is not None:
+            await maybe_remove_step(current_step)
+            current_step = None
+        await thinking.write(event.thinking_delta)
+        return current_step, thinking, True, False
+    if event.delta:
+        if current_step is not None:
+            await maybe_remove_step(current_step)
+            current_step = None
+        await thinking.close()
+        await output.stream_token(event.delta)
+        return current_step, thinking, True, True
+    return current_step, thinking, False, False
 
-    Iterates over the agent's streaming events, manages thinking-block
-    rendering and tool-call steps.  Thinking content is detected via
-    LlamaIndex's ``AgentStream.thinking_delta`` field (both XML-tag and
-    structured-reasoning styles are handled upstream by the framework).
 
-    Two flags are tracked separately to avoid a class of silent bugs:
+async def _handle_agent_output_event(
+    event: AgentOutput,
+    current_step: cl.Step | None,
+    thinking: _ThinkingBlock,
+    output: cl.Message,
+    content_emitted: bool,
+) -> bool:
+    if not event.tool_calls:
+        if current_step is not None:
+            await maybe_remove_step(current_step)
+            current_step = None
+        await thinking.close()
+    if content_emitted:
+        return False
+    return await _emit_final(output, event.response.content or "", thinking)
 
-    * ``emitted`` — any visible token (thinking or answer) was streamed.
-      Controls the "I wasn't able to generate a response" fallback.
-    * ``content_emitted`` — a real *answer* token was streamed (i.e. an
-      ``AgentStream.delta`` or an ``AgentOutput.response.content`` that
-      differs from the accumulated thinking text).
 
-    Some models emit reasoning via ``thinking_delta`` and then return the
-    *same* text as ``AgentOutput.response.content``.  To avoid rendering
-    the answer twice (once as a blockquote, once as plain text) the final
-    ``response.content`` is only streamed when no answer was streamed yet
-    *and* it is not identical to the thinking text.
+async def _emit_final(
+    output: cl.Message, content: str, thinking: _ThinkingBlock
+) -> bool:
+    """Stream the final answer once, skipping empty or thinking-duplicate text.
 
-    Args:
-        handler: The running agent workflow handler (with ``stream_events``
-            and ``__await__``).
-        output: The Chainlit message to stream tokens into.
-
-    Returns:
-        A ``(emitted, metadata)`` tuple where *emitted* indicates
-        whether any visible content was streamed and *metadata*
-        contains execution statistics.
+    Returns True if content was streamed.
     """
-    current_step: cl.Step | None = None
-    emitted = False
-    content_emitted = False
-    thinking = _ThinkingBlock(output)
-    tools_called: list[str] = []
-    has_thinking = False
+    if not content.strip() or content.strip() == thinking.full_text():
+        return False
+    await output.stream_token(content)
+    return True
 
-    async def _emit_final(content: str) -> None:
-        """Stream the final answer once, skipping thinking duplicates."""
-        nonlocal emitted, content_emitted
-        if content_emitted or not content:
-            return
-        if content.strip() and content.strip() != thinking.full_text():
-            await output.stream_token(content)
+
+async def _process_stream_event(
+    event,
+    current_step: cl.Step | None,
+    thinking: _ThinkingBlock,
+    tools_called: list[str],
+    output: cl.Message,
+    content_emitted: bool,
+) -> tuple[cl.Step | None, _ThinkingBlock, bool, bool, bool]:
+    """Process a single event. Returns (step, thinking, emitted, content_emitted, has_thinking)."""
+    if isinstance(event, ToolCall):
+        new_step, thinking = await _handle_tool_call_event(
+            event, current_step, thinking, tools_called
+        )
+        return new_step, thinking, False, False, False
+
+    if isinstance(event, AgentStream):
+        step, thinking, emitted, ce = await _handle_agent_stream_event(
+            event, current_step, thinking, output
+        )
+        return step, thinking, emitted, ce, bool(event.thinking_delta)
+
+    if isinstance(event, AgentOutput):
+        emitted = await _handle_agent_output_event(
+            event, current_step, thinking, output, content_emitted
+        )
+        return current_step, thinking, emitted, emitted, False
+
+    return current_step, thinking, False, False, False
+
+
+async def _finalize_stream(
+    output: cl.Message,
+    thinking: _ThinkingBlock,
+    handler_result,
+    emitted: bool,
+    content_emitted: bool,
+    has_thinking: bool,
+) -> tuple[bool, bool, bool]:
+    if not content_emitted:
+        final = getattr(handler_result.response, "content", None) or ""
+        if await _emit_final(output, final, thinking):
             emitted = True
             content_emitted = True
-
-    async for event in handler.stream_events():
-        if isinstance(event, ToolCall):
-            tools_called.append(event.tool_name or "unknown")
-            await maybe_remove_step(current_step)
-            await thinking.close()
-            current_step = await send_tool_step(event)
-
-        elif isinstance(event, AgentStream):
-            if event.thinking_delta:
-                has_thinking = True
-                if current_step is not None:
-                    await maybe_remove_step(current_step)
-                    current_step = None
-                await thinking.write(event.thinking_delta)
-                emitted = True
-            elif event.delta:
-                # The final answer is starting — clear the lingering last
-                # tool step now so it doesn't stay visible until AgentOutput
-                # arrives (which may be several tokens later).
-                if current_step is not None:
-                    await maybe_remove_step(current_step)
-                    current_step = None
-                await thinking.close()
-                await output.stream_token(event.delta)
-                emitted = True
-                content_emitted = True
-
-        elif isinstance(event, AgentOutput):
-            if not event.tool_calls:
-                # Final output — clean up UI state
-                if current_step is not None:
-                    await maybe_remove_step(current_step)
-                    current_step = None
-                await thinking.close()
-            await _emit_final(event.response.content or "")
-
-    # Always await the handler to retrieve the final result and avoid
-    # unawaited-coroutine warnings.
-    try:
-        handler_result = await handler
-    except Exception:
-        await thinking.close()
-        raise
-
-    # Fallback — use the final result if no answer was streamed
-    if not content_emitted:
-        await _emit_final(getattr(handler_result.response, "content", None) or "")
-
     await thinking.close()
-
     if not emitted:
         logger.warning("No assistant output emitted for message.")
         await output.stream_token(
             "I wasn't able to generate a response. Please try rephrasing your request."
         )
         emitted = True
+    return emitted, content_emitted, has_thinking
 
-    stream_meta = {
-        "tools_called": tools_called,
-        "has_thinking": has_thinking,
-    }
-    return emitted, stream_meta
+
+async def _stream_agent_response(
+    handler: WorkflowHandler,
+    output: cl.Message,
+) -> tuple[bool, dict]:
+    """Stream agent events to the UI and return whether output was emitted."""
+    thinking = _ThinkingBlock(output)
+    tools_called: list[str] = []
+    current_step: cl.Step | None = None
+    emitted = False
+    content_emitted = False
+    has_thinking = False
+
+    async for event in handler.stream_events():
+        current_step, thinking, e, ce, ht = await _process_stream_event(
+            event, current_step, thinking, tools_called, output, content_emitted
+        )
+        emitted |= e
+        content_emitted |= ce
+        has_thinking |= ht
+
+    try:
+        handler_result = await handler
+    except Exception:
+        await thinking.close()
+        raise
+
+    emitted, _content_emitted, has_thinking = await _finalize_stream(
+        output, thinking, handler_result, emitted, content_emitted, has_thinking
+    )
+
+    return emitted, {"tools_called": tools_called, "has_thinking": has_thinking}
 
 
 async def _fail_turn(
@@ -556,6 +585,93 @@ async def _fail_turn(
     await cl.Message(content=user_message).send()
 
 
+async def _workflow_init(message: cl.Message) -> tuple[Memory, str, dict, bool]:
+    """Prepare memory + handler for a workflow run.
+
+    Returns ``(memory, prompt, pipeline_meta, is_edit)``.
+    """
+    prompt, pipeline_meta = await _handle_message(message)
+    is_edit = bool(message.metadata and message.metadata.get(_PROCESSED_KEY))
+    memory = cl.user_session.get("memory")
+    if memory is None or memory.session_id != message.thread_id:
+        memory = create_memory(message.thread_id)
+        cl.user_session.set("memory", memory)
+        logger.debug(f"Created new Memory for thread {message.thread_id}")
+
+    if is_edit:
+        logger.info(
+            f"Edit detected for message {message.id}, "
+            "resetting memory from persisted history"
+        )
+        memory = await _reset_memory_for_edit(message.thread_id)
+        cl.user_session.set("memory", memory)
+
+    await _sanitize_memory(memory)
+    return memory, prompt, pipeline_meta, is_edit
+
+
+async def _send_empty_placeholder() -> cl.Message:
+    output = cl.Message(content="")
+    await output.send()
+    return output
+
+
+async def _warn_not_initialized() -> None:
+    logger.warning("Message received but agents_workflow is not configured")
+    await cl.Message(
+        content=(
+            "The system is not fully initialized (LLM unavailable). "
+            "Please check server logs and try again later."
+        )
+    ).send()
+
+
+async def _stream_and_finalize(
+    message: cl.Message,
+    output: cl.Message,
+    pipeline_meta: dict,
+    prompt: str,
+    memory: Memory,
+) -> dict:
+    handler = _state.agents_workflow.run(  # type: ignore[union-attr]
+        user_msg=prompt,
+        memory=memory,
+        max_iterations=ChatConfig.max_iteration,
+    )
+    _run_succeeded = False
+    stream_meta: dict = {}
+    try:
+        _, stream_meta = await _stream_agent_response(handler, output)
+        _run_succeeded = True
+    finally:
+        if _run_succeeded:
+            await output.update()
+            await _mark_message_processed(
+                message, extra_metadata={**pipeline_meta, **stream_meta}
+            )
+        else:
+            await output.remove()
+    return stream_meta
+
+
+def _context_overflow_message() -> str:
+    return (
+        "The conversation has grown too large for the "
+        "model's context window. Please start a new "
+        "conversation."
+    )
+
+
+def _generic_error_message() -> str:
+    return "An error occurred. Please try again."
+
+
+def _route_pipeline_error(error_msg: str) -> str:
+    if "maximum context length" in error_msg.lower():
+        return _context_overflow_message()
+    return _generic_error_message()
+
+
 async def on_message_handler(message: cl.Message) -> None:
     """Handle incoming user messages and execute the agent workflow.
 
@@ -570,71 +686,17 @@ async def on_message_handler(message: cl.Message) -> None:
         message: The incoming Chainlit message from the user.
     """
     if not _state.agents_workflow:
-        logger.warning("Message received but agents_workflow is not configured")
-        await cl.Message(
-            content=(
-                "The system is not fully initialized (LLM unavailable). "
-                "Please check server logs and try again later."
-            )
-        ).send()
+        await _warn_not_initialized()
         return
 
     memory: Memory | None = None
     pipeline_meta: dict = {}
     try:
         _state.validate_initialized()
-        prompt, pipeline_meta = await _handle_message(message)
+        memory, prompt, pipeline_meta, _is_edit = await _workflow_init(message)
 
-        # --- Edit detection via metadata marker ---
-        is_edit = bool(message.metadata and message.metadata.get(_PROCESSED_KEY))
-        memory = cl.user_session.get("memory")
-        # Reuse existing memory only if it belongs to the same thread;
-        # Memory.session_id is set by create_memory() to the thread_id.
-        if memory is None or memory.session_id != message.thread_id:
-            memory = create_memory(message.thread_id)
-            cl.user_session.set("memory", memory)
-            logger.debug(f"Created new Memory for thread {message.thread_id}")
-
-        if is_edit:
-            logger.info(
-                f"Edit detected for message {message.id}, "
-                "resetting memory from persisted history"
-            )
-            memory = await _reset_memory_for_edit(message.thread_id)
-            cl.user_session.set("memory", memory)
-
-        # Repair broken alternation left by a previous failed turn
-        # before handing the memory to the workflow.
-        await _sanitize_memory(memory)
-
-        handler = _state.agents_workflow.run(
-            user_msg=prompt,
-            memory=memory,
-            max_iterations=ChatConfig.max_iteration,
-        )
-
-        # Send the (empty) assistant message first so it has an id in the
-        # UI; tokens are then streamed into it via stream_token. After
-        # streaming completes, update() must be called to flip streaming
-        # off (stops the blinking dot) and persist the final content via
-        # update_step — a second send() would be a no-op (persisted guard).
-        output = cl.Message(content="")
-        await output.send()
-        _run_succeeded = False
-        stream_meta: dict = {}
-        try:
-            _, stream_meta = await _stream_agent_response(handler, output)
-            _run_succeeded = True
-        finally:
-            if _run_succeeded:
-                await output.update()
-                await _mark_message_processed(
-                    message, extra_metadata={**pipeline_meta, **stream_meta}
-                )
-            else:
-                # Don't persist partial/incomplete assistant content to the
-                # data layer — remove the placeholder instead.
-                await output.remove()
+        output = await _send_empty_placeholder()
+        await _stream_and_finalize(message, output, pipeline_meta, prompt, memory)
 
     except AppStateNotInitializedError as e:
         await _fail_turn(
@@ -670,21 +732,11 @@ async def on_message_handler(message: cl.Message) -> None:
         )
 
     except Exception as e:
-        logger.exception(f"Error processing message: {e}")
-        error_msg = str(e)
-        if "maximum context length" in error_msg.lower():
-            user_message = (
-                "The conversation has grown too large for the "
-                "model's context window. Please start a new "
-                "conversation."
-            )
-        else:
-            user_message = "An error occurred. Please try again."
         await _fail_turn(
             message=message,
             memory=memory,
             pipeline_meta=pipeline_meta,
             error=e,
-            user_message=user_message,
+            user_message=_route_pipeline_error(str(e)),
             log_level="exception",
         )

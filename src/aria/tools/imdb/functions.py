@@ -165,6 +165,42 @@ def _imdb_tool(error_not_found_msg_template: str, *, id_param: str = "imdb_id"):
     return decorator
 
 
+def _no_results(reason: str, query: str) -> str:
+    return tool_error_response(
+        get_function_name(),
+        reason,
+        ValueError(ERROR_NO_RESULTS.format(query=query)),
+    )
+
+
+def _has_results(result) -> bool:
+    return bool(result.titles or result.names)
+
+
+def _serialize_titles(result) -> list[dict]:
+    return [
+        {
+            "imdbId": t.imdbId,
+            "title": t.title,
+            "year": t.year,
+            "kind": t.kind,
+            "rating": t.rating,
+        }
+        for t in (result.titles or [])
+    ]
+
+
+def _serialize_names(result) -> list[dict]:
+    return [
+        {
+            "imdbId": n.imdbId,
+            "name": n.name,
+            "job": n.job,
+        }
+        for n in (result.names or [])
+    ]
+
+
 @log_tool_call
 def search_imdb_titles(reason: str, query: str, title_type: str | None = None) -> str:
     """Search IMDb titles or people and get IDs for follow-up lookups.
@@ -192,36 +228,11 @@ def search_imdb_titles(reason: str, query: str, title_type: str | None = None) -
 
         result = search_title(query.strip(), title_type=imdb_title_type)
 
-        if result is None or (
-            (not result.titles or len(result.titles) == 0)
-            and (not result.names or len(result.names) == 0)
-        ):
-            return tool_error_response(
-                get_function_name(),
-                reason,
-                ValueError(ERROR_NO_RESULTS.format(query=query)),
-            )
+        if result is None or not _has_results(result):
+            return _no_results(reason, query)
 
-        titles = [
-            {
-                "imdbId": t.imdbId,
-                "title": t.title,
-                "year": t.year,
-                "kind": t.kind,
-                "rating": t.rating,
-            }
-            for t in (result.titles or [])
-        ]
-
-        names = [
-            {
-                "imdbId": n.imdbId,
-                "name": n.name,
-                "job": n.job,
-            }
-            for n in (result.names or [])
-        ]
-
+        titles = _serialize_titles(result)
+        names = _serialize_names(result)
         response = {"titles": titles, "names": names}
 
         logger.info(f"Found {len(titles)} titles, {len(names)} names")
@@ -235,6 +246,43 @@ def search_imdb_titles(reason: str, query: str, title_type: str | None = None) -
         return tool_error_response(
             get_function_name(), reason, RuntimeError(_classify_error(e))
         )
+
+
+def _person_summary(person) -> dict:
+    return {"imdbId": person.imdbId, "name": person.name}
+
+
+def _credits_from_categories(movie, key: str) -> list[dict]:
+    items = (movie.categories or {}).get(key, [])
+    return [_person_summary(p) for p in items]
+
+
+def _directors(movie) -> list[dict]:
+    if movie.directors:
+        return [_person_summary(d) for d in movie.directors]
+    return _credits_from_categories(movie, "director")
+
+
+def _cast(movie) -> list[dict]:
+    items = (movie.categories or {}).get("cast", [])
+    return [
+        {
+            "imdbId": c.imdbId,
+            "name": c.name,
+            "characters": getattr(c, "characters", []),
+        }
+        for c in items
+    ]
+
+
+def _awards_payload(movie) -> dict | None:
+    if not movie.awards:
+        return None
+    return {
+        "wins": movie.awards.wins,
+        "nominations": movie.awards.nominations,
+        "prestigious_award": movie.awards.prestigious_award,
+    }
 
 
 @log_tool_call
@@ -258,41 +306,6 @@ def get_movie_details(reason: Reason, imdb_id: str) -> str:
     if movie is None:
         raise ValueError(ERROR_MOVIE_NOT_FOUND.format(imdb_id=imdb_id))
 
-    # Directors: prefer movie.directors, fall back to categories
-    directors = [{"imdbId": d.imdbId, "name": d.name} for d in (movie.directors or [])]
-    if not directors:
-        cat_directors = (movie.categories or {}).get("director", [])
-        directors = [{"imdbId": d.imdbId, "name": d.name} for d in cat_directors]
-
-    # Writers: extracted from categories
-    cat_writers = (movie.categories or {}).get("writer", [])
-    writers = [{"imdbId": w.imdbId, "name": w.name} for w in cat_writers]
-
-    # Producers: extracted from categories
-    cat_producers = (movie.categories or {}).get("producer", [])
-    producers = [{"imdbId": p.imdbId, "name": p.name} for p in cat_producers]
-
-    # Cast with characters: extracted from categories
-    cat_cast = (movie.categories or {}).get("cast", [])
-    cast = [
-        {
-            "imdbId": c.imdbId,
-            "name": c.name,
-            "characters": getattr(c, "characters", []),
-        }
-        for c in cat_cast
-    ]
-
-    stars = [{"imdbId": s.imdbId, "name": s.name} for s in (movie.stars or [])]
-
-    awards = None
-    if movie.awards:
-        awards = {
-            "wins": movie.awards.wins,
-            "nominations": movie.awards.nominations,
-            "prestigious_award": movie.awards.prestigious_award,
-        }
-
     result = {
         "imdbId": movie.imdbId,
         "title": movie.title,
@@ -307,16 +320,16 @@ def get_movie_details(reason: Reason, imdb_id: str) -> str:
         "genres": movie.genres or [],
         "languages_text": movie.languages_text or [],
         "countries": movie.countries or [],
-        "directors": directors,
-        "writers": writers,
-        "producers": producers,
-        "cast": cast,
-        "stars": stars,
+        "directors": _directors(movie),
+        "writers": _credits_from_categories(movie, "writer"),
+        "producers": _credits_from_categories(movie, "producer"),
+        "cast": _cast(movie),
+        "stars": [_person_summary(s) for s in (movie.stars or [])],
         "release_date": movie.release_date,
         "cover_url": movie.cover_url,
         "worldwide_gross": movie.worldwide_gross,
         "production_budget": movie.production_budget,
-        "awards": awards,
+        "awards": _awards_payload(movie),
         "trailers": movie.trailers or [],
     }
 

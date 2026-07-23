@@ -18,7 +18,6 @@ from loguru import logger
 from pydantic import BaseModel, Field
 
 from aria.tools import Reason
-from aria.tools.constants import BASE_DIR
 from aria.tools.decorators import tool_function
 from aria.tools.files._internals import (
     _secure_resolve_dir,
@@ -497,6 +496,104 @@ def file_info(reason: Reason, file_name: str) -> str:
         )
 
 
+def _resolve_listing_path(path_value: str) -> tuple[Path | None, str | None]:
+    """Return (path, None) on success or (None, error_response) on failure."""
+    try:
+        resolved = _secure_resolve_dir(path_value)
+        if not resolved.exists():
+            resolved = _secure_resolve_path(path_value, check_exists=False)
+        if not resolved.exists():
+            return None, "Path does not exist"
+        return resolved, None
+    except Exception as exc:
+        return None, str(exc)
+
+
+def _single_file_response(path_value: str) -> dict[str, Any]:
+    return {
+        "path": path_value,
+        "is_file": True,
+        "files": [path_value],
+        "count": 1,
+        "truncated": False,
+    }
+
+
+def _tree_response(
+    path_value: str, resolved_path: Path, max_depth_value: int
+) -> dict[str, Any]:
+    tree = _build_directory_tree(resolved_path, 0, max_depth_value)
+    total_files, total_directories = _count_tree_items(tree)
+    return {
+        "path": path_value,
+        "tree": tree,
+        "total_files": total_files,
+        "total_directories": total_directories,
+        "mode": "tree",
+        "max_depth": max_depth_value,
+    }
+
+
+def _relative_or_absolute(match: Path, resolved_path: Path) -> str:
+    try:
+        return str(match.relative_to(resolved_path))
+    except ValueError:
+        return str(match)
+
+
+def _flat_listing(
+    resolved_path: Path,
+    pattern_value: str,
+    recursive_value: bool,
+    max_results_value: int,
+) -> tuple[list[str], bool]:
+    matches = (
+        list(resolved_path.rglob(pattern_value))
+        if recursive_value
+        else list(resolved_path.glob(pattern_value))
+    )
+    files = []
+    for match in matches:
+        if not match.is_file():
+            continue
+        files.append(_relative_or_absolute(match, resolved_path))
+        if len(files) >= max_results_value:
+            break
+    return files, len(matches) > max_results_value
+
+
+def _normalize_list_params(
+    pattern: str | None,
+    recursive: bool | None,
+    max_depth: int | None,
+    max_results: int | None,
+    path: str | None,
+) -> tuple[str, bool, int, int, str]:
+    return (
+        pattern or "*",
+        False if recursive is None else recursive,
+        3 if max_depth is None else max_depth,
+        100 if max_results is None else max_results,
+        path or ".",
+    )
+
+
+def _flat_response(
+    path_value: str,
+    pattern_value: str,
+    files: list[str],
+    truncated: bool,
+) -> dict[str, Any]:
+    return {
+        "path": path_value,
+        "pattern": pattern_value,
+        "files": files,
+        "count": len(files),
+        "truncated": truncated,
+        "mode": "flat",
+    }
+
+
 @tool_function(
     "list_files",
     error_handler=with_file_operation_error_handling,
@@ -522,107 +619,53 @@ def list_files(
     Returns:
         JSON with files (flat) or tree (recursive), plus count.
     """
-    pattern_value = pattern or "*"
-    recursive_value = False if recursive is None else recursive
-    max_depth_value = 3 if max_depth is None else max_depth
-    max_results_value = 100 if max_results is None else max_results
-    path_value = path or "."
-
+    pattern_value, recursive_value, max_depth_value, max_results_value, path_value = (
+        _normalize_list_params(pattern, recursive, max_depth, max_results, path)
+    )
     logger.info(
         f"Listing files: path={path_value}, pattern={pattern_value}, "
         f"recursive={recursive_value}"
     )
 
-    try:
-        resolved_path = _secure_resolve_dir(path_value)
-        if not resolved_path.exists():
-            resolved_path = _secure_resolve_path(path_value, check_exists=False)
-
-        if not resolved_path.exists():
-            return _err(
-                tool="list_files",
-                reason=reason,
-                message=f"Path does not exist: {path_value}",
-                path=path_value,
-            )
-
-        if resolved_path.is_file():
-            return _ok(
-                tool="list_files",
-                reason=reason,
-                result={
-                    "path": path_value,
-                    "is_file": True,
-                    "files": [path_value],
-                    "count": 1,
-                    "truncated": False,
-                },
-                path=path_value,
-            )
-
-        if recursive_value and pattern_value == "*":
-            tree = _build_directory_tree(resolved_path, 0, max_depth_value)
-            total_files, total_directories = _count_tree_items(tree)
-
-            return _ok(
-                tool="list_files",
-                reason=reason,
-                result={
-                    "path": path_value,
-                    "tree": tree,
-                    "total_files": total_files,
-                    "total_directories": total_directories,
-                    "mode": "tree",
-                    "max_depth": max_depth_value,
-                },
-                path=path_value,
-            )
-        else:
-            matches = list(
-                resolved_path.rglob(pattern_value)
-                if recursive_value
-                else resolved_path.glob(pattern_value)
-            )
-
-            files = []
-            for match in matches:
-                if match.is_file():
-                    try:
-                        try:
-                            rel_path = match.relative_to(resolved_path)
-                        except ValueError:
-                            rel_path = match.relative_to(BASE_DIR)
-                        files.append(str(rel_path))
-                        if len(files) >= max_results_value:
-                            break
-                    except ValueError:
-                        files.append(str(match))
-                        if len(files) >= max_results_value:
-                            break
-
-            truncated = len(matches) > max_results_value
-
-            return _ok(
-                tool="list_files",
-                reason=reason,
-                result={
-                    "path": path_value,
-                    "pattern": pattern_value,
-                    "files": files,
-                    "count": len(files),
-                    "truncated": truncated,
-                    "mode": "flat",
-                },
-                path=path_value,
-            )
-
-    except Exception as exc:
+    resolved_path, error = _resolve_listing_path(path_value)
+    if error is not None:
+        message = (
+            f"Path does not exist: {path_value}"
+            if error == "Path does not exist"
+            else error
+        )
         return _err(
             tool="list_files",
             reason=reason,
-            message=str(exc),
+            message=message,
             path=path_value,
         )
+    assert resolved_path is not None
+
+    if resolved_path.is_file():
+        return _ok(
+            tool="list_files",
+            reason=reason,
+            result=_single_file_response(path_value),
+            path=path_value,
+        )
+    if recursive_value and pattern_value == "*":
+        return _ok(
+            tool="list_files",
+            reason=reason,
+            result=_tree_response(path_value, resolved_path, max_depth_value),
+            path=path_value,
+        )
+
+    files, truncated = _flat_listing(
+        resolved_path, pattern_value, recursive_value, max_results_value
+    )
+    return _ok(
+        tool="list_files",
+        reason=reason,
+        result=_flat_response(path_value, pattern_value, files, truncated),
+        path=path_value,
+    )
 
 
 def _search_names(

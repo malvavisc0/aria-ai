@@ -25,12 +25,63 @@ def _update_audit(worker_id: str, updates: dict):
     save_state(path, audit)
 
 
-async def _run(args):
-    from llama_index.core.agent.workflow import (
-        AgentOutput,
-        AgentWorkflow,
-        ToolCall,
+def _build_prompt(args) -> str:
+    prompt = args.prompt
+    if args.reason:
+        prompt += f"\n\nReason for delegation: {args.reason}"
+    if args.expected:
+        prompt += f"\n\nExpected deliverable: {args.expected}"
+    if args.instructions:
+        prompt += f"\n\nAdditional instructions: {args.instructions}"
+    return prompt
+
+
+def _process_event(event, tool_calls: list[dict], result_state: list[str]) -> None:
+    from llama_index.core.agent.workflow import AgentOutput, ToolCall
+
+    if isinstance(event, ToolCall):
+        tool_calls.append(
+            {
+                "tool": event.tool_name,
+                "timestamp": datetime.now(UTC).isoformat(),
+            }
+        )
+    elif isinstance(event, AgentOutput) and event.response:
+        content = getattr(event.response, "content", "")
+        if content:
+            result_state[0] = content
+
+
+def _record_failure(worker_id: str, exc: Exception) -> None:
+    logger.exception(f"Worker {worker_id} failed: {exc}")
+    _update_audit(
+        worker_id,
+        {
+            "status": "failed",
+            "completed_at": datetime.now(UTC).isoformat(),
+            "error": str(exc),
+        },
     )
+
+
+def _record_completion(
+    worker_id: str, result_text: str, result_file: Path, tool_calls: list[dict]
+) -> None:
+    _update_audit(
+        worker_id,
+        {
+            "status": "completed",
+            "completed_at": datetime.now(UTC).isoformat(),
+            "result": result_text[:2000],
+            "result_file": str(result_file),
+            "tool_calls": tool_calls,
+        },
+    )
+    logger.info(f"Worker {worker_id} completed")
+
+
+async def _run(args):
+    from llama_index.core.agent.workflow import AgentOutput, AgentWorkflow
     from llama_index.core.memory import Memory
 
     from aria.agents.worker import get_worker_agent
@@ -60,69 +111,33 @@ async def _run(args):
             session_id=worker_id, token_limit=EmbeddingsConfig.token_limit
         )
 
-        prompt = args.prompt
-        if args.reason:
-            prompt += f"\n\nReason for delegation: {args.reason}"
-        if args.expected:
-            prompt += f"\n\nExpected deliverable: {args.expected}"
-        if args.instructions:
-            prompt += f"\n\nAdditional instructions: {args.instructions}"
-
         workflow = AgentWorkflow(agents=[agent], root_agent=agent.name)
         handler = workflow.run(
-            user_msg=prompt,
+            user_msg=_build_prompt(args),
             memory=memory,
             max_iterations=ChatConfig.max_iteration,
         )
 
-        tool_calls = []
-        result_text = ""
+        tool_calls: list[dict] = []
+        result_state: list[str] = [""]
 
         async for event in handler.stream_events():
-            if isinstance(event, ToolCall):
-                tool_calls.append(
-                    {
-                        "tool": event.tool_name,
-                        "timestamp": datetime.now(UTC).isoformat(),
-                    }
-                )
-            elif isinstance(event, AgentOutput) and event.response:
-                content = getattr(event.response, "content", "")
-                if content:
-                    result_text = content
+            _process_event(event, tool_calls, result_state)
 
         final = await handler
-        if hasattr(final, "response") and final.response:
-            content = getattr(final.response, "content", "")
+        if isinstance(final, AgentOutput) or hasattr(final, "response"):
+            content = getattr(getattr(final, "response", None), "content", "")
             if content:
-                result_text = content
+                result_state[0] = content
 
-        # Save result
+        result_text = result_state[0]
         result_file = output_dir / "result.md"
         result_file.write_text(result_text)
 
-        _update_audit(
-            worker_id,
-            {
-                "status": "completed",
-                "completed_at": datetime.now(UTC).isoformat(),
-                "result": result_text[:2000],
-                "result_file": str(result_file),
-                "tool_calls": tool_calls,
-            },
-        )
-        logger.info(f"Worker {worker_id} completed")
+        _record_completion(worker_id, result_text, result_file, tool_calls)
 
     except Exception as e:
-        logger.exception(f"Worker {worker_id} failed: {e}")
-        _update_audit(
-            worker_id,
-            {
-                "status": "failed",
-                "completed_at": datetime.now(UTC).isoformat(),
-                "error": str(e),
-            },
-        )
+        _record_failure(worker_id, e)
         sys.exit(1)
 
 

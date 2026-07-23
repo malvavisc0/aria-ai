@@ -77,6 +77,42 @@ def _error_response(
     return safe_json(response)
 
 
+def _validate_filename(file_name: str) -> None:
+    if not file_name or not isinstance(file_name, str):
+        raise FileSecurityError("Invalid file name provided")
+    if ".." in file_name:
+        raise FileSecurityError("Path traversal attempt detected in file name")
+    if any(pattern in file_name for pattern in BLOCKED_PATTERNS):
+        raise FileSecurityError("File name contains blocked patterns")
+
+
+def _validate_numeric_params(chunk_size: int, offset: int, length: int) -> None:
+    if chunk_size > MAX_CHUNK_SIZE:
+        raise FileSecurityError(f"chunk_size must be between 1 and {MAX_CHUNK_SIZE}")
+    if offset < 0 or length < 0:
+        raise FileSecurityError("Negative offset or length not allowed")
+
+
+def _validate_content(contents: str | None) -> None:
+    if not contents:
+        return
+    if len(contents) > MAX_FILE_SIZE:
+        raise FileSecurityError(
+            f"Content size {len(contents)} exceeds limit: {MAX_FILE_SIZE}"
+        )
+
+
+def _validate_line_lengths(new_lines: list[str] | None) -> None:
+    if not new_lines:
+        return
+    for line in new_lines:
+        line_length = len(line)
+        if line_length > MAX_LINE_LENGTH:
+            raise FileSecurityError(
+                f"Line length {line_length} exceeds limit: {MAX_LINE_LENGTH}"
+            )
+
+
 def _validate_inputs(
     file_name: str,
     chunk_size: int = 0,
@@ -101,40 +137,21 @@ def _validate_inputs(
     Raises:
         FileSecurityError: If validation fails due to security violations
     """
-    if not file_name or not isinstance(file_name, str):
-        raise FileSecurityError("Invalid file name provided")
+    _validate_filename(file_name)
+    _validate_numeric_params(chunk_size, offset, length)
+    _validate_content(contents)
+    _validate_line_lengths(new_lines)
 
-    # Check for path traversal attempts
-    if ".." in file_name:
-        raise FileSecurityError("Path traversal attempt detected in file name")
 
-    # Check for blocked patterns
-    if any(pattern in file_name for pattern in BLOCKED_PATTERNS):
-        raise FileSecurityError("File name contains blocked patterns")
+def _enforce_base_dir(file_path: Path, base_dir_resolved: Path, enforce: bool) -> None:
+    if enforce and not str(file_path).startswith(str(base_dir_resolved)):
+        raise FileSecurityError("Path traversal attempt detected")
 
-    # Validate numeric parameters
-    if chunk_size > MAX_CHUNK_SIZE:
-        raise FileSecurityError(f"chunk_size must be between 1 and {MAX_CHUNK_SIZE}")
 
-    if offset < 0 or length < 0:
-        raise FileSecurityError("Negative offset or length not allowed")
-
-    # Validate content size
-    if contents:
-        content_length = len(contents)
-        if content_length > MAX_FILE_SIZE:
-            raise FileSecurityError(
-                f"Content size {content_length} exceeds limit: {MAX_FILE_SIZE}"
-            )
-
-    # Validate line lengths
-    if new_lines:
-        for line in new_lines:
-            line_length = len(line)
-            if line_length > MAX_LINE_LENGTH:
-                raise FileSecurityError(
-                    f"Line length {line_length} exceeds limit: {MAX_LINE_LENGTH}"
-                )
+def _check_blocked_extension(file_path: Path) -> None:
+    suffix = file_path.suffix.lower()
+    if file_path.suffix and suffix in BLOCKED_EXTENSIONS:
+        raise FileSecurityError(f"File type not allowed: {file_path.suffix}")
 
 
 def _secure_resolve_path(
@@ -158,38 +175,19 @@ def _secure_resolve_path(
         FileOperationError: If path is a directory or not absolute
     """
     try:
-        # Resolve BASE_DIR to handle symlinks (macOS /var -> /private/var)
         base_dir_resolved = BASE_DIR.resolve()
-
-        # Only accept absolute paths
         file_path = Path(file_name)
         if not file_path.is_absolute():
             raise FileOperationError(f"Path must be absolute: {file_name}")
-
-        # Check for symlinks BEFORE resolving (to detect symlinked files)
         if file_path.is_symlink():
             raise FileSecurityError("Symlinks not allowed")
-
-        # Resolve the absolute path
         file_path = file_path.resolve()
-
-        # Check for path traversal attacks - path must be within BASE_DIR
-        if enforce_base_dir and not str(file_path).startswith(str(base_dir_resolved)):
-            raise FileSecurityError("Path traversal attempt detected")
-
-        # Check if path is a directory
+        _enforce_base_dir(file_path, base_dir_resolved, enforce_base_dir)
         if file_path.is_dir():
             raise FileOperationError(f"Path is a directory, not a file: {file_name}")
-
-        # Block known binary/dangerous file extensions
-        if file_path.suffix and file_path.suffix.lower() in BLOCKED_EXTENSIONS:
-            msg = f"File type not allowed: {file_path.suffix}"
-            raise FileSecurityError(msg)
-
-        # Check if file exists if required
+        _check_blocked_extension(file_path)
         if check_exists and not file_path.exists():
             raise FileOperationError(f"File not found: {file_name}")
-
         return file_path
     except (FileSecurityError, FileOperationError):
         raise

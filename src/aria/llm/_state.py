@@ -238,23 +238,50 @@ class StatefulAgentWorkflow(AgentWorkflow):
             ]
         return messages
 
+    @staticmethod
+    def _is_empty_output(output: AgentOutput) -> bool:
+        return not output.tool_calls and not (output.response.content or "").strip()
+
+    @staticmethod
+    def _synthesize_error_response(last_err: str) -> str:
+        return (
+            "The tool call encountered an error:\n\n"
+            f"```\n{last_err}\n```\n\n"
+            "I'll try a different approach if you'd like"
+            " \u2014 just let me know how to proceed."
+        )
+
+    async def _retry_after_tool_failure(
+        self, ctx: Any, ev: AgentSetup
+    ) -> AgentOutput | None:
+        try:
+            output = await super().run_agent_step(ctx, ev)
+        except Exception:
+            return None
+        await self.reduce_state(ctx, output)
+        return output
+
+    async def _run_with_empty_response_fallback(
+        self, ctx: Any, ev: AgentSetup, output: AgentOutput
+    ) -> AgentOutput:
+        if not self._is_empty_output(output):
+            return output
+        state = await ctx.store.get("state", default=None)
+        last_err = (state or {}).get("last_error")
+        if not last_err:
+            return output
+        retried = await self._retry_after_tool_failure(ctx, ev)
+        if retried is not None and self._is_empty_output(retried):
+            retried.response.content = self._synthesize_error_response(last_err)
+        return retried or output
+
     async def run_agent_step(self, ctx: Any, ev: AgentSetup) -> AgentOutput:
         """Run the parent agent step and synchronize custom state.
 
-        This override preserves the original event contract of
-        ``AgentWorkflow.run_agent_step()`` so workflow validation still sees
-        :class:`AgentOutput` as a produced event.
-
-        The state is updated on both success and failure so that
-        ``WorkflowState.last_error`` always reflects the most recent outcome.
-        If the LLM produces an empty terminal response after a tool failure,
-        a single retry is attempted before injecting a synthesized error
-        report.
+        See class docstring for behavior.
         """
-        # Check scratchpad pressure — returns a NEW list (no mutation).
         ev.input = await self._inject_pressure_warning(ctx, ev.input)
 
-        # DIAGNOSTIC: log what's being sent
         msg_count = len(ev.input)
         approx_tokens = sum(len(str(m.content or "")) // 4 for m in ev.input)
         logger.info(
@@ -262,42 +289,13 @@ class StatefulAgentWorkflow(AgentWorkflow):
             f"~{approx_tokens} tokens "
             f"(roles: {[m.role.value for m in ev.input[:5]]}...)"
         )
-        # END DIAGNOSTIC
 
         try:
             output = await super().run_agent_step(ctx, ev)
         except Exception:
-            # Re-raise — downstream consumers can inspect
-            # ctx.store["state"]["last_error"] for diagnostics.
             raise
         await self.reduce_state(ctx, output)
-
-        # Guard against empty terminal responses after a tool failure.
-        # Some local models produce no text after a tool error result —
-        # retry once, then synthesize a fallback reply.
-        if not output.tool_calls and not (output.response.content or "").strip():
-            state = await ctx.store.get("state", default=None)
-            last_err = (state or {}).get("last_error")
-            if last_err:
-                # Retry once (ev.input is already clean — no dup warning).
-                try:
-                    output = await super().run_agent_step(ctx, ev)
-                    await self.reduce_state(ctx, output)
-                except Exception:
-                    pass
-
-                # If still empty after retry, synthesize response.
-                if (
-                    not output.tool_calls
-                    and not (output.response.content or "").strip()
-                ):
-                    output.response.content = (
-                        "The tool call encountered an error:\n\n"
-                        f"```\n{last_err}\n```\n\n"
-                        "I'll try a different approach if you'd like"
-                        " \u2014 just let me know how to proceed."
-                    )
-        return output
+        return await self._run_with_empty_response_fallback(ctx, ev, output)
 
     async def _get_cumulative_budget(self, ctx: Any) -> int:
         """Get the cumulative tool-output char budget for this turn."""

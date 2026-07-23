@@ -26,6 +26,7 @@ Example:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -299,6 +300,52 @@ def _ensure_lightpanda_installed() -> None:
     console.print(f"[green]✓[/green] Lightpanda installed at {binary}")
 
 
+def _download_model(alias: str, raw_value: str, path: Path, max_retries: int) -> None:
+    from huggingface_hub import snapshot_download
+    from rich.status import Status
+
+    from aria.config.huggingface import HuggingFace
+
+    last_error: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        label = (
+            f"Downloading {alias} model ({raw_value})"
+            if attempt == 1
+            else f"Retrying {alias} model download (attempt {attempt}/{max_retries})"
+        )
+        try:
+            with Status(f"[dim]{label}…[/dim]", console=console):
+                snapshot_download(
+                    repo_id=raw_value,
+                    local_dir=str(path),
+                    token=HuggingFace.token,
+                    ignore_patterns=["onnx/*", "openvino/*", "openvino_model.*"],
+                )
+            console.print(f"[green]✓[/green] {alias} model ready at {path}")
+            return
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries:
+                console.print(
+                    f"[yellow]⚠[/yellow] {alias} model download failed "
+                    f"(attempt {attempt}/{max_retries}): {e}"
+                )
+
+    error_console.print(
+        f"[red]Failed to download {alias} model after "
+        f"{max_retries} attempts: {last_error}[/red]"
+    )
+    raise typer.Exit(1)
+
+
+def _should_auto_download(raw_value: str) -> bool:
+    from pathlib import Path
+
+    if not raw_value:
+        return False
+    return not Path(raw_value).is_absolute()
+
+
 def _ensure_models_downloaded() -> None:
     """Auto-download models from HuggingFace if they are missing.
 
@@ -310,11 +357,7 @@ def _ensure_models_downloaded() -> None:
     from os import getenv
     from pathlib import Path
 
-    from huggingface_hub import snapshot_download
-    from rich.status import Status
-
     from aria.config.api import Vllm as VllmConfig
-    from aria.config.huggingface import HuggingFace
     from aria.config.models import Chat, Embeddings
 
     models_to_check = [
@@ -322,67 +365,24 @@ def _ensure_models_downloaded() -> None:
         ("embeddings", "EMBED_MODEL_PATH", Embeddings),
     ]
 
-    # In remote mode the chat model is served by an external vLLM endpoint,
-    # so we must never attempt to download it locally.  Only the in-process
-    # embeddings model still needs to be present on disk.
     if VllmConfig.remote:
         models_to_check = [m for m in models_to_check if m[0] != "chat"]
-
-    max_retries = 3
 
     for alias, env_var, config_cls in models_to_check:
         model_path = config_cls.model_path
         if not model_path:
-            continue  # Not configured — preflight will report it
+            continue
 
         path = Path(model_path)
         if path.exists() and path.is_dir():
             console.print(f"[green]✓[/green] {alias} model ready")
             continue
 
-        # Only auto-download for HuggingFace repo IDs (not absolute paths)
         raw_value = getenv(env_var, "")
-        if not raw_value or Path(raw_value).is_absolute():
-            continue  # Missing or local path that doesn't exist
+        if not _should_auto_download(raw_value):
+            continue
 
-        last_error: Exception | None = None
-        for attempt in range(1, max_retries + 1):
-            label = (
-                f"Downloading {alias} model ({raw_value})"
-                if attempt == 1
-                else (
-                    f"Retrying {alias} model download (attempt {attempt}/{max_retries})"
-                )
-            )
-            try:
-                with Status(f"[dim]{label}…[/dim]", console=console):
-                    snapshot_download(
-                        repo_id=raw_value,
-                        local_dir=str(path),
-                        token=HuggingFace.token,
-                        ignore_patterns=[
-                            "onnx/*",
-                            "openvino/*",
-                            "openvino_model.*",
-                        ],
-                    )
-                console.print(f"[green]✓[/green] {alias} model ready at {path}")
-                last_error = None
-                break
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries:
-                    console.print(
-                        f"[yellow]⚠[/yellow] {alias} model download failed "
-                        f"(attempt {attempt}/{max_retries}): {e}"
-                    )
-
-        if last_error is not None:
-            error_console.print(
-                f"[red]Failed to download {alias} model after "
-                f"{max_retries} attempts: {last_error}[/red]"
-            )
-            raise typer.Exit(1)
+        _download_model(alias, raw_value, path, max_retries=3)
 
 
 def _has_cuda() -> bool:
@@ -393,6 +393,74 @@ def _has_cuda() -> bool:
         return get_total_vram_mb() > 0
     except Exception:
         return False
+
+
+def _check_remote_endpoint() -> None:
+    from aria.config.models import Chat
+
+    try:
+        with _authenticated_request(f"{Chat.api_url}/models", timeout=10) as resp:
+            if resp.status == 200:
+                console.print("[green]✓[/green] Remote OpenAI endpoint reachable")
+                return
+    except (URLError, OSError) as e:
+        error_console.print(
+            f"[red]✗[/red] Remote OpenAI endpoint unreachable: {Chat.api_url}\n  {e}"
+        )
+        raise typer.Exit(1)
+
+
+def _check_cuda_available() -> None:
+    if _has_cuda():
+        return
+    error_console.print(
+        "[red]✗[/red] No CUDA-capable GPU detected. "
+        "Local vLLM requires NVIDIA CUDA drivers.\n"
+        "  Set [bold]ARIA_VLLM_REMOTE=true[/bold] in your .env "
+        "to connect to a remote OpenAI-compatible endpoint."
+    )
+    raise typer.Exit(1)
+
+
+def _is_local_vllm_healthy() -> bool:
+    from aria.config.models import Chat
+
+    port = Chat.get_port()
+    try:
+        with urlopen(f"http://localhost:{port}/health", timeout=3) as resp:
+            return bool(resp.status == 200)
+    except (URLError, OSError):
+        return False
+
+
+def _wait_for_vllm_healthy(timeout: int = 120) -> bool:
+    import time
+
+    from aria.config.models import Chat
+
+    port = Chat.get_port()
+    deadline = time.time() + timeout
+    console.print("[dim]Waiting for vLLM to become healthy...[/dim]")
+    while time.time() < deadline:
+        try:
+            with urlopen(f"http://localhost:{port}/health", timeout=3) as resp:
+                if resp.status == 200:
+                    return True
+        except (URLError, OSError):
+            pass
+        time.sleep(HEALTH_CHECK_INTERVAL)
+    return False
+
+
+def _start_local_vllm() -> None:
+    from aria.server.vllm import VllmServerManager
+
+    console.print("[dim]Starting vLLM server...[/dim]")
+    try:
+        VllmServerManager().start_all()
+    except Exception as e:
+        error_console.print(f"[red]✗[/red] Failed to start vLLM: {e}")
+        raise typer.Exit(1)
 
 
 def _ensure_endpoint_reachable() -> None:
@@ -406,71 +474,22 @@ def _ensure_endpoint_reachable() -> None:
     - Local mode without CUDA: fail with guidance to use remote mode.
     """
     from aria.config.api import Vllm as VllmConfig
-    from aria.config.models import Chat
 
-    # ── Remote mode ──────────────────────────────────────────────────────
     if VllmConfig.remote:
-        try:
-            with _authenticated_request(f"{Chat.api_url}/models", timeout=10) as resp:
-                if resp.status == 200:
-                    console.print("[green]✓[/green] Remote OpenAI endpoint reachable")
-                    return
-        except (URLError, OSError) as e:
-            error_console.print(
-                f"[red]✗[/red] Remote OpenAI endpoint unreachable: "
-                f"{Chat.api_url}\n  {e}"
-            )
-            raise typer.Exit(1)
+        _check_remote_endpoint()
+        return
 
-    # ── Local mode — CUDA required ───────────────────────────────────────
-    if not _has_cuda():
-        error_console.print(
-            "[red]✗[/red] No CUDA-capable GPU detected. "
-            "Local vLLM requires NVIDIA CUDA drivers.\n"
-            "  Set [bold]ARIA_VLLM_REMOTE=true[/bold] in your .env "
-            "to connect to a remote OpenAI-compatible endpoint."
-        )
-        raise typer.Exit(1)
+    _check_cuda_available()
 
-    # ── Local mode with CUDA — ensure vLLM is running ────────────────────
-    # Check if vLLM is already healthy
-    try:
-        port = Chat.get_port()
-        with urlopen(f"http://localhost:{port}/health", timeout=3) as resp:
-            if resp.status == 200:
-                console.print("[green]✓[/green] OpenAI endpoint already running")
-                return
-    except (URLError, OSError):
-        pass  # Not running — will start below
+    if _is_local_vllm_healthy():
+        console.print("[green]✓[/green] OpenAI endpoint already running")
+        return
 
-    # Start vLLM explicitly
-    from aria.server.vllm import VllmServerManager
+    _start_local_vllm()
 
-    console.print("[dim]Starting vLLM server...[/dim]")
-    try:
-        vllm = VllmServerManager()
-        vllm.start_all()
-    except Exception as e:
-        error_console.print(f"[red]✗[/red] Failed to start vLLM: {e}")
-        raise typer.Exit(1)
-
-    # Poll for health (model loading can take 30s+)
-    import time
-
-    port = Chat.get_port()
-    vllm_timeout = 120  # seconds
-    deadline = time.time() + vllm_timeout
-    console.print("[dim]Waiting for vLLM to become healthy...[/dim]")
-
-    while time.time() < deadline:
-        try:
-            with urlopen(f"http://localhost:{port}/health", timeout=3) as resp:
-                if resp.status == 200:
-                    console.print("[green]✓[/green] OpenAI endpoint healthy")
-                    return
-        except (URLError, OSError):
-            pass
-        time.sleep(HEALTH_CHECK_INTERVAL)
+    if _wait_for_vllm_healthy():
+        console.print("[green]✓[/green] OpenAI endpoint healthy")
+        return
 
     error_console.print(
         "[red]✗[/red] OpenAI endpoint unhealthy after vLLM startup. "

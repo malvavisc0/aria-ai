@@ -8,9 +8,10 @@ Creates required files and directories on first launch:
 """
 
 import secrets
+from collections.abc import Callable
 from importlib.resources import as_file, files
 from pathlib import Path
-from shutil import copyfile
+from shutil import copy2, copyfile
 
 from rich.console import Console
 
@@ -223,6 +224,32 @@ def setup_logs() -> None:
     console.print("   [green]✓[/green] Created log file")
 
 
+def _copy_chainlit_config(dest: Path) -> None:
+    ref = files("aria").joinpath(".chainlit", "config.toml")
+    with as_file(ref) as src:
+        if src.is_file():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            copy2(src, dest)
+
+
+def _copy_chainlit_translations(dest: Path) -> None:
+    ref = files("aria").joinpath(".chainlit", "translations")
+    with as_file(ref) as src:
+        if not src.is_dir():
+            return
+        dest.mkdir(parents=True, exist_ok=True)
+        for json_file in src.iterdir():
+            if json_file.suffix == ".json":
+                copy2(json_file, dest / json_file.name)
+
+
+def _copy_chainlit_welcome(dest: Path) -> None:
+    ref = files("aria").joinpath("chainlit.md")
+    with as_file(ref) as src:
+        if src.is_file():
+            copy2(src, dest)
+
+
 def setup_chainlit_config() -> None:
     """Copy .chainlit/ (config + translations) and chainlit.md to ARIA_HOME.
 
@@ -231,42 +258,22 @@ def setup_chainlit_config() -> None:
     package and must be extracted once into ARIA_HOME.
     """
     import os
-    from shutil import copy2
 
     aria_home = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria"))
     chainlit_dest = aria_home / ".chainlit"
-    config_dest = chainlit_dest / "config.toml"
-    trans_dest = chainlit_dest / "translations"
-    md_dest = aria_home / "chainlit.md"
 
-    # Skip if everything is already in place.
-    if config_dest.exists() and trans_dest.exists() and md_dest.exists():
+    copies: list[tuple[Path, Callable[[Path], None]]] = [
+        (chainlit_dest / "config.toml", _copy_chainlit_config),
+        (chainlit_dest / "translations", _copy_chainlit_translations),
+        (aria_home / "chainlit.md", _copy_chainlit_welcome),
+    ]
+
+    if all(dest.exists() for dest, _ in copies):
         return
 
-    # ── .chainlit/config.toml ────────────────────────────────────────
-    if not config_dest.exists():
-        config_ref = files("aria").joinpath(".chainlit", "config.toml")
-        with as_file(config_ref) as config_src:
-            if config_src.is_file():
-                chainlit_dest.mkdir(parents=True, exist_ok=True)
-                copy2(config_src, config_dest)
-
-    # ── .chainlit/translations/*.json ────────────────────────────────
-    if not trans_dest.exists():
-        trans_ref = files("aria").joinpath(".chainlit", "translations")
-        with as_file(trans_ref) as trans_src:
-            if trans_src.is_dir():
-                trans_dest.mkdir(parents=True, exist_ok=True)
-                for json_file in trans_src.iterdir():
-                    if json_file.suffix == ".json":
-                        copy2(json_file, trans_dest / json_file.name)
-
-    # ── chainlit.md (welcome message) ────────────────────────────────
-    if not md_dest.exists():
-        md_ref = files("aria").joinpath("chainlit.md")
-        with as_file(md_ref) as md_src:
-            if md_src.is_file():
-                copy2(md_src, md_dest)
+    for dest, copy_fn in copies:
+        if not dest.exists():
+            copy_fn(dest)
 
     console.print(
         "   [green]✓[/green] Installed Chainlit config, translations, and welcome page"

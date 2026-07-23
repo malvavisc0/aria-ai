@@ -28,6 +28,76 @@ class GPUMetadata(BaseModel):
     compute_mode: str
 
 
+def _parse_memory(values: list[str]) -> tuple[int, int, int] | None:
+    try:
+        total_mem = int(float(values[3])) if values[3] else 0
+        used_mem = int(float(values[4])) if values[4] else 0
+        free_mem = int(float(values[5])) if values[5] else 0
+    except (ValueError, IndexError):
+        return None
+    return total_mem, used_mem, free_mem
+
+
+def _parse_numeric(value: str, suffixes: list[str] | None = None) -> int:
+    """Parse numeric value, optionally removing unit suffixes."""
+    if not value:
+        return 0
+    try:
+        cleaned = value
+        if suffixes:
+            for suffix in suffixes:
+                cleaned = cleaned.replace(suffix, "")
+        return int(float(cleaned))
+    except (ValueError, AttributeError):
+        return 0
+
+
+def _parse_display_active(value: str) -> bool:
+    return value.lower() in ("enabled", "yes", "true", "1")
+
+
+def _parse_gpu_line(line: str) -> GPUMetadata | None:
+    values = [v.strip() for v in line.split(",")]
+    if len(values) < 13:
+        return None
+    memory = _parse_memory(values)
+    if memory is None:
+        return None
+    total_mem, used_mem, free_mem = memory
+    memory_util = round((used_mem / total_mem * 100), 2) if total_mem > 0 else 0.0
+    return GPUMetadata(
+        index=int(values[0]),
+        name=values[1],
+        uuid=values[2],
+        total_memory=total_mem,
+        used_memory=used_mem,
+        free_memory=free_mem,
+        memory_utilization=memory_util,
+        power_limit=_parse_numeric(values[8], ["W", "w"]),
+        power_draw=_parse_numeric(values[9], ["W", "w"]),
+        temperature=_parse_numeric(values[10], ["C", "c"]),
+        fan_speed=_parse_numeric(values[11], ["%"]),
+        driver_version=values[7],
+        display_active=_parse_display_active(values[12]),
+        compute_mode=values[6],
+    )
+
+
+def _query_nvidia_smi() -> str:
+    return subprocess.run(
+        [
+            "nvidia-smi",
+            "--query-gpu=index,name,uuid,memory.total,memory.used,memory.free,"
+            "compute_mode,driver_version,power.limit,power.draw,temperature.gpu,"
+            "fan.speed,display_active",
+            "--format=csv,noheader,nounits",
+        ],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+
+
 def detect_gpus_with_details(log_errors: bool = False) -> list[GPUMetadata]:
     """
     Detect all installed NVIDIA GPUs with detailed information.
@@ -46,108 +116,20 @@ def detect_gpus_with_details(log_errors: bool = False) -> list[GPUMetadata]:
         None: All exceptions are caught and handled internally
     """
     try:
-        # Query for comprehensive GPU information
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                "--query-gpu=index,name,uuid,memory.total,memory.used,memory.free,"
-                "compute_mode,driver_version,power.limit,power.draw,temperature.gpu,"
-                "fan.speed,display_active",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        gpus = []
-        for line in result.stdout.strip().split("\n"):
-            if not line.strip():
-                continue
-
-            # Split the CSV line and extract values
-            values = [v.strip() for v in line.split(",")]
-
-            # Validate we have enough values (13 expected)
-            if len(values) < 13:
-                continue
-
-            # Parse memory values with validation
-            try:
-                total_mem = int(float(values[3])) if values[3] else 0
-                used_mem = int(float(values[4])) if values[4] else 0
-                free_mem = int(float(values[5])) if values[5] else 0
-            except (ValueError, IndexError):
-                continue
-
-            # Calculate memory utilization percentage (rounded to 2 decimals)
-            memory_util = (
-                round((used_mem / total_mem * 100), 2) if total_mem > 0 else 0.0
-            )
-
-            # Helper function to safely parse numeric values with unit suffixes
-            def parse_numeric(value: str, suffixes: list[str] | None = None) -> int:
-                """Parse numeric value, optionally removing unit suffixes."""
-                if not value:
-                    return 0
-                try:
-                    # Remove common suffixes if provided
-                    cleaned = value
-                    if suffixes:
-                        for suffix in suffixes:
-                            cleaned = cleaned.replace(suffix, "")
-                    return int(float(cleaned))
-                except (ValueError, AttributeError):
-                    return 0
-
-            # Parse power values (may have 'W' suffix)
-            power_limit = parse_numeric(values[8], ["W", "w"])
-            power_draw = parse_numeric(values[9], ["W", "w"])
-
-            # Parse temperature (may have 'C' suffix)
-            temperature = parse_numeric(values[10], ["C", "c"])
-
-            # Parse fan speed (may have '%' suffix)
-            fan_speed = parse_numeric(values[11], ["%"])
-
-            # Parse display active (case-insensitive boolean)
-            display_active_str = values[12].lower()
-            display_active = display_active_str in [
-                "enabled",
-                "yes",
-                "true",
-                "1",
-            ]
-
-            gpu = GPUMetadata(
-                index=int(values[0]),
-                name=values[1],
-                uuid=values[2],
-                total_memory=total_mem,
-                used_memory=used_mem,
-                free_memory=free_mem,
-                memory_utilization=memory_util,
-                power_limit=power_limit,
-                power_draw=power_draw,
-                temperature=temperature,
-                fan_speed=fan_speed,
-                driver_version=values[7],
-                display_active=display_active,
-                compute_mode=values[6],
-            )
-            gpus.append(gpu)
-
-        return gpus
-
-    except (
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-        ValueError,
-        IndexError,
-    ) as e:
+        stdout = _query_nvidia_smi()
+    except Exception as exc:
         if log_errors:
-            logger.warning(f"Failed to detect GPUs: {e}")
+            logger.warning(f"Failed to detect GPUs: {exc}")
         return []
+
+    gpus = []
+    for line in stdout.strip().split("\n"):
+        if not line.strip():
+            continue
+        gpu = _parse_gpu_line(line)
+        if gpu is not None:
+            gpus.append(gpu)
+    return gpus
 
 
 def detect_gpu_count() -> int:
@@ -462,127 +444,74 @@ def get_nvidia_smi_version() -> str:
         return ""
 
 
+_SAFETY_MARGIN = 0.10
+_MIN_CONTEXT = 1024
+_ABSOLUTE_MIN_GB = 1.5
+
+_EMBEDDING_TIERS = [
+    (2, 256),
+    (3, 384),
+    (4, 512),
+    (6, 768),
+    (8, 1024),
+    (12, 1536),
+    (16, 2048),
+    (24, 3072),
+    (32, 4096),
+]
+
+_LLM_TIERS = [
+    (4, 2048),
+    (6, 4096),
+    (8, 8192),
+    (10, 12288),
+    (12, 16384),
+    (14, 24576),
+    (16, 32768),
+    (20, 49152),
+    (24, 65536),
+    (28, 131072),
+    (32, 262144),
+    (40, 393216),
+    (48, 524288),
+    (64, 786432),
+    (96, 1048576),
+    (128, 1572864),
+]
+
+
+def _validate_context_inputs(free_vram_mb: int, model_size_mb: int) -> bool:
+    if not isinstance(free_vram_mb, int) or not isinstance(model_size_mb, int):
+        return False
+    if free_vram_mb <= 0 or model_size_mb < 0:
+        return False
+    return not (model_size_mb > 0 and free_vram_mb < model_size_mb)
+
+
+def _pick_tier(safe_memory_gb: float, tiers: list[tuple[int, int]]) -> int:
+    for threshold_gb, tokens in tiers:
+        if safe_memory_gb <= threshold_gb:
+            return tokens
+    return tiers[-1][1]
+
+
 def calculate_max_safe_context(
     free_vram_mb: int, model_size_mb: int = 0, is_embedding_model: bool = False
 ) -> int:
+    """Calculate the maximum safe context size (in tokens) for a model.
+
+    See module docstring examples.  Pulled out of one function to keep
+    complexity manageable.
     """
-    Calculate the maximum safe context size (in tokens) for a language model or embedding
-    model based on available VRAM, accounting for the model's memory requirements and
-    applying a safety margin.
-
-    The function uses tiered thresholds that provide appropriate context sizes for different
-    VRAM capacities, with more conservative values for embedding models. It validates inputs
-    to prevent errors and ensures at least a minimum context size is always available when
-    possible. The function distinguishes between regular language models and embedding models
-    through a boolean flag, providing optimized context sizes for each type of model.
-
-    Process:
-    1. Validates input parameters (type and value checks)
-    2. Subtracts model size from free VRAM to get available memory
-    3. Applies a 10% safety margin to available memory
-    4. Checks if safe memory meets minimum tier threshold
-    5. Selects appropriate tier based on safe memory
-    6. Returns context size (enforcing minimum of 1024 tokens)
-
-    Args:
-        free_vram_mb: Currently free VRAM in megabytes (from get_free_vram_per_gpu)
-        model_size_mb: Size of the model being loaded in megabytes (including embeddings)
-        is_embedding_model: Whether this is an embedding model (default: False)
-
-    Returns:
-        Maximum safe context size in tokens (0 if VRAM is insufficient)
-
-    Examples:
-        >>> # LLM with 16GB free VRAM, no model loaded
-        >>> calculate_max_safe_context(16384, 0, False)
-        32768
-
-        >>> # Embedding model with 8GB free VRAM
-        >>> calculate_max_safe_context(8192, 0, True)
-        1024
-
-        >>> # LLM with 10GB free, 2GB model
-        >>> calculate_max_safe_context(10240, 2048, False)
-        16384
-    """
-    # Constants
-    SAFETY_MARGIN = 0.10  # 10% safety margin for other operations
-    MIN_CONTEXT = 1024  # Minimum context size in tokens
-
-    # Embedding-specific thresholds (more conservative, more granular)
-    # Format: (memory_threshold_gb, context_tokens)
-    EMBEDDING_TIERS = [
-        (2, 256),  # 2GB → 256 tokens
-        (3, 384),  # 3GB → 384 tokens
-        (4, 512),  # 4GB → 512 tokens
-        (6, 768),  # 6GB → 768 tokens
-        (8, 1024),  # 8GB → 1024 tokens
-        (12, 1536),  # 12GB → 1536 tokens
-        (16, 2048),  # 16GB → 2048 tokens
-        (24, 3072),  # 24GB → 3072 tokens
-        (32, 4096),  # 32GB+ → 4096 tokens (max for embeddings)
-    ]
-
-    # Regular LLM tiers (more granular)
-    # Format: (memory_threshold_gb, context_tokens)
-    LLM_TIERS = [
-        (4, 2048),  # 4GB → 2,048 tokens
-        (6, 4096),  # 6GB → 4,096 tokens
-        (8, 8192),  # 8GB → 8,192 tokens
-        (10, 12288),  # 10GB → 12,288 tokens
-        (12, 16384),  # 12GB → 16,384 tokens
-        (14, 24576),  # 14GB → 24,576 tokens
-        (16, 32768),  # 16GB → 32,768 tokens
-        (20, 49152),  # 20GB → 49,152 tokens
-        (24, 65536),  # 24GB → 65,536 tokens
-        (28, 131072),  # 28GB → 131,072 tokens
-        (32, 262144),  # 32GB → 262,144 tokens
-        (40, 393216),  # 40GB → 393,216 tokens
-        (48, 524288),  # 48GB → 524,288 tokens
-        (64, 786432),  # 64GB → 786,432 tokens
-        (96, 1048576),  # 96GB → 1,048,576 tokens
-        (128, 1572864),  # 128GB → 1,572,864 tokens (max for LLMs)
-    ]
-
-    # Select appropriate tier list based on model type
-    tiers = EMBEDDING_TIERS if is_embedding_model else LLM_TIERS
-
-    # Absolute minimum memory threshold (below this, return 0)
-    # This is lower than the first tier to allow the tier selection to work
-    ABSOLUTE_MIN_GB = 1.5
-
-    # Comprehensive input validation
-    if not isinstance(free_vram_mb, int) or not isinstance(model_size_mb, int):
-        return 0
-    if free_vram_mb <= 0 or model_size_mb < 0:
-        return 0
-    if model_size_mb > 0 and free_vram_mb < model_size_mb:
+    if not _validate_context_inputs(free_vram_mb, model_size_mb):
         return 0
 
-    # Calculate memory available after loading model
-    available_after_model = free_vram_mb - model_size_mb
-
-    # Apply safety margin
-    safe_memory_mb = available_after_model * (1 - SAFETY_MARGIN)
-    safe_memory_gb = safe_memory_mb / 1024
-
-    # Check if we have enough for absolute minimum threshold
-    if safe_memory_gb < ABSOLUTE_MIN_GB:
+    tiers = _EMBEDDING_TIERS if is_embedding_model else _LLM_TIERS
+    safe_memory_gb = (free_vram_mb - model_size_mb) * (1 - _SAFETY_MARGIN) / 1024
+    if safe_memory_gb < _ABSOLUTE_MIN_GB:
         return 0
 
-    # Find the appropriate tier based on safe memory
-    # Select the first tier where safe_memory_gb <= threshold
-    context_size = MIN_CONTEXT
-    for threshold_gb, tokens in tiers:
-        if safe_memory_gb <= threshold_gb:
-            context_size = tokens
-            break
-    else:
-        # If no tier matched (memory exceeds all thresholds), use maximum tier
-        context_size = tiers[-1][1]
-
-    # Ensure we return at least the minimum context
-    return max(MIN_CONTEXT, context_size)
+    return max(_MIN_CONTEXT, _pick_tier(safe_memory_gb, tiers))
 
 
 # 4-bit KV cache types: 0.5 bytes per element

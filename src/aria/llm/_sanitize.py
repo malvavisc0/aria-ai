@@ -30,6 +30,52 @@ from llama_index.llms.openai_like import OpenAILike
 from loguru import logger
 from openai.types.chat import ChatCompletionMessageParam
 
+_KV_PATTERN = re.compile(
+    r'"(\w+)"\s*:\s*' r'("(?:[^"\\]|\\.)*"|[\d.]+|true|false|null)'
+)
+
+_JSON_DECODER = json.JSONDecoder()
+
+
+def _literal_value(raw_v: str) -> Any:
+    if raw_v.startswith('"'):
+        return json.loads(raw_v)
+    if raw_v == "true":
+        return True
+    if raw_v == "false":
+        return False
+    if raw_v == "null":
+        return None
+    try:
+        return json.loads(raw_v)
+    except (json.JSONDecodeError, ValueError):
+        return raw_v
+
+
+def _regex_recover(arguments: str) -> dict[str, Any] | None:
+    matches = _KV_PATTERN.findall(arguments)
+    if not matches:
+        return None
+    recovered = {k: _literal_value(raw_v) for k, raw_v in matches}
+    logger.warning("Regex-recovered tool-call arguments: {}", recovered)
+    return recovered
+
+
+def _raw_decode_recover(arguments: str) -> dict[str, Any] | None:
+    try:
+        obj, _end = _JSON_DECODER.raw_decode(arguments.strip())
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if isinstance(obj, dict):
+        logger.warning(
+            "Recovered tool-call arguments from malformed JSON "
+            "(truncated at char {}): {}",
+            _end,
+            arguments[:200],
+        )
+        return obj
+    return {"value": obj}
+
 
 def _sanitize_tool_call_args(arguments: Any) -> dict[str, Any]:
     """Ensure tool-call arguments are returned as a JSON-safe object.
@@ -45,72 +91,28 @@ def _sanitize_tool_call_args(arguments: Any) -> dict[str, Any]:
     request can at least proceed (the tool will report a missing-argument
     error which is handled gracefully by the agent loop).
     """
-    # Already a dict — nothing to do.
     if isinstance(arguments, dict):
         return arguments
-
     if isinstance(arguments, (list, tuple)):
         return {"value": list(arguments)}
-
     if arguments is None:
         return {}
-
     if not isinstance(arguments, str):
         return {"value": arguments}
 
-    # Fast path: valid JSON.
     try:
         parsed = json.loads(arguments)
-        if isinstance(parsed, dict):
-            return parsed
-        # Non-dict JSON (e.g. a bare string) — wrap it.
-        return {"value": parsed}
+        return parsed if isinstance(parsed, dict) else {"value": parsed}
     except (json.JSONDecodeError, ValueError):
         pass
 
-    # Slow path: attempt to extract the *first* complete JSON object.
-    # This handles the "Extra data" case where the model emitted two
-    # concatenated objects like  {"k":"v"}{"k2":"v2"}
-    try:
-        decoder = json.JSONDecoder()
-        obj, _end = decoder.raw_decode(arguments.strip())
-        if isinstance(obj, dict):
-            logger.warning(
-                "Recovered tool-call arguments from malformed JSON "
-                "(truncated at char {}): {}",
-                _end,
-                arguments[:200],
-            )
-            return obj
-        return {"value": obj}
-    except (json.JSONDecodeError, ValueError):
-        pass
-
-    # Last resort: try to pull key=value pairs with a regex.
-    # Matches string values, numbers, booleans, and null.
-    kv_pattern = re.compile(
-        r'"(\w+)"\s*:\s*' r'("(?:[^"\\]|\\.)*"|[\d.]+|true|false|null)'
-    )
-    matches = kv_pattern.findall(arguments)
-    if matches:
-        recovered: dict[str, Any] = {}
-        for k, raw_v in matches:
-            if raw_v.startswith('"'):
-                # Strip surrounding quotes and unescape.
-                recovered[k] = json.loads(raw_v)
-            elif raw_v == "true":
-                recovered[k] = True
-            elif raw_v == "false":
-                recovered[k] = False
-            elif raw_v == "null":
-                recovered[k] = None
-            else:
-                try:
-                    recovered[k] = json.loads(raw_v)
-                except (json.JSONDecodeError, ValueError):
-                    recovered[k] = raw_v
-        logger.warning("Regex-recovered tool-call arguments: {}", recovered)
+    recovered = _raw_decode_recover(arguments)
+    if recovered is not None:
         return recovered
+
+    regex_result = _regex_recover(arguments)
+    if regex_result is not None:
+        return regex_result
 
     logger.warning(
         "Could not sanitize tool-call arguments, defaulting to {{}}: {}",
@@ -136,6 +138,145 @@ def _sanitize_tool_call_arguments_json(arguments: Any) -> str:
     return json.dumps(sanitized, ensure_ascii=False, separators=(",", ":"))
 
 
+def _stringify_block_kwargs(raw: Any) -> str:
+    if isinstance(raw, dict):
+        return json.dumps(raw, ensure_ascii=False)
+    if isinstance(raw, str):
+        return _sanitize_tool_call_arguments_json(raw)
+    return json.dumps(_sanitize_tool_call_args(raw), ensure_ascii=False)
+
+
+def _sanitize_tool_call_block(
+    block: ToolCallBlock,
+) -> tuple[ToolCallBlock | None, bool]:
+    raw = block.tool_kwargs
+    fixed_str = _stringify_block_kwargs(raw)
+    if fixed_str == raw:
+        return None, False
+    logger.debug(
+        "Sanitized ToolCallBlock.tool_kwargs: {} → {}",
+        repr(raw)[:120],
+        repr(fixed_str)[:120],
+    )
+    return (
+        ToolCallBlock(
+            tool_name=block.tool_name,
+            tool_kwargs=fixed_str,
+            tool_call_id=block.tool_call_id,
+        ),
+        True,
+    )
+
+
+def _ensure_ak_copy(
+    ak: dict[str, Any], ak_copy: dict[str, Any] | None
+) -> dict[str, Any]:
+    if ak_copy is None:
+        return copy.deepcopy(ak)
+    return ak_copy
+
+
+def _sanitize_choice_delta_tool_call(
+    tc: Any,
+    raw_tool_calls: list,
+    new_tool_calls: list,
+    ak: dict[str, Any],
+) -> tuple[Any, dict[str, Any] | None, bool]:
+    if not (hasattr(tc, "function") and hasattr(tc.function, "arguments")):
+        return tc, None, False
+    raw_args = tc.function.arguments
+    fixed = _sanitize_tool_call_arguments_json(raw_args)
+    if fixed == raw_args:
+        return tc, None, False
+    logger.debug(
+        "Sanitized additional_kwargs tool_call args: {} → {}",
+        repr(raw_args)[:120],
+        repr(fixed)[:120],
+    )
+    ak_copy = _ensure_ak_copy(ak, None)
+    raw_tool_calls = ak_copy["tool_calls"]
+    tc = raw_tool_calls[len(new_tool_calls)]
+    tc.function.arguments = fixed
+    return tc, ak_copy, True
+
+
+def _sanitize_dict_tool_call(
+    tc: Any,
+    raw_tool_calls: list,
+    new_tool_calls: list,
+    ak: dict[str, Any],
+) -> tuple[Any, dict[str, Any] | None, bool]:
+    if not isinstance(tc, dict):
+        return tc, None, False
+    func = tc.get("function", {})
+    if "arguments" not in func:
+        return tc, None, False
+    raw_args = func["arguments"]
+    fixed = _sanitize_tool_call_arguments_json(raw_args)
+    if fixed == raw_args:
+        return tc, None, False
+    ak_copy = _ensure_ak_copy(ak, None)
+    raw_tool_calls = ak_copy["tool_calls"]
+    tc = raw_tool_calls[len(new_tool_calls)]
+    func = tc.get("function", {})
+    func["arguments"] = fixed
+    return tc, ak_copy, True
+
+
+def _sanitize_additional_kwargs_tool_calls(
+    msg: ChatMessage,
+) -> tuple[dict[str, Any] | None, bool]:
+    ak = msg.additional_kwargs
+    if "tool_calls" not in ak:
+        return None, False
+    raw_tool_calls = ak["tool_calls"]
+    new_tool_calls = []
+    ak_copy: dict[str, Any] | None = None
+    changed = False
+    for tc in raw_tool_calls:
+        tc, ak_copy, did_change = _sanitize_choice_delta_tool_call(
+            tc, raw_tool_calls, new_tool_calls, ak
+        )
+        if did_change:
+            changed = True
+        tc, ak_copy_2, did_change = _sanitize_dict_tool_call(
+            tc, raw_tool_calls, new_tool_calls, ak
+        )
+        if did_change:
+            changed = True
+            ak_copy = ak_copy or ak_copy_2
+        new_tool_calls.append(tc)
+    return ak_copy if changed else None, changed
+
+
+def _sanitize_message_blocks(
+    msg: ChatMessage,
+) -> tuple[list, bool]:
+    new_blocks = list(msg.blocks)
+    changed = False
+    for i, block in enumerate(new_blocks):
+        if not isinstance(block, ToolCallBlock):
+            continue
+        new_block, did_change = _sanitize_tool_call_block(block)
+        if did_change and new_block is not None:
+            new_blocks[i] = new_block
+            changed = True
+    return new_blocks, changed
+
+
+def _build_sanitized_message(
+    msg: ChatMessage,
+    new_blocks: list,
+    ak_copy: dict[str, Any] | None,
+) -> ChatMessage:
+    return ChatMessage(
+        role=msg.role,
+        blocks=new_blocks,
+        additional_kwargs=ak_copy or msg.additional_kwargs,
+        content=msg.content,
+    )
+
+
 def _sanitize_messages(messages: Sequence[ChatMessage]) -> List[ChatMessage]:
     """Return *messages* with tool-call arguments guaranteed to be valid JSON.
 
@@ -149,94 +290,12 @@ def _sanitize_messages(messages: Sequence[ChatMessage]) -> List[ChatMessage]:
     """
     sanitized: List[ChatMessage] = []
     for msg in messages:
-        changed = False
-
-        # --- Path 1: ToolCallBlock in blocks ---
-        # The OpenAI API requires `function.arguments` to be a JSON *string*.
-        # LlamaIndex may store tool_kwargs as a dict (after parsing or via the
-        # `or {}` fallback).  If a dict reaches utils.py, the openai SDK's
-        # Pydantic model coerces it with str() → Python repr with single quotes
-        # → vLLM fails with "Expecting property name enclosed in double quotes".
-        new_blocks = list(msg.blocks)
-        for i, block in enumerate(new_blocks):
-            if isinstance(block, ToolCallBlock):
-                raw = block.tool_kwargs
-                if isinstance(raw, dict):
-                    fixed_str = json.dumps(raw, ensure_ascii=False)
-                elif isinstance(raw, str):
-                    fixed_str = _sanitize_tool_call_arguments_json(raw)
-                else:
-                    fixed_str = json.dumps(
-                        _sanitize_tool_call_args(raw),
-                        ensure_ascii=False,
-                    )
-                if fixed_str != raw:
-                    logger.debug(
-                        "Sanitized ToolCallBlock.tool_kwargs: {} → {}",
-                        repr(raw)[:120],
-                        repr(fixed_str)[:120],
-                    )
-                    new_blocks[i] = ToolCallBlock(
-                        tool_name=block.tool_name,
-                        tool_kwargs=fixed_str,
-                        tool_call_id=block.tool_call_id,
-                    )
-                    changed = True
-
-        # --- Path 2: additional_kwargs["tool_calls"] ---
-        ak = msg.additional_kwargs
-        ak_copy: dict[str, Any] | None = None
-        if "tool_calls" in ak:
-            raw_tool_calls = ak["tool_calls"]
-            new_tool_calls = []
-            for tc in raw_tool_calls:
-                # ChoiceDeltaToolCall is a Pydantic model; .function.arguments
-                # is the raw string we need to fix.
-                if hasattr(tc, "function") and hasattr(tc.function, "arguments"):
-                    raw_args = tc.function.arguments
-                    fixed = _sanitize_tool_call_arguments_json(raw_args)
-                    if fixed != raw_args:
-                        logger.debug(
-                            "Sanitized additional_kwargs tool_call args: {} → {}",
-                            repr(raw_args)[:120],
-                            repr(fixed)[:120],
-                        )
-                        # Deep-copy ak on first mutation to avoid
-                        # mutating the caller's original message.
-                        if ak_copy is None:
-                            ak_copy = copy.deepcopy(ak)
-                            raw_tool_calls = ak_copy["tool_calls"]
-                            # Re-point tc to the copy's entry.
-                            tc = raw_tool_calls[len(new_tool_calls)]
-                        tc.function.arguments = fixed
-                        changed = True
-                elif isinstance(tc, dict):
-                    func = tc.get("function", {})
-                    if "arguments" in func:
-                        raw_args = func["arguments"]
-                        fixed = _sanitize_tool_call_arguments_json(raw_args)
-                        if fixed != raw_args:
-                            if ak_copy is None:
-                                ak_copy = copy.deepcopy(ak)
-                                raw_tool_calls = ak_copy["tool_calls"]
-                                tc = raw_tool_calls[len(new_tool_calls)]
-                                func = tc.get("function", {})
-                            func["arguments"] = fixed
-                            changed = True
-                new_tool_calls.append(tc)
-
-        if changed:
-            sanitized.append(
-                ChatMessage(
-                    role=msg.role,
-                    blocks=new_blocks,
-                    additional_kwargs=ak_copy or ak,
-                    content=msg.content,
-                )
-            )
+        new_blocks, blocks_changed = _sanitize_message_blocks(msg)
+        ak_copy, ak_changed = _sanitize_additional_kwargs_tool_calls(msg)
+        if blocks_changed or ak_changed:
+            sanitized.append(_build_sanitized_message(msg, new_blocks, ak_copy))
         else:
             sanitized.append(msg)
-
     return sanitized
 
 

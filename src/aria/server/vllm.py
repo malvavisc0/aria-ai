@@ -956,6 +956,37 @@ class VllmServerManager:
                 f"Check logs: {', '.join(str(log_files[f]) for f in failed)}"
             )
 
+    def _stop_tracked_pids(self, timeout: float) -> tuple[set[int], dict[str, int]]:
+        killed: set[int] = set()
+        survivors: dict[str, int] = {}
+        for role, pid in list(self._pids.items()):
+            if not is_process_running(pid):
+                continue
+            logger.info(f"Stopping {role} server (PID/PGID {pid})...")
+            stopped = stop_process_group(pid, timeout)
+            if not stopped and is_process_running(pid):
+                logger.warning(
+                    f"{role} server (PID {pid}) did not stop — PID preserved for retry"
+                )
+                survivors[role] = pid
+            else:
+                killed.add(pid)
+        return killed, survivors
+
+    def _stop_orphans(
+        self, orphans: list[int], killed: set[int], timeout: float
+    ) -> tuple[set[int], dict[str, int]]:
+        new_survivors: dict[str, int] = {}
+        for pid in orphans:
+            if pid in killed or not is_process_running(pid):
+                continue
+            stopped = stop_process_group(pid, timeout)
+            if stopped or not is_process_running(pid):
+                killed.add(pid)
+            else:
+                new_survivors[f"orphan-{pid}"] = pid
+        return killed, new_survivors
+
     def stop_all(self, timeout: float = 10.0, skip_vllm: bool = False) -> None:
         """Stop all running vLLM server processes.
 
@@ -974,22 +1005,7 @@ class VllmServerManager:
             self._clear_pids()
             return
 
-        killed_pids: set[int] = set()
-        survivors: dict[str, int] = {}
-
-        # Phase 1: Stop tracked PIDs from state file
-        for role, pid in list(self._pids.items()):
-            if is_process_running(pid):
-                logger.info(f"Stopping {role} server (PID/PGID {pid})...")
-                stopped = stop_process_group(pid, timeout)
-                if not stopped and is_process_running(pid):
-                    logger.warning(
-                        f"{role} server (PID {pid}) did not stop — "
-                        "PID preserved for retry"
-                    )
-                    survivors[role] = pid
-                else:
-                    killed_pids.add(pid)
+        killed_pids, survivors = self._stop_tracked_pids(timeout)
 
         # Phase 2: Scan for orphaned vLLM processes not in the PID file
         orphans = self._find_orphan_pids()
@@ -999,13 +1015,10 @@ class VllmServerManager:
                 f"Found {len(orphan_leaders)} orphaned vLLM process "
                 f"group(s): {orphan_leaders}"
             )
-            for pid in orphan_leaders:
-                if is_process_running(pid):
-                    stopped = stop_process_group(pid, timeout)
-                    if stopped or not is_process_running(pid):
-                        killed_pids.add(pid)
-                    else:
-                        survivors[f"orphan-{pid}"] = pid
+            killed_pids, orphan_survivors = self._stop_orphans(
+                orphan_leaders, killed_pids, timeout
+            )
+            survivors.update(orphan_survivors)
 
         if survivors:
             self._pids = survivors

@@ -409,6 +409,64 @@ async def _abort_startup(exc: Exception, phase: str) -> None:
     raise SystemExit(1) from exc
 
 
+async def _start_local_vllm_with_embeddings(embed_task) -> bool:
+    try:
+        logger.info("Starting vLLM inference servers...")
+        await asyncio.to_thread(_init_vllm_servers)
+        return True
+    except Exception as e:
+        await _cancel_embed_task(embed_task)
+        await _abort_startup(e, "vLLM")
+        return False
+
+
+async def _start_remote_vllm_with_embeddings(embed_task) -> bool:
+    logger.info(
+        "Remote vLLM mode — skipping local server startup "
+        f"(endpoint: {ChatConfig.api_url})"
+    )
+    if await _probe_remote_vllm(ChatConfig.api_url):
+        return True
+    await _cancel_embed_task(embed_task)
+    await _abort_startup(
+        RuntimeError(f"Remote vLLM endpoint not reachable at {ChatConfig.api_url}"),
+        "vLLM",
+    )
+    return False
+
+
+async def _cancel_embed_task(embed_task) -> None:
+    embed_task.cancel()
+    try:
+        await embed_task
+    except (asyncio.CancelledError, Exception):
+        pass
+
+
+async def _init_critical_infra() -> None:
+    from chainlit.config import FILES_DIRECTORY
+
+    FILES_DIRECTORY.mkdir(parents=True, exist_ok=True)
+    DebugConfig.path.mkdir(parents=True, exist_ok=True)
+    DebugConfig.startup_error_path.unlink(missing_ok=True)
+
+    _init_langfuse()
+    _init_logging()
+    logger.info("Starting Aria web UI...")
+
+    _init_storage_mount()
+    logger.info("Initializing database...")
+    _init_database()
+
+
+async def _finalize_subsystems(embed_task) -> None:
+    try:
+        await embed_task
+        logger.info("Embeddings model loaded")
+    except Exception as e:
+        logger.warning(f"Embeddings model failed to load: {e}.")
+
+
 async def on_app_startup_handler() -> None:
     """Initialize the application on startup.
 
@@ -418,83 +476,25 @@ async def on_app_startup_handler() -> None:
     trigger a full rollback. Non-critical subsystems (vector database,
     browser) are best-effort.
     """
-    # ------------------------------------------------------------------
-    # Phase 1 – Critical infrastructure (failure is fatal)
-    # ------------------------------------------------------------------
+    # Phase 1 – Critical infrastructure
     try:
-        from chainlit.config import FILES_DIRECTORY
-
-        FILES_DIRECTORY.mkdir(parents=True, exist_ok=True)
-        DebugConfig.path.mkdir(parents=True, exist_ok=True)
-        DebugConfig.startup_error_path.unlink(missing_ok=True)
-
-        _init_langfuse()
-        _init_logging()
-        logger.info("Starting Aria web UI...")
-
-        _init_storage_mount()
-
-        logger.info("Initializing database...")
-        _init_database()
+        await _init_critical_infra()
     except Exception as e:
         await _abort_startup(e, "critical")
 
-    # ------------------------------------------------------------------
-    # Phase 2 – vLLM startup (failure is fatal)
-    # ------------------------------------------------------------------
-    _vllm_ready = False
-    _llm_ready = False
-
-    # Start embeddings load concurrently with vLLM warmup (CPU-only,
-    # no dependency on vLLM). This hides embeddings load latency behind
-    # the vLLM health-check wait (~300s max).
+    # Phase 2 – vLLM startup
     logger.info("Loading embeddings model (concurrent with vLLM)...")
     embed_task = asyncio.create_task(asyncio.to_thread(_load_embeddings_sync))
 
     if VllmConfig.remote:
-        logger.info(
-            "Remote vLLM mode — skipping local server startup "
-            f"(endpoint: {ChatConfig.api_url})"
-        )
-        # Probe the remote endpoint so a down/misconfigured URL fails fast
-        # at startup instead of surfacing only on the first user message.
-        if not await _probe_remote_vllm(ChatConfig.api_url):
-            embed_task.cancel()
-            try:
-                await embed_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            await _abort_startup(
-                RuntimeError(
-                    f"Remote vLLM endpoint not reachable at {ChatConfig.api_url}"
-                ),
-                "vLLM",
-            )
-        _vllm_ready = True
+        _vllm_ready = await _start_remote_vllm_with_embeddings(embed_task)
     else:
-        try:
-            logger.info("Starting vLLM inference servers...")
-            await asyncio.to_thread(_init_vllm_servers)
-            _vllm_ready = True
-        except Exception as e:
-            embed_task.cancel()
-            try:
-                await embed_task
-            except (asyncio.CancelledError, Exception):
-                pass
-            await _abort_startup(e, "vLLM")
+        _vllm_ready = await _start_local_vllm_with_embeddings(embed_task)
 
-    # ------------------------------------------------------------------
-    # Phase 3 – Remaining subsystems (best effort)
-    # ------------------------------------------------------------------
+    # Phase 3 – Remaining subsystems
+    await _finalize_subsystems(embed_task)
 
-    # Await embeddings result (likely already done by now)
-    try:
-        await embed_task
-        logger.info("Embeddings model loaded")
-    except Exception as e:
-        logger.warning(f"Embeddings model failed to load: {e}.")
-
+    _llm_ready = False
     if _vllm_ready:
         try:
             logger.info("Initializing chat LLM client...")
@@ -509,7 +509,6 @@ async def on_app_startup_handler() -> None:
     except Exception as e:
         logger.warning(f"Vector database failed to initialize: {e}.")
 
-    # Clean up ChromaDB collections for deleted threads
     _cleanup_orphaned_collections()
 
     if _llm_ready and _state.llm is not None:
@@ -530,6 +529,69 @@ async def on_app_startup_handler() -> None:
     logger.info("Aria web UI startup complete")
 
 
+def _consume_skip_vllm_sentinel() -> bool:
+    sentinel = DataConfig.path / "skip_vllm_shutdown"
+    if not sentinel.is_file():
+        return False
+    try:
+        sentinel.unlink()
+    except OSError:
+        pass
+    return True
+
+
+def _stop_vllm_servers(skip_vllm: bool) -> None:
+    if not _state.vllm_manager:
+        return
+    try:
+        _state.vllm_manager.stop_all(skip_vllm=skip_vllm)
+        if skip_vllm:
+            logger.info("vLLM servers left running (--skip-vllm)")
+        else:
+            logger.info("All vLLM servers stopped")
+    except Exception as e:
+        logger.error(f"Error stopping vLLM servers: {e}")
+
+
+async def _stop_browser() -> None:
+    if not _state.browser_manager:
+        return
+    try:
+        await _state.browser_manager.stop()
+        logger.info("Lightpanda browser stopped")
+    except Exception as e:
+        logger.error(f"Error stopping Lightpanda browser: {e}")
+    finally:
+        from aria.tools.browser.manager import set_browser_manager
+
+        set_browser_manager(None)
+        _state.browser_manager = None
+
+
+def _reset_app_state() -> None:
+    _state.vllm_manager = None
+    _state.llm = None
+    _state.embeddings = None
+    _state.vector_db = None
+    _state.agents_workflow = None
+    _state.prompt_enhancer = None
+    _state.startup_complete = False
+    _state.startup_event.clear()
+    if _state.db_engine:
+        _state.db_engine.dispose()
+        _state.db_engine = None
+
+
+def _remove_log_sinks() -> None:
+    global _log_sink_id, _tool_call_sink_id
+    if _log_sink_id is not None:
+        logger.remove(_log_sink_id)
+        _log_sink_id = None
+    if _tool_call_sink_id is not None:
+        logger.remove(_tool_call_sink_id)
+        _tool_call_sink_id = None
+
+
 async def on_app_shutdown_handler() -> None:
     """Clean up resources on application shutdown.
 
@@ -541,66 +603,13 @@ async def on_app_shutdown_handler() -> None:
     - Data layer cache
     - Logging sinks
     """
-    global _log_sink_id, _tool_call_sink_id
     logger.info("Shutting down Aria web UI...")
 
     from aria.web.hooks import reset_data_layer_cache
 
     reset_data_layer_cache()
-
-    # Check for sentinel file written by `aria server stop --skip-vllm`
-    _skip_sentinel = DataConfig.path / "skip_vllm_shutdown"
-    _skip_vllm = _skip_sentinel.is_file()
-    if _skip_vllm:
-        try:
-            _skip_sentinel.unlink()
-        except OSError:
-            pass
-
-    if _state.vllm_manager:
-        try:
-            _state.vllm_manager.stop_all(skip_vllm=_skip_vllm)
-            if _skip_vllm:
-                logger.info("vLLM servers left running (--skip-vllm)")
-            else:
-                logger.info("All vLLM servers stopped")
-        except Exception as e:
-            logger.error(f"Error stopping vLLM servers: {e}")
-
-    if _state.browser_manager:
-        try:
-            await _state.browser_manager.stop()
-            logger.info("Lightpanda browser stopped")
-        except Exception as e:
-            logger.error(f"Error stopping Lightpanda browser: {e}")
-        finally:
-            from aria.tools.browser.manager import set_browser_manager
-
-            set_browser_manager(None)
-            _state.browser_manager = None
-
-    _state.vllm_manager = None
-    _state.llm = None
-    _state.embeddings = None
-    _state.vector_db = None
-    _state.agents_workflow = None
-    _state.prompt_enhancer = None
-    _state.startup_complete = False
-    _state.startup_event.clear()
-
-    if _state.db_engine:
-        _state.db_engine.dispose()
-        _state.db_engine = None
-
+    _stop_vllm_servers(_consume_skip_vllm_sentinel())
+    await _stop_browser()
+    _reset_app_state()
     logger.info("Aria web UI shutdown complete")
-
-    # Log sinks are removed LAST so that all cleanup logging above is
-    # captured by the file sinks. This is intentional — removing sinks
-    # earlier would silently drop diagnostic messages during shutdown.
-    if _log_sink_id is not None:
-        logger.remove(_log_sink_id)
-        _log_sink_id = None
-
-    if _tool_call_sink_id is not None:
-        logger.remove(_tool_call_sink_id)
-        _tool_call_sink_id = None
+    _remove_log_sinks()

@@ -167,6 +167,95 @@ class ReasoningSession:
             "timestamp": entry["timestamp"],
         }
 
+    def _scratchpad_set(
+        self, key: str, value: str | None, reason: str, now: str
+    ) -> dict[str, Any]:
+        if value is None:
+            return {
+                "status": "error",
+                "error": {
+                    "code": "VALUE_REQUIRED",
+                    "message": "Value required for set operation",
+                },
+            }
+        self.scratchpad[key] = {"value": value, "updated": now, "reason": reason}
+        self.persist_scratchpad_item(key, self.scratchpad[key])
+        self.persist_tool_event(
+            tool_name="use_scratchpad",
+            reason=reason,
+            timestamp=now,
+            payload={"tool": "set", "key": key},
+        )
+        return {
+            "tool": "set",
+            "key": key,
+            "value": value,
+            "reason": reason,
+            "timestamp": now,
+        }
+
+    def _scratchpad_get(self, key: str, now: str) -> dict[str, Any]:
+        if key in self.scratchpad:
+            return {
+                "tool": "get",
+                "key": key,
+                "value": self.scratchpad[key]["value"],
+                "timestamp": now,
+            }
+        return {
+            "status": "error",
+            "error": {
+                "code": "KEY_NOT_FOUND",
+                "message": f"Key '{key}' not found",
+            },
+        }
+
+    def _scratchpad_list(self, now: str) -> dict[str, Any]:
+        if not self.scratchpad:
+            return {"tool": "list", "items": [], "timestamp": now}
+        return {
+            "tool": "list",
+            "items": [
+                {
+                    "key": k,
+                    "value": v.get("value"),
+                    "updated": v.get("updated"),
+                    "reason": v.get("reason"),
+                }
+                for k, v in self.scratchpad.items()
+            ],
+            "timestamp": now,
+        }
+
+    def _scratchpad_clear(self, key: str, reason: str, now: str) -> dict[str, Any]:
+        if key == "all":
+            self.scratchpad.clear()
+            self.clear_scratchpad_db()
+            self.persist_tool_event(
+                tool_name="use_scratchpad",
+                reason=reason,
+                timestamp=now,
+                payload={"tool": "clear", "key": "all"},
+            )
+            return {"tool": "clear", "key": "all", "timestamp": now}
+        if key not in self.scratchpad:
+            return {
+                "status": "error",
+                "error": {
+                    "code": "KEY_NOT_FOUND",
+                    "message": f"Key '{key}' not found for clear operation",
+                },
+            }
+        self.scratchpad.pop(key, None)
+        self.delete_scratchpad_item_db(key)
+        self.persist_tool_event(
+            tool_name="use_scratchpad",
+            reason=reason,
+            timestamp=now,
+            payload={"tool": "clear", "key": key},
+        )
+        return {"tool": "clear", "key": key, "timestamp": now}
+
     def scratchpad_operation(
         self,
         reason: str,
@@ -188,114 +277,19 @@ class ReasoningSession:
         now = datetime.now(UTC).isoformat()
         match operation:
             case "set":
-                if value is None:
-                    return {
-                        "status": "error",
-                        "error": {
-                            "code": "VALUE_REQUIRED",
-                            "message": "Value required for set operation",
-                        },
-                    }
-                self.scratchpad[key] = {
-                    "value": value,
-                    "updated": now,
-                    "reason": reason,
-                }
-                # Persist to database
-                self.persist_scratchpad_item(key, self.scratchpad[key])
-
-                self.persist_tool_event(
-                    tool_name="use_scratchpad",
-                    reason=reason,
-                    timestamp=now,
-                    payload={"tool": "set", "key": key},
-                )
-
-                return {
-                    "tool": "set",
-                    "key": key,
-                    "value": value,
-                    "reason": reason,
-                    "timestamp": now,
-                }
+                return self._scratchpad_set(key, value, reason, now)
             case "get":
-                if key in self.scratchpad:
-                    return {
-                        "tool": "get",
-                        "key": key,
-                        "value": self.scratchpad[key]["value"],
-                        "timestamp": now,
-                    }
-                return {
-                    "status": "error",
-                    "error": {
-                        "code": "KEY_NOT_FOUND",
-                        "message": f"Key '{key}' not found",
-                    },
-                }
+                return self._scratchpad_get(key, now)
             case "list":
-                if not self.scratchpad:
-                    return {
-                        "tool": "list",
-                        "items": [],
-                        "timestamp": now,
-                    }
-                return {
-                    "tool": "list",
-                    "items": [
-                        {
-                            "key": k,
-                            "value": v.get("value"),
-                            "updated": v.get("updated"),
-                            "reason": v.get("reason"),
-                        }
-                        for k, v in self.scratchpad.items()
-                    ],
-                    "timestamp": now,
-                }
+                return self._scratchpad_list(now)
             case "clear":
-                if key == "all":
-                    self.scratchpad.clear()
-                    self.clear_scratchpad_db()
-                    self.persist_tool_event(
-                        tool_name="use_scratchpad",
-                        reason=reason,
-                        timestamp=now,
-                        payload={"tool": "clear", "key": "all"},
-                    )
-                    return {
-                        "tool": "clear",
-                        "key": "all",
-                        "timestamp": now,
-                    }
-                # Check if key exists before attempting to delete
-                if key not in self.scratchpad:
-                    return {
-                        "status": "error",
-                        "error": {
-                            "code": "KEY_NOT_FOUND",
-                            "message": f"Key '{key}' not found for clear operation",
-                        },
-                    }
-                self.scratchpad.pop(key, None)
-                self.delete_scratchpad_item_db(key)
-                self.persist_tool_event(
-                    tool_name="use_scratchpad",
-                    reason=reason,
-                    timestamp=now,
-                    payload={"tool": "clear", "key": key},
-                )
-                return {
-                    "tool": "clear",
-                    "key": key,
-                    "timestamp": now,
-                }
+                return self._scratchpad_clear(key, reason, now)
             case _:
                 return {
                     "status": "error",
                     "error": {
                         "code": "UNSUPPORTED_OPERATION",
-                        "message": ("Supported operations: get, set, list, clear"),
+                        "message": "Supported operations: get, set, list, clear",
                     },
                 }
 

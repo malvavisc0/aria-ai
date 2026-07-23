@@ -50,6 +50,48 @@ PYTORCH_INDEX: dict[str, str] = {
 PYPI_JSON = "https://pypi.org/pypi/vllm/json"
 
 
+def _cuda_target_from_version(major: int, minor: int) -> str:
+    """Map CUDA version to the highest compatible PyTorch wheel target."""
+    if major >= 13 or (major == 12 and minor >= 6):
+        return "cu126"
+    if major == 12 and minor >= 4:
+        return "cu124"
+    if major == 12 and minor >= 1:
+        return "cu121"
+    if major == 11 and minor >= 8:
+        return "cu118"
+    return "cu126"  # Fallback to latest
+
+
+def _detect_cuda_target() -> str | None:
+    try:
+        from aria.helpers.nvidia import get_cuda_version
+
+        cuda_version = get_cuda_version()
+    except Exception as exc:
+        logger.debug(f"NVIDIA CUDA detection failed: {exc}")
+        return None
+    if not cuda_version:
+        return None
+    major_str, minor_str = cuda_version.split(".", 1)
+    target = _cuda_target_from_version(int(major_str), int(minor_str))
+    logger.info(f"CUDA {cuda_version} detected → {target} target")
+    return target
+
+
+def _detect_rocm_target() -> str | None:
+    try:
+        if shutil.which("rocm-smi") is not None:
+            logger.info("rocm-smi found → rocm6 target")
+            return "rocm6"
+        if Path("/opt/rocm").is_dir():
+            logger.info("/opt/rocm directory found → rocm6 target")
+            return "rocm6"
+    except Exception as exc:
+        logger.debug(f"ROCm detection failed: {exc}")
+    return None
+
+
 def detect_install_target() -> str:
     """Detect the appropriate vLLM install target for this system.
 
@@ -68,48 +110,12 @@ def detect_install_target() -> str:
         # "cu126" on an NVIDIA system with CUDA 12.6+
         ```
     """
-    # --- NVIDIA CUDA ---
-    try:
-        from aria.helpers.nvidia import get_cuda_version
-
-        cuda_version = get_cuda_version()
-        if cuda_version:
-            major, minor = cuda_version.split(".")
-            major, minor = int(major), int(minor)
-
-            # Map CUDA version to the highest compatible PyTorch wheel target.
-            # PyTorch provides wheels for cu118, cu121, cu124, cu126.
-            # Drivers are backward-compatible: CUDA 13.x can run cu126 wheels.
-            if major >= 13:
-                target = "cu126"
-            elif major == 12 and minor >= 6:
-                target = "cu126"
-            elif major == 12 and minor >= 4:
-                target = "cu124"
-            elif major == 12 and minor >= 1:
-                target = "cu121"
-            elif major == 11 and minor >= 8:
-                target = "cu118"
-            else:
-                target = "cu126"  # Fallback to latest
-
-            logger.info(f"CUDA {cuda_version} detected → {target} target")
-            return target
-    except Exception as exc:
-        logger.debug(f"NVIDIA CUDA detection failed: {exc}")
-
-    # --- AMD ROCm ---
-    try:
-        if shutil.which("rocm-smi") is not None:
-            logger.info("rocm-smi found → rocm6 target")
-            return "rocm6"
-        if Path("/opt/rocm").is_dir():
-            logger.info("/opt/rocm directory found → rocm6 target")
-            return "rocm6"
-    except Exception as exc:
-        logger.debug(f"ROCm detection failed: {exc}")
-
-    # --- CPU fallback ---
+    cuda_target = _detect_cuda_target()
+    if cuda_target:
+        return cuda_target
+    rocm_target = _detect_rocm_target()
+    if rocm_target:
+        return rocm_target
     logger.info("No GPU detected → cpu target")
     return "cpu"
 

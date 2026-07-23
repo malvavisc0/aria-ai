@@ -325,6 +325,67 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
             tags=cast(Any, tags_json),
         )
 
+    async def _resolve_user_for_element(self, thread_id: str) -> str:
+        """Resolve user_id from Chainlit session; fall back to DB lookup."""
+        try:
+            from chainlit.context import context
+
+            if context.session.user:
+                persisted = await self.get_user(context.session.user.identifier)
+                if persisted:
+                    return persisted.id
+        except Exception:
+            pass
+        return await self._get_user_id_by_thread(thread_id) or "unknown"
+
+    async def _read_element_content(self, element) -> Optional[Union[bytes, str]]:
+        from chainlit.logger import logger as chainlit_logger
+
+        if element.path:
+            async with aiofiles.open(element.path, "rb") as f:
+                return await f.read()
+        if element.url:
+            return None
+        if element.content:
+            return element.content
+        chainlit_logger.warning(f"create_element: no content {element.id}")
+        return None
+
+    async def _upload_element_content(
+        self, element, user_id: str, content: Union[bytes, str]
+    ) -> None:
+        if not self.storage_provider:
+            return
+        file_key = f"{user_id}/{element.id}" + (
+            f"/{element.name}" if element.name else ""
+        )
+        if not element.mime:
+            element.mime = "application/octet-stream"
+        uploaded = await self.storage_provider.upload_file(
+            object_key=file_key,
+            data=content,
+            mime=element.mime,
+            overwrite=True,
+        )
+        if uploaded:
+            element.url = uploaded.get("url")
+            setattr(element, "objectKey", uploaded.get("object_key"))
+
+    def _element_insert_query(self, element) -> tuple[str, dict[str, Any]]:
+        element_dict = cast(dict[str, Any], element.to_dict())
+        element_dict_cleaned = {k: v for k, v in element_dict.items() if v is not None}
+        if "props" in element_dict_cleaned:
+            element_dict_cleaned["props"] = json.dumps(element_dict_cleaned["props"])
+        columns = ", ".join(f'"{c}"' for c in element_dict_cleaned)
+        placeholders = ", ".join(f":{c}" for c in element_dict_cleaned)
+        updates = ", ".join(f'"{c}" = :{c}' for c in element_dict_cleaned if c != "id")
+        query = (
+            f"INSERT INTO elements ({columns}) "
+            f"VALUES ({placeholders}) "
+            f"ON CONFLICT (id) DO UPDATE SET {updates};"
+        )
+        return query, element_dict_cleaned
+
     async def create_element(self, element: "Element"):
         """Override to fix race condition: resolve userId from session context.
 
@@ -338,29 +399,12 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
         By resolving the userId from the Chainlit session context (which is
         always available at message time), we avoid the race condition.
         """
-        from chainlit.logger import logger as chainlit_logger
-
         if not self.storage_provider:
             return
         if not element.for_id:
             return
 
-        # Resolve userId from session context (available immediately)
-        # instead of querying DB where thread.userId may not be set yet
-        user_id = "unknown"
-        try:
-            from chainlit.context import context
-
-            if context.session.user:
-                persisted = await self.get_user(context.session.user.identifier)
-                if persisted:
-                    user_id = persisted.id
-        except Exception:
-            pass
-
-        # Fallback to DB lookup if session context unavailable
-        if user_id == "unknown":
-            user_id = await self._get_user_id_by_thread(element.thread_id) or "unknown"
+        user_id = await self._resolve_user_for_element(element.thread_id)
 
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -368,49 +412,13 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
                 f"user_id={user_id}, name={element.name}"
             )
 
-        content: Optional[Union[bytes, str]] = None
+        content = await self._read_element_content(element)
 
-        if element.path:
-            async with aiofiles.open(element.path, "rb") as f:
-                content = await f.read()
-        elif element.url:
-            content = None
-        elif element.content:
-            content = element.content
-        else:
-            chainlit_logger.warning(f"create_element: no content {element.id}")
+        if content is not None:
+            await self._upload_element_content(element, user_id, content)
 
-        if content is not None and self.storage_provider:
-            file_key = f"{user_id}/{element.id}" + (
-                f"/{element.name}" if element.name else ""
-            )
-            if not element.mime:
-                element.mime = "application/octet-stream"
-
-            uploaded = await self.storage_provider.upload_file(
-                object_key=file_key,
-                data=content,
-                mime=element.mime,
-                overwrite=True,
-            )
-            if uploaded:
-                element.url = uploaded.get("url")
-                setattr(element, "objectKey", uploaded.get("object_key"))
-
-        element_dict = cast(dict[str, Any], element.to_dict())
-        element_dict_cleaned = {k: v for k, v in element_dict.items() if v is not None}
-        if "props" in element_dict_cleaned:
-            element_dict_cleaned["props"] = json.dumps(element_dict_cleaned["props"])
-
-        columns = ", ".join(f'"{c}"' for c in element_dict_cleaned)
-        placeholders = ", ".join(f":{c}" for c in element_dict_cleaned)
-        updates = ", ".join(f'"{c}" = :{c}' for c in element_dict_cleaned if c != "id")
-        query = (
-            f"INSERT INTO elements ({columns}) "
-            f"VALUES ({placeholders}) "
-            f"ON CONFLICT (id) DO UPDATE SET {updates};"
-        )
-        await self.execute_sql(query=query, parameters=element_dict_cleaned)
+        query, params = self._element_insert_query(element)
+        await self.execute_sql(query=query, parameters=params)
 
     async def create_step(self, step_dict: StepDict):
         """Create/update a step, ensuring SQLite-safe serialization.
@@ -425,6 +433,35 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
             patched["tags"] = _json_dumps_or_none(patched["tags"])
 
         return await super().create_step(cast(StepDict, patched))
+
+    async def _resolve_user_id_from_context(self) -> str | None:
+        """Try to resolve the user_id from the active Chainlit session."""
+        try:
+            from chainlit.context import context
+
+            if not hasattr(context, "session") or not hasattr(context.session, "user"):
+                return None
+            current_user = context.session.user
+            if not current_user or not hasattr(current_user, "identifier"):
+                return None
+            result = await self.execute_sql(
+                query="SELECT id FROM users WHERE identifier = :identifier LIMIT 1",
+                parameters={"identifier": current_user.identifier},
+            )
+        except Exception as e:
+            logger.debug(
+                f"Could not get user_id from session context: {e}. "
+                "This is expected when called from API endpoints."
+            )
+            return None
+        if isinstance(result, list) and len(result) > 0:
+            user_id = result[0].get("id")
+            logger.debug(
+                f"Retrieved user_id '{user_id}' from session context "
+                f"for user '{current_user.identifier}'"
+            )
+            return user_id
+        return None
 
     async def get_all_user_threads(
         self, user_id: str | None = None, thread_id: str | None = None
@@ -442,33 +479,7 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
         # from the current Chainlit session context. This ensures each user
         # only sees their own threads.
         if user_id is None and thread_id is None:
-            try:
-                # Try to get the current user from Chainlit's context
-                # This works when called from within a Chainlit session (e.g., websocket)
-                from chainlit.context import context
-
-                if hasattr(context, "session") and hasattr(context.session, "user"):
-                    current_user = context.session.user
-                    if current_user and hasattr(current_user, "identifier"):
-                        # Look up the user_id from the database using the identifier
-                        user_query = """
-                            SELECT id FROM users WHERE identifier = :identifier LIMIT 1
-                        """
-                        result = await self.execute_sql(
-                            query=user_query,
-                            parameters={"identifier": current_user.identifier},
-                        )
-                        if isinstance(result, list) and len(result) > 0:
-                            user_id = result[0].get("id")
-                            logger.debug(
-                                f"Retrieved user_id '{user_id}' from session context "
-                                f"for user '{current_user.identifier}'"
-                            )
-            except Exception as e:
-                logger.debug(
-                    f"Could not get user_id from session context: {e}. "
-                    "This is expected when called from API endpoints."
-                )
+            user_id = await self._resolve_user_id_from_context()
 
         threads = await super().get_all_user_threads(
             user_id=user_id, thread_id=thread_id

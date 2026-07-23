@@ -225,6 +225,162 @@ def process(
 # ---------------------------------------------------------------------------
 
 
+def _missing_param_response(reason: str, param: str) -> str:
+    return tool_response(
+        tool="process",
+        reason=reason,
+        data={"error": f"Missing required '{param}' parameter."},
+    )
+
+
+def _resolve_run_target(
+    command: str, args: list[str] | None, use_shell: bool
+) -> tuple[str | list[str], str]:
+    if use_shell:
+        return command, command
+    cmd_list = [command] + (args or [])
+    return cmd_list, " ".join(cmd_list)
+
+
+def _count_running(entries: dict[str, dict]) -> int:
+    return sum(
+        1 for e in entries.values() if e.get("pid") and is_process_running(e["pid"])
+    )
+
+
+def _build_process_env(env: dict[str, str] | None) -> dict[str, str]:
+    from aria.config.folders import get_augmented_env
+
+    proc_env = get_augmented_env()
+    if env:
+        proc_env.update(env)
+    return proc_env
+
+
+def _schedule_timeout(name: str, pid: int, timeout: int | None) -> None:
+    if timeout is None or timeout <= 0:
+        return
+    timer = threading.Timer(timeout, _auto_kill, args=(pid, name))
+    timer.daemon = True
+    timer.start()
+
+
+def _start_response(
+    name: str,
+    pid: int,
+    full_command: str,
+    working_dir: Path,
+    use_shell: bool,
+    timeout: int | None,
+    reason: str,
+) -> str:
+    return tool_response(
+        tool="process",
+        reason=reason,
+        data={
+            "action": "start",
+            "name": name,
+            "pid": pid,
+            "command": full_command,
+            "working_dir": str(working_dir),
+            "use_shell": use_shell,
+            "timeout": timeout,
+            "message": f"Process '{name}' started (PID: {pid})",
+        },
+    )
+
+
+def _launch_process(
+    run_target: str | list[str],
+    use_shell: bool,
+    resolved_dir: Path,
+    proc_env: dict[str, str],
+    stdout_log: Path,
+    stderr_log: Path,
+) -> subprocess.Popen:
+    stdout_fh = open(stdout_log, "w")
+    stderr_fh = open(stderr_log, "w")
+    proc = subprocess.Popen(
+        run_target,
+        stdout=stdout_fh,
+        stderr=stderr_fh,
+        text=True,
+        cwd=resolved_dir,
+        env=proc_env,
+        shell=use_shell,
+        close_fds=False,
+        start_new_session=True,
+    )
+    stdout_fh.close()
+    stderr_fh.close()
+    return proc
+
+
+def _validate_start_preconditions(
+    reason: str, name: str | None, command: str | None, entries: dict[str, dict]
+) -> dict[str, dict] | str:
+    """Return the entries dict on success; an error response string on failure."""
+    if not name:
+        return _missing_param_response(reason, "name")
+    if not command:
+        return _missing_param_response(reason, "command")
+    if _is_command_blocked(command):
+        return tool_response(
+            tool="process",
+            reason=reason,
+            data={"error": "Command contains blocked patterns."},
+        )
+    if name in entries:
+        pid = entries[name].get("pid")
+        if pid and is_process_running(pid):
+            return tool_response(
+                tool="process",
+                reason=reason,
+                data={"error": f"Process '{name}' is already running (PID: {pid})."},
+            )
+    if _count_running(entries) >= _MAX_PROCESSES:
+        return tool_response(
+            tool="process",
+            reason=reason,
+            data={
+                "error": (
+                    f"Maximum of {_MAX_PROCESSES} concurrent processes "
+                    f"reached. Stop one first."
+                ),
+            },
+        )
+    return entries
+
+
+def _register_process(
+    entries: dict[str, dict],
+    *,
+    name: str,
+    proc: subprocess.Popen,
+    command: str,
+    full_command: str,
+    args: list[str] | None,
+    resolved_dir: Path,
+    use_shell: bool,
+    env: dict[str, str] | None,
+    stdout_log: Path,
+    stderr_log: Path,
+) -> None:
+    entries[name] = {
+        "pid": proc.pid,
+        "command": full_command,
+        "raw_command": command,
+        "raw_args": args,
+        "working_dir": str(resolved_dir),
+        "use_shell": use_shell,
+        "env": env,
+        "stdout_log": str(stdout_log),
+        "stderr_log": str(stderr_log),
+        "started_at": datetime.now(timezone.utc).isoformat(),
+    }
+    _save_processes(entries)
+
+
 def _action_start(
     reason: str,
     name: str | None,
@@ -236,50 +392,12 @@ def _action_start(
     use_shell: bool,
 ) -> str:
     """Start a new background process."""
-    if not name:
-        return tool_response(
-            tool="process",
-            reason=reason,
-            data={"error": "Missing required 'name' parameter."},
-        )
-    if not command:
-        return tool_response(
-            tool="process",
-            reason=reason,
-            data={"error": "Missing required 'command' parameter."},
-        )
-
-    if _is_command_blocked(command):
-        return tool_response(
-            tool="process",
-            reason=reason,
-            data={"error": "Command contains blocked patterns."},
-        )
-
     entries = _load_processes()
-    if name in entries:
-        pid = entries[name].get("pid")
-        if pid and is_process_running(pid):
-            return tool_response(
-                tool="process",
-                reason=reason,
-                data={"error": f"Process '{name}' is already running (PID: {pid})."},
-            )
-
-    active_count = sum(
-        1 for e in entries.values() if e.get("pid") and is_process_running(e["pid"])
-    )
-    if active_count >= _MAX_PROCESSES:
-        return tool_response(
-            tool="process",
-            reason=reason,
-            data={
-                "error": (
-                    f"Maximum of {_MAX_PROCESSES} concurrent processes "
-                    f"reached ({active_count} running). Stop one first."
-                ),
-            },
-        )
+    pre = _validate_start_preconditions(reason, name, command, entries)
+    if isinstance(pre, str):
+        return pre
+    entries = pre
+    assert name is not None and command is not None
 
     try:
         resolved_dir = _resolve_working_dir(working_dir)
@@ -290,79 +408,34 @@ def _action_start(
             data={"error": str(exc)},
         )
 
-    # Ensure ~/.aria/bin and the current Python env bin are on PATH
-    from aria.config.folders import get_augmented_env
-
-    proc_env = get_augmented_env()
-    if env:
-        proc_env.update(env)
-
-    if use_shell:
-        full_command = command
-        run_target = command
-    else:
-        cmd_list = [command] + (args or [])
-        full_command = " ".join(cmd_list)
-        run_target = cmd_list
+    proc_env = _build_process_env(env)
+    run_target, full_command = _resolve_run_target(command, args, use_shell)
 
     _LOG_DIR.mkdir(parents=True, exist_ok=True)
     stdout_log = _LOG_DIR / f"{name}.log"
     stderr_log = _LOG_DIR / f"{name}.err"
 
     try:
-        stdout_fh = open(stdout_log, "w")
-        stderr_fh = open(stderr_log, "w")
-
-        proc = subprocess.Popen(
-            run_target,
-            stdout=stdout_fh,
-            stderr=stderr_fh,
-            text=True,
-            cwd=resolved_dir,
-            env=proc_env,
-            shell=use_shell,
-            close_fds=False,  # Let child inherit fds directly — avoids
-            # macOS posix_spawn edge-cases with dup2 + close_fds.
-            start_new_session=True,  # Detach from parent process group
+        proc = _launch_process(
+            run_target, use_shell, resolved_dir, proc_env, stdout_log, stderr_log
         )
-
-        # Close file handles in parent — child owns them now
-        stdout_fh.close()
-        stderr_fh.close()
-
-        entries[name] = {
-            "pid": proc.pid,
-            "command": full_command,
-            "raw_command": command,
-            "raw_args": args,
-            "working_dir": str(resolved_dir),
-            "use_shell": use_shell,
-            "env": env,
-            "stdout_log": str(stdout_log),
-            "stderr_log": str(stderr_log),
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        }
-        _save_processes(entries)
-
-        if timeout is not None and timeout > 0:
-            timer = threading.Timer(timeout, _auto_kill, args=(proc.pid, name))
-            timer.daemon = True
-            timer.start()
-
+        _register_process(
+            entries,
+            name=name,
+            proc=proc,
+            command=command,
+            full_command=full_command,
+            args=args,
+            resolved_dir=resolved_dir,
+            use_shell=use_shell,
+            env=env,
+            stdout_log=stdout_log,
+            stderr_log=stderr_log,
+        )
+        _schedule_timeout(name, proc.pid, timeout)
         logger.info(f"Started process '{name}': {full_command} (PID: {proc.pid})")
-        return tool_response(
-            tool="process",
-            reason=reason,
-            data={
-                "action": "start",
-                "name": name,
-                "pid": proc.pid,
-                "command": full_command,
-                "working_dir": str(resolved_dir),
-                "use_shell": use_shell,
-                "timeout": timeout,
-                "message": f"Process '{name}' started (PID: {proc.pid})",
-            },
+        return _start_response(
+            name, proc.pid, full_command, resolved_dir, use_shell, timeout, reason
         )
     except FileNotFoundError:
         return tool_response(

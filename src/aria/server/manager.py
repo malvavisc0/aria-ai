@@ -295,7 +295,7 @@ class ServerManager:
         os.chdir(aria_home)
 
         cmd = self._build_command()
-        log_file = open(log_path, "a")  # noqa: WPS515 — kept open for subprocess
+        log_file = open(log_path, "a")
         from aria.config.folders import get_augmented_env
 
         env = get_augmented_env()

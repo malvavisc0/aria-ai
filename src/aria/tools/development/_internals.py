@@ -83,6 +83,51 @@ def _error_response(
     )
 
 
+def _validate_code(code: str | None) -> None:
+    if code is None:
+        return
+    if not isinstance(code, str):
+        raise PythonSecurityError("Code must be a string")
+    if len(code) > 10_000_000:
+        raise PythonSecurityError("Code size exceeds maximum limit (10MB)")
+
+
+def _validate_timeout_value(timeout: int | None) -> None:
+    if timeout is None:
+        return
+    if not isinstance(timeout, int):
+        raise ValueError("Timeout must be an integer")
+    if timeout <= 0:
+        raise ValueError("Timeout must be positive")
+    if timeout > MAX_TIMEOUT:
+        raise ValueError(
+            f"Timeout {timeout} exceeds maximum limit of {MAX_TIMEOUT} seconds"
+        )
+
+
+def _validate_no_traversal(value: str, label: str, exc_cls: type[Exception]) -> None:
+    if ".." in value:
+        raise exc_cls(f"Path traversal attempt detected in {label}")
+
+
+def _validate_filename(filename: str | None) -> None:
+    if filename is None:
+        return
+    if not isinstance(filename, str):
+        raise PythonSecurityError("Filename must be a string")
+    _validate_no_traversal(filename, "filename", PythonSecurityError)
+
+
+def _validate_file_path(file_path: str | None) -> None:
+    if file_path is None:
+        return
+    if not isinstance(file_path, str):
+        raise PythonSecurityError("File path must be a string")
+    if len(file_path) == 0:
+        raise PythonSecurityError("File path cannot be empty")
+    _validate_no_traversal(file_path, "file path", PythonSecurityError)
+
+
 def _validate_inputs(
     code: str | None = None,
     timeout: int | None = None,
@@ -104,49 +149,10 @@ def _validate_inputs(
         PythonSecurityError: If validation fails due to security violations
         ValueError: If validation fails due to invalid values
     """
-    # Validate code if provided
-    if code is not None:
-        if not isinstance(code, str):
-            raise PythonSecurityError("Code must be a string")
-
-        # Allow empty code (it's valid Python)
-        # Check for extremely large code (potential DoS)
-        if len(code) > 10_000_000:  # 10MB limit
-            raise PythonSecurityError("Code size exceeds maximum limit (10MB)")
-
-    # Validate timeout if provided
-    if timeout is not None:
-        if not isinstance(timeout, int):
-            raise ValueError("Timeout must be an integer")
-
-        if timeout <= 0:
-            raise ValueError("Timeout must be positive")
-
-        if timeout > MAX_TIMEOUT:
-            raise ValueError(
-                f"Timeout {timeout} exceeds maximum limit of {MAX_TIMEOUT} seconds"
-            )
-
-    # Validate filename if provided
-    if filename is not None:
-        if not isinstance(filename, str):
-            raise PythonSecurityError("Filename must be a string")
-
-        # Check for path traversal attempts
-        if ".." in filename:
-            raise PythonSecurityError("Path traversal attempt detected in filename")
-
-    # Validate file_path if provided
-    if file_path is not None:
-        if not isinstance(file_path, str):
-            raise PythonSecurityError("File path must be a string")
-
-        if len(file_path) == 0:
-            raise PythonSecurityError("File path cannot be empty")
-
-        # Check for path traversal attempts
-        if ".." in file_path:
-            raise PythonSecurityError("Path traversal attempt detected in file path")
+    _validate_code(code)
+    _validate_timeout_value(timeout)
+    _validate_filename(filename)
+    _validate_file_path(file_path)
 
 
 def _create_safe_globals() -> dict[str, Any]:

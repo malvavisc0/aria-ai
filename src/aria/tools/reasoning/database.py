@@ -84,10 +84,47 @@ class ReasoningDatabase:
             session.commit()
             logger.debug(f"Saved session metadata: {session_id} for agent {agent_id}")
 
+    def _step_to_dict(self, step) -> dict:
+        return {
+            "id": step.step_number,
+            "cognitive_mode": step.cognitive_mode,
+            "reasoning_type": step.reasoning_type,
+            "content": step.content,
+            "confidence": step.confidence,
+            "reason": getattr(step, "reason", None),
+            "evidence": (json.loads(step.evidence) if step.evidence else []),
+            "biases_detected": (
+                json.loads(step.biases_detected) if step.biases_detected else []
+            ),
+            "timestamp": step.timestamp.isoformat(),
+        }
+
+    def _reflection_to_dict(self, refl) -> dict:
+        return {
+            "content": refl.content,
+            "step_id": refl.step_id,
+            "reason": getattr(refl, "reason", None),
+            "timestamp": refl.timestamp.isoformat(),
+        }
+
+    def _scratchpad_to_dict(self, item) -> tuple[str, dict]:
+        return item.key, {
+            "value": item.value,
+            "updated": item.updated_at.isoformat(),
+            "reason": getattr(item, "reason", None),
+        }
+
+    def _tool_event_to_dict(self, ev) -> dict:
+        return {
+            "tool_name": ev.tool_name,
+            "reason": ev.reason,
+            "payload": (json.loads(ev.payload_json) if ev.payload_json else None),
+            "timestamp": ev.timestamp.isoformat(),
+        }
+
     def load_session(self, session_id: str, agent_id: str) -> dict | None:
         """Load complete session data from database."""
         with self.get_session() as session:
-            # Get session with all relationships
             stmt = select(ReasoningSessionModel).where(
                 ReasoningSessionModel.session_id == session_id,
                 ReasoningSessionModel.agent_id == agent_id,
@@ -98,69 +135,20 @@ class ReasoningDatabase:
             if not session_model:
                 return None
 
-            internal_id = session_model.id
+            steps = [self._step_to_dict(s) for s in session_model.steps]
+            reflections = [
+                self._reflection_to_dict(r) for r in session_model.reflections
+            ]
+            scratchpad = dict(
+                self._scratchpad_to_dict(i) for i in session_model.scratchpad_items
+            )
+            tool_events = [
+                self._tool_event_to_dict(e)
+                for e in getattr(session_model, "tool_events", []) or []
+            ]
 
-            # Convert steps to dict
-            steps = []
-            for step in session_model.steps:
-                steps.append(
-                    {
-                        "id": step.step_number,
-                        "cognitive_mode": step.cognitive_mode,
-                        "reasoning_type": step.reasoning_type,
-                        "content": step.content,
-                        "confidence": step.confidence,
-                        "reason": getattr(step, "reason", None),
-                        "evidence": (
-                            json.loads(step.evidence) if step.evidence else []
-                        ),
-                        "biases_detected": (
-                            json.loads(step.biases_detected)
-                            if step.biases_detected
-                            else []
-                        ),
-                        "timestamp": step.timestamp.isoformat(),
-                    }
-                )
-
-            # Convert reflections to dict
-            reflections = []
-            for refl in session_model.reflections:
-                reflections.append(
-                    {
-                        "content": refl.content,
-                        "step_id": refl.step_id,
-                        "reason": getattr(refl, "reason", None),
-                        "timestamp": refl.timestamp.isoformat(),
-                    }
-                )
-
-            # Convert scratchpad to dict
-            scratchpad = {}
-            for item in session_model.scratchpad_items:
-                scratchpad[item.key] = {
-                    "value": item.value,
-                    "updated": item.updated_at.isoformat(),
-                    "reason": getattr(item, "reason", None),
-                }
-
-            # Convert tool events to dict
-            tool_events = []
-            for ev in getattr(session_model, "tool_events", []) or []:
-                tool_events.append(
-                    {
-                        "tool_name": ev.tool_name,
-                        "reason": ev.reason,
-                        "payload": (
-                            json.loads(ev.payload_json) if ev.payload_json else None
-                        ),
-                        "timestamp": ev.timestamp.isoformat(),
-                    }
-                )
-
-            # Build session data
             session_data = {
-                "id": internal_id,
+                "id": session_model.id,
                 "session_id": session_model.session_id,
                 "agent_id": session_model.agent_id,
                 "created_at": session_model.created_at.isoformat(),

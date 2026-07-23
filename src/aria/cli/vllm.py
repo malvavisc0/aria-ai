@@ -114,6 +114,48 @@ def install_command(
     _print_legacy_notice()
 
 
+def _resolve_update_target(version: str | None, latest: bool) -> str:
+    from aria.config.api import Vllm as VllmConfig
+    from aria.scripts.vllm import get_latest_vllm_version
+
+    if version:
+        return version
+    if latest:
+        latest_version = get_latest_vllm_version()
+        if latest_version:
+            return latest_version
+    return VllmConfig.version
+
+
+def _was_vllm_running() -> bool:
+    from aria.server.vllm import VllmServerManager
+
+    mgr = VllmServerManager()
+    return bool(mgr._pids) or bool(VllmServerManager._find_orphan_pids())
+
+
+def _stop_and_update(target: str, was_running: bool) -> None:
+    from aria.scripts.vllm import update_vllm
+    from aria.server.vllm import VllmServerManager
+
+    if was_running:
+        console.print("Stopping vLLM before update...")
+        VllmServerManager().stop_all()
+    update_vllm(version=target)
+
+
+def _report_update_result(target: str, was_running: bool) -> None:
+    from aria.server.vllm import VllmServerManager
+
+    if was_running:
+        VllmServerManager().start_all()
+        console.print(f"[green]✓[/green] vLLM updated to {target} and restarted.")
+    else:
+        console.print(
+            f"[green]✓[/green] vLLM updated to {target}. Run: aria vllm start"
+        )
+
+
 @app.command("update")
 def update_command(
     version: str | None = typer.Option(
@@ -141,43 +183,22 @@ def update_command(
     if _remote_notice("update"):
         return
 
-    from aria.scripts.vllm import (
-        get_latest_vllm_version,
-        get_vllm_version,
-        update_vllm,
-    )
+    from aria.scripts.vllm import get_vllm_version
 
-    target = version or (get_latest_vllm_version() if latest else None)
-    if target is None:
-        from aria.config.api import Vllm as VllmConfig
-
-        target = VllmConfig.version
-
+    target = _resolve_update_target(version, latest)
     current = get_vllm_version()
     if current == target and not force:
         console.print(f"vLLM is already up to date ({current}).")
         return
 
-    from aria.server.vllm import VllmServerManager
-
-    mgr = VllmServerManager()
-    was_running = bool(mgr._pids) or bool(VllmServerManager._find_orphan_pids())
+    was_running = _was_vllm_running()
     try:
-        if was_running:
-            console.print("Stopping vLLM before update...")
-            mgr.stop_all()
-        update_vllm(version=target)
+        _stop_and_update(target, was_running)
     except Exception as e:
         error_console.print(f"[red]✗[/red] Update failed: {e}")
         raise typer.Exit(1)
 
-    if was_running:
-        VllmServerManager().start_all()
-        console.print(f"[green]✓[/green] vLLM updated to {target} and restarted.")
-    else:
-        console.print(
-            f"[green]✓[/green] vLLM updated to {target}. Run: aria vllm start"
-        )
+    _report_update_result(target, was_running)
 
 
 @app.command("uninstall")
@@ -243,6 +264,79 @@ def check_status():
     _print_legacy_notice()
 
 
+def _or_dim(value, dim_label: str) -> str:
+    return str(value) if value else f"[dim]{dim_label}[/dim]"
+
+
+def _on_or_off(condition: bool) -> str:
+    return "[green]\u2713[/green]" if condition else "[dim]off[/dim]"
+
+
+def _engine_table() -> Table:
+    from aria.config.api import Vllm as VllmConfig
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Setting", style="cyan", width=28)
+    table.add_column("Value", style="green")
+
+    table.add_row("Chat Context Size", str(VllmConfig.chat_context_size))
+    table.add_row("Max Output Tokens", str(VllmConfig.max_tokens))
+    table.add_row(
+        "GPU Memory Utilization",
+        _or_dim(VllmConfig.gpu_memory_utilization, "auto"),
+    )
+    table.add_row("Quantization", _or_dim(VllmConfig.quantization, "none"))
+    table.add_row("Dtype", VllmConfig.dtype)
+    table.add_row("KV Cache Dtype", VllmConfig.kv_cache_dtype)
+    table.add_row("Tensor Parallel Size", str(VllmConfig.tensor_parallel_size))
+    table.add_row("Data Parallel Size", str(VllmConfig.data_parallel_size))
+    table.add_row("Expert Parallel", _on_or_off(VllmConfig.expert_parallel))
+    table.add_row("Prefix Caching", _on_or_off(VllmConfig.prefix_caching))
+    table.add_row("Vision Enabled", _on_or_off(VllmConfig.vision_enabled))
+    table.add_row("Tool Call Parser", _or_dim(VllmConfig.tool_call_parser, "none"))
+    table.add_row("Reasoning Parser", _or_dim(VllmConfig.reasoning_parser, "none"))
+    table.add_row("Chat Template", _or_dim(VllmConfig.chat_template_file, "default"))
+    table.add_row(
+        "Chat Template Kwargs", _or_dim(VllmConfig.chat_template_kwargs, "none")
+    )
+    return table
+
+
+def _offload_table() -> Table:
+    from aria.config.api import Vllm as VllmConfig
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Setting", style="cyan", width=28)
+    table.add_column("Value", style="green")
+    table.add_row("Offload Mode", VllmConfig.kv_offload_mode)
+    table.add_row(
+        "Offload Size (GiB)",
+        _or_dim(VllmConfig.kv_offloading_size_gb, "auto"),
+    )
+    table.add_row("Offload Backend", VllmConfig.kv_offloading_backend)
+    return table
+
+
+def _sampling_table() -> Table:
+    from aria.config.api import Vllm as VllmConfig
+
+    table = Table(show_header=True, header_style="bold cyan")
+    table.add_column("Setting", style="cyan", width=28)
+    table.add_column("Value", style="green")
+    table.add_row("Temperature", str(VllmConfig.temperature))
+    table.add_row("Top P", str(VllmConfig.top_p))
+    table.add_row("Top K", str(VllmConfig.top_k))
+    table.add_row("Min P", str(VllmConfig.min_p))
+    table.add_row("Repetition Penalty", str(VllmConfig.repetition_penalty))
+    table.add_row("Seed", str(VllmConfig.seed))
+    return table
+
+
+def _print_info_section(title: str, table: Table) -> None:
+    console.print(f"\n[bold]{title}[/bold]\n")
+    console.print(table)
+
+
 @app.command("info")
 def info_command():
     """Show vLLM configuration details.
@@ -255,96 +349,9 @@ def info_command():
         aria vllm info
         ```
     """
-    from aria.config.api import Vllm as VllmConfig
-
-    # --- Engine ---
-    engine = Table(show_header=True, header_style="bold cyan")
-    engine.add_column("Setting", style="cyan", width=28)
-    engine.add_column("Value", style="green")
-
-    engine.add_row("Chat Context Size", str(VllmConfig.chat_context_size))
-    engine.add_row("Max Output Tokens", str(VllmConfig.max_tokens))
-    engine.add_row(
-        "GPU Memory Utilization",
-        (
-            str(VllmConfig.gpu_memory_utilization)
-            if VllmConfig.gpu_memory_utilization is not None
-            else "[dim]auto[/dim]"
-        ),
-    )
-    engine.add_row(
-        "Quantization",
-        VllmConfig.quantization or "[dim]none[/dim]",
-    )
-    engine.add_row("Dtype", VllmConfig.dtype)
-    engine.add_row("KV Cache Dtype", VllmConfig.kv_cache_dtype)
-    engine.add_row("Tensor Parallel Size", str(VllmConfig.tensor_parallel_size))
-    engine.add_row("Data Parallel Size", str(VllmConfig.data_parallel_size))
-    engine.add_row(
-        "Expert Parallel",
-        "[green]✓[/green]" if VllmConfig.expert_parallel else "[dim]off[/dim]",
-    )
-    engine.add_row(
-        "Prefix Caching",
-        "[green]✓[/green]" if VllmConfig.prefix_caching else "[dim]off[/dim]",
-    )
-    engine.add_row(
-        "Vision Enabled",
-        "[green]✓[/green]" if VllmConfig.vision_enabled else "[dim]off[/dim]",
-    )
-    engine.add_row(
-        "Tool Call Parser",
-        VllmConfig.tool_call_parser or "[dim]none[/dim]",
-    )
-    engine.add_row(
-        "Reasoning Parser",
-        VllmConfig.reasoning_parser or "[dim]none[/dim]",
-    )
-    engine.add_row(
-        "Chat Template",
-        str(VllmConfig.chat_template_file) or "[dim]default[/dim]",
-    )
-    engine.add_row(
-        "Chat Template Kwargs",
-        VllmConfig.chat_template_kwargs or "[dim]none[/dim]",
-    )
-
-    console.print("[bold]Engine[/bold]\n")
-    console.print(engine)
-
-    # --- KV Cache Offloading ---
-    offload = Table(show_header=True, header_style="bold cyan")
-    offload.add_column("Setting", style="cyan", width=28)
-    offload.add_column("Value", style="green")
-
-    offload.add_row("Offload Mode", VllmConfig.kv_offload_mode)
-    offload.add_row(
-        "Offload Size (GiB)",
-        (
-            str(VllmConfig.kv_offloading_size_gb)
-            if VllmConfig.kv_offloading_size_gb is not None
-            else "[dim]auto[/dim]"
-        ),
-    )
-    offload.add_row("Offload Backend", VllmConfig.kv_offloading_backend)
-
-    console.print("\n[bold]KV Cache Offloading[/bold]\n")
-    console.print(offload)
-
-    # --- Sampling ---
-    sampling = Table(show_header=True, header_style="bold cyan")
-    sampling.add_column("Setting", style="cyan", width=28)
-    sampling.add_column("Value", style="green")
-
-    sampling.add_row("Temperature", str(VllmConfig.temperature))
-    sampling.add_row("Top P", str(VllmConfig.top_p))
-    sampling.add_row("Top K", str(VllmConfig.top_k))
-    sampling.add_row("Min P", str(VllmConfig.min_p))
-    sampling.add_row("Repetition Penalty", str(VllmConfig.repetition_penalty))
-    sampling.add_row("Seed", str(VllmConfig.seed))
-
-    console.print("\n[bold]Sampling[/bold]\n")
-    console.print(sampling)
+    _print_info_section("Engine", _engine_table())
+    _print_info_section("KV Cache Offloading", _offload_table())
+    _print_info_section("Sampling", _sampling_table())
 
 
 @app.command("start")

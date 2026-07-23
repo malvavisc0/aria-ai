@@ -117,6 +117,73 @@ def _atomic_write(file_path: Path, content: str) -> None:
         raise FileOperationError(f"Failed to write file: {exc}") from exc
 
 
+def _should_skip_index(i: int, offset: int, length: int) -> bool:
+    return offset < i < offset + length
+
+
+def _is_insert_position(i: int, offset: int) -> bool:
+    return i == offset
+
+
+def _is_before_offset(i: int, offset: int) -> bool:
+    return i < offset
+
+
+def _process_position(
+    i: int,
+    line: str,
+    offset: int,
+    length: int,
+    new_lines: list[str] | None,
+    outfile,
+    counter: list[int],
+) -> None:
+    if _is_before_offset(i, offset):
+        _emit_line(line, outfile, counter)
+    elif _is_insert_position(i, offset):
+        _emit_insert_lines(new_lines, outfile, counter)
+        if length == 0:
+            _emit_line(line, outfile, counter)
+    elif not _should_skip_index(i, offset, length):
+        _emit_line(line, outfile, counter)
+
+
+def _emit_line(line: str, outfile, counter: list[int]) -> None:
+    outfile.write(line)
+    counter[0] += 1
+
+
+def _emit_insert_lines(
+    new_lines: list[str] | None, outfile, counter: list[int]
+) -> None:
+    if not new_lines:
+        return
+    for new_line in new_lines:
+        outfile.write(new_line + "\n")
+        counter[0] += 1
+
+
+def _copy_streaming(
+    infile,
+    outfile,
+    offset: int,
+    length: int,
+    new_lines: list[str] | None,
+) -> tuple[int, int]:
+    """Stream-copy ``infile`` to ``outfile`` applying the modification."""
+    old_total_lines = 0
+    counter: list[int] = [0]
+
+    for i, line in enumerate(infile):
+        old_total_lines += 1
+        _process_position(i, line, offset, length, new_lines, outfile, counter)
+
+    if offset >= old_total_lines:
+        _emit_insert_lines(new_lines, outfile, counter)
+
+    return old_total_lines, counter[0]
+
+
 def _modify_lines_streaming(
     file_path: Path, offset: int, length: int, new_lines: list[str] | None
 ) -> tuple[int, int]:
@@ -137,49 +204,18 @@ def _modify_lines_streaming(
     import shutil
 
     temp_path = file_path.with_suffix(file_path.suffix + ".tmp")
-    old_total_lines = 0
-    new_total_lines = 0
 
     try:
         with (
             open(file_path, encoding="utf-8") as infile,
             open(temp_path, "w", encoding="utf-8") as outfile,
         ):
-            for i, line in enumerate(infile):
-                old_total_lines += 1
-                if i < offset:
-                    outfile.write(line)
-                    new_total_lines += 1
-                elif i == offset:
-                    # Insert new lines at offset position
-                    if new_lines:
-                        for new_line in new_lines:
-                            outfile.write(new_line + "\n")
-                            new_total_lines += 1
-                    # If length > 0, skip this line (it's being replaced)
-                    # If length == 0, write this line (pure insert)
-                    if length == 0:
-                        outfile.write(line)
-                        new_total_lines += 1
-                elif i < offset + length:
-                    # Skip lines in the range to be replaced/deleted
-                    pass
-                else:
-                    outfile.write(line)
-                    new_total_lines += 1
+            totals = _copy_streaming(infile, outfile, offset, length, new_lines)
 
-            # If offset is at or beyond end of file, append new lines
-            if offset >= old_total_lines and new_lines:
-                for new_line in new_lines:
-                    outfile.write(new_line + "\n")
-                    new_total_lines += 1
-
-        # Replace original file with modified file
         shutil.move(str(temp_path), str(file_path))
-        return old_total_lines, new_total_lines
+        return totals
 
     except Exception as exc:
-        # Clean up temp file if it exists
         if temp_path.exists():
             temp_path.unlink()
         raise FileOperationError(f"Failed to modify file: {exc}") from exc

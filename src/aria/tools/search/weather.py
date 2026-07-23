@@ -63,6 +63,64 @@ def _get_weather_text(code: int | None) -> str:
     return _WEATHER_CODE_TEXT.get(code, f"Unknown (code={code})")
 
 
+def _geocode_location(location: str) -> dict[str, Any] | str:
+    response = httpx.get(
+        "https://geocoding-api.open-meteo.com/v1/search",
+        params={"name": location, "count": 1, "format": "json"},
+        timeout=httpx.Timeout(NETWORK_TIMEOUT),
+    )
+    response.raise_for_status()
+    results = response.json().get("results") or []
+    if not results:
+        return f"No geocoding result for location: {location}"
+    first = results[0]
+    if first.get("latitude") is None or first.get("longitude") is None:
+        return "Geocoding response missing latitude/longitude"
+    return first
+
+
+def _fetch_current_weather(lat: float, lon: float) -> dict[str, Any]:
+    response = httpx.get(
+        "https://api.open-meteo.com/v1/forecast",
+        params={
+            "latitude": lat,
+            "longitude": lon,
+            "current": ["temperature_2m", "wind_speed_10m", "weather_code"],
+            "timezone": "auto",
+        },
+        timeout=httpx.Timeout(NETWORK_TIMEOUT),
+    )
+    response.raise_for_status()
+    return response.json().get("current") or {}
+
+
+def _build_weather_response(
+    reason: str, location: str, geo: dict[str, Any], current: dict[str, Any]
+) -> str:
+    weather_code = current.get("weather_code")
+    return _ok(
+        reason,
+        {
+            "tool": "get_current_weather",
+            "query": {"location": location},
+            "resolved": {
+                "name": geo.get("name") or location,
+                "country": geo.get("country"),
+                "latitude": geo.get("latitude"),
+                "longitude": geo.get("longitude"),
+                "timezone": geo.get("timezone"),
+            },
+            "current": {
+                "time": current.get("time"),
+                "temperature_c": current.get("temperature_2m"),
+                "wind_speed_kmh": current.get("wind_speed_10m"),
+                "weather_code": weather_code,
+                "conditions": _get_weather_text(weather_code),
+            },
+        },
+    )
+
+
 @log_tool_call
 def get_current_weather(reason: Reason, location: str) -> str:
     """Get current weather conditions for a city or location.
@@ -94,70 +152,11 @@ def get_current_weather(reason: Reason, location: str) -> str:
         return _err(reason, "location must be a non-empty string")
 
     try:
-        # 1) Geocode
-        geo = httpx.get(
-            "https://geocoding-api.open-meteo.com/v1/search",
-            params={"name": location_value, "count": 1, "format": "json"},
-            timeout=httpx.Timeout(NETWORK_TIMEOUT),
-        )
-        geo.raise_for_status()
-        geo_json = geo.json()
-        results = geo_json.get("results") or []
-        if not results:
-            return _err(reason, f"No geocoding result for location: {location_value}")
-
-        first = results[0]
-        lat = first.get("latitude")
-        lon = first.get("longitude")
-        if lat is None or lon is None:
-            return _err(reason, "Geocoding response missing latitude/longitude")
-
-        resolved_name = first.get("name") or location_value
-        country = first.get("country")
-        timezone = first.get("timezone")
-
-        # 2) Forecast (current)
-        forecast = httpx.get(
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": lat,
-                "longitude": lon,
-                "current": [
-                    "temperature_2m",
-                    "wind_speed_10m",
-                    "weather_code",
-                ],
-                "timezone": "auto",
-            },
-            timeout=httpx.Timeout(NETWORK_TIMEOUT),
-        )
-        forecast.raise_for_status()
-        fjson = forecast.json()
-        current = fjson.get("current") or {}
-
-        weather_code = current.get("weather_code")
-
-        return _ok(
-            reason,
-            {
-                "tool": "get_current_weather",
-                "query": {"location": location_value},
-                "resolved": {
-                    "name": resolved_name,
-                    "country": country,
-                    "latitude": lat,
-                    "longitude": lon,
-                    "timezone": timezone,
-                },
-                "current": {
-                    "time": current.get("time"),
-                    "temperature_c": current.get("temperature_2m"),
-                    "wind_speed_kmh": current.get("wind_speed_10m"),
-                    "weather_code": weather_code,
-                    "conditions": _get_weather_text(weather_code),
-                },
-            },
-        )
+        geo = _geocode_location(location_value)
+        if isinstance(geo, str):
+            return _err(reason, geo)
+        current = _fetch_current_weather(geo["latitude"], geo["longitude"])
+        return _build_weather_response(reason, location_value, geo, current)
     except httpx.HTTPError as exc:
         logger.warning(f"Weather lookup failed for {location_value}: {exc}")
         return _err(reason, f"Weather request failed: {exc}")

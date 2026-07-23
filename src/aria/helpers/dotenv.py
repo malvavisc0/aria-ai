@@ -31,39 +31,47 @@ def parse_dotenv(path: Path) -> tuple[dict[str, str], list[str]]:
     return values, raw_lines
 
 
+def _format_existing_line(key: str, new_value: str, comment: str | None) -> str:
+    if comment:
+        return f"{key} = {new_value}  # {comment}"
+    return f"{key} = {new_value}"
+
+
+def _replace_known_keys(
+    raw_lines: list[str], values: dict[str, str]
+) -> tuple[list[str], set[str]]:
+    out: list[str] = []
+    seen: set[str] = set()
+    for line in raw_lines:
+        match = _LINE_RE.match(line)
+        if not match or match.group("key") not in values:
+            out.append(line)
+            continue
+        key = match.group("key")
+        seen.add(key)
+        out.append(_format_existing_line(key, values[key], match.group("comment")))
+    return out, seen
+
+
+def _append_missing_keys(
+    out: list[str], values: dict[str, str], seen: set[str]
+) -> list[str]:
+    missing = [k for k in values if k not in seen]
+    if not missing:
+        return out
+    if out and out[-1].strip():
+        out.append("")
+    for key in missing:
+        out.append(f"{key} = {values[key]}")
+    return out
+
+
 def write_dotenv(path: Path, values: dict[str, str], raw_lines: list[str]) -> None:
     """Write updated values into a .env while preserving structure.
 
     Existing key lines are updated in-place (comments stay), unknown lines are
     untouched, and missing keys from ``values`` are appended at the end.
     """
-    out: list[str] = []
-    seen_keys: set[str] = set()
-
-    for line in raw_lines:
-        match = _LINE_RE.match(line)
-        if not match:
-            out.append(line)
-            continue
-
-        key = match.group("key")
-        if key not in values:
-            out.append(line)
-            continue
-
-        seen_keys.add(key)
-        new_value = values[key]
-        comment = match.group("comment")
-        if comment:
-            out.append(f"{key} = {new_value}  # {comment}")
-        else:
-            out.append(f"{key} = {new_value}")
-
-    missing_keys = [key for key in values if key not in seen_keys]
-    if missing_keys:
-        if out and out[-1].strip():
-            out.append("")
-        for key in missing_keys:
-            out.append(f"{key} = {values[key]}")
-
+    out, seen = _replace_known_keys(raw_lines, values)
+    out = _append_missing_keys(out, values, seen)
     path.write_text("\n".join(out) + "\n", encoding="utf-8")

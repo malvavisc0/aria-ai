@@ -602,6 +602,29 @@ def _sanitize_chat_history(
     return step3
 
 
+def _collect_conversation_steps(chat_steps: list) -> list:
+    conversation = [m for m in chat_steps if m.get("type") in ROOT_MESSAGE_TYPES]
+    conversation.sort(
+        key=lambda message_step: (
+            message_step.get("createdAt") or message_step.get("created_at") or "",
+            message_step.get("id") or "",
+        )
+    )
+    return conversation
+
+
+def _step_to_chat_message(step) -> ChatMessage | None:
+    content = step.get("output", "")
+    if not content:
+        return None
+    role = (
+        MessageRole.USER
+        if step.get("type") == "user_message"
+        else MessageRole.ASSISTANT
+    )
+    return ChatMessage(role=role, content=content)
+
+
 async def restore_chat_history(thread: ThreadDict) -> Memory:
     """Restore conversation history from a thread dictionary.
 
@@ -633,35 +656,16 @@ async def restore_chat_history(thread: ThreadDict) -> Memory:
     chat_steps = thread.get("steps", [])
     logger.debug(f"Thread contains {len(chat_steps)} total steps")
 
-    # Include ALL user/assistant messages regardless of parentId.
-    # get_thread() returns the raw tree where assistant messages are
-    # children of user messages (parentId != None), so filtering on
-    # parentId == None would silently drop every assistant reply.
-    conversation_steps = [m for m in chat_steps if m.get("type") in ROOT_MESSAGE_TYPES]
-    conversation_steps.sort(
-        key=lambda message_step: (
-            message_step.get("createdAt") or message_step.get("created_at") or "",
-            message_step.get("id") or "",
-        )
-    )
+    conversation_steps = _collect_conversation_steps(chat_steps)
     logger.debug(f"Found {len(conversation_steps)} conversation messages")
 
     memory = create_memory(thread_id)
 
-    raw_history: list[ChatMessage] = []
-    for message_step in conversation_steps:
-        content = message_step.get("output", "")
-        message_type = message_step.get("type")
-
-        if not content:
-            continue
-
-        role = (
-            MessageRole.USER
-            if message_type == "user_message"
-            else MessageRole.ASSISTANT
-        )
-        raw_history.append(ChatMessage(role=role, content=content))
+    raw_history: list[ChatMessage] = [
+        msg
+        for msg in (_step_to_chat_message(step) for step in conversation_steps)
+        if msg is not None
+    ]
 
     chat_history = _sanitize_chat_history(raw_history, drop_trailing_user=False)
     if len(raw_history) != len(chat_history):
@@ -670,11 +674,6 @@ async def restore_chat_history(thread: ThreadDict) -> Memory:
             f"messages (removed non-alternating roles)"
         )
 
-    # Use aput_messages instead of aset to enforce token_limit.
-    # aset() bypasses _manage_queue() and dumps ALL messages unbounded.
-    # aput_messages() triggers the waterfall logic: when the buffer
-    # exceeds token_limit * chat_history_token_ratio, oldest messages
-    # are flushed to memory blocks (FactExtraction, Vector).
     if chat_history:
         await memory.aput_messages(chat_history)
 
