@@ -202,13 +202,13 @@ def test_plan_survives_reload(test_db):
     # Clear registry state (simulate restart)
     import aria.tools.planner.registry as reg_module
 
-    reg_module._db = None
+    reg_module._DbHolder.db = None
 
     # Reload plan from DB
     from aria.tools.planner.database import PlannerDatabase
 
     PlannerDatabase._instance = None
-    reg_module._db = PlannerDatabase()
+    reg_module._DbHolder.db = PlannerDatabase()
 
     get_result = plan(reason="Testing", action="get", execution_id=plan_id)
     data = json.loads(get_result)

@@ -66,7 +66,11 @@ def _resolve_model_path(path: str) -> str:
     return str(Models.path / model_name)
 
 
-_random_port: int | None = None
+class _PortCache:
+    value: int | None = None
+
+
+_port = _PortCache()
 
 
 def _random_user_port() -> int:
@@ -77,10 +81,9 @@ def _random_user_port() -> int:
     so that repeated calls return the same value, preventing the vLLM
     command and health check from using different ports.
     """
-    global _random_port
-    if _random_port is None:
-        _random_port = random.randint(49152, 65535)
-    return _random_port
+    if _port.value is None:
+        _port.value = random.randint(49152, 65535)
+    return _port.value
 
 
 class Chat:

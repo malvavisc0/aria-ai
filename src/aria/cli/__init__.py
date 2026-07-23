@@ -21,24 +21,25 @@ from sqlalchemy.orm import Session
 from aria.config.database import SQLite
 from aria.db.models import Base
 
-_engine = None
 
+class _EngineHolder:
+    engine = None
 
-def _get_engine():
-    """Lazily create the SQLAlchemy engine on first use.
+    @classmethod
+    def get(cls):
+        """Lazily create the SQLAlchemy engine on first use.
 
-    Deferring engine creation avoids opening the database at import time,
-    which would fail if the database directory doesn't exist yet (e.g.
-    during tests before fixtures run).
-    """
-    global _engine
-    if _engine is None:
-        from aria.config.folders import DB
+        Deferring engine creation avoids opening the database at import time,
+        which would fail if the database directory doesn't exist yet (e.g.
+        during tests before fixtures run).
+        """
+        if cls.engine is None:
+            from aria.config.folders import DB
 
-        DB.path.mkdir(parents=True, exist_ok=True)
-        _engine = create_engine(SQLite.db_url)
-        Base.metadata.create_all(_engine)
-    return _engine
+            DB.path.mkdir(parents=True, exist_ok=True)
+            cls.engine = create_engine(SQLite.db_url)
+            Base.metadata.create_all(cls.engine)
+        return cls.engine
 
 
 @contextlib.contextmanager
@@ -62,7 +63,7 @@ def get_db_session():
             users = session.execute(select(User)).scalars().all()
         ```
     """
-    session = Session(_get_engine())
+    session = Session(_EngineHolder.get())
     try:
         yield session
         session.commit()

@@ -62,12 +62,16 @@ class ToolsDatabase:
             logger.debug("Tools database connections closed")
 
 
-_db_instance = None
+class _DatabaseHolder:
+    instance: "ToolsDatabase | None" = None
+
+    @classmethod
+    def get(cls) -> ToolsDatabase:
+        if cls.instance is None:
+            cls.instance = ToolsDatabase()
+        return cls.instance
 
 
 def get_tools_database() -> ToolsDatabase:
     """Get the global tools database instance."""
-    global _db_instance
-    if _db_instance is None:
-        _db_instance = ToolsDatabase()
-    return _db_instance
+    return _DatabaseHolder.get()

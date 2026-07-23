@@ -25,7 +25,7 @@ def test_db(test_tools_db):
 
     import aria.tools.reasoning.registry as reg_module
 
-    reg_module._db = test_reasoning_db
+    reg_module._DbHolder.db = test_reasoning_db
 
     yield test_reasoning_db
 

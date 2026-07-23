@@ -17,6 +17,6 @@ def test_db(test_tools_db):
 
     import aria.tools.planner.registry as reg_module
 
-    reg_module._db = test_planner_db
+    reg_module._DbHolder.db = test_planner_db
 
     yield test_planner_db

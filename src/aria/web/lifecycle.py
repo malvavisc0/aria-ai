@@ -34,8 +34,13 @@ LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} - {level} - {name}.{function} : {messag
 
 _HEALTH_ENDPOINTS = ("/health",)
 
-_log_sink_id: int | None = None
-_tool_call_sink_id: int | None = None
+
+class _LogSinks:
+    log_sink_id: int | None = None
+    tool_call_sink_id: int | None = None
+
+
+_sinks = _LogSinks()
 
 
 class _HealthCheckFilter(logging.Filter):
@@ -76,13 +81,12 @@ def _init_langfuse() -> None:
 
 def _init_logging() -> None:
     """Configure loguru file sinks and stdlib logger filters."""
-    global _log_sink_id, _tool_call_sink_id
 
     logger.remove()
 
     log_path = DebugConfig.logs_path
     # Always store INFO+ to avoid DEBUG log spam (WebSocket frames, etc.)
-    _log_sink_id = logger.add(
+    _sinks.log_sink_id = logger.add(
         log_path,
         rotation="10 MB",
         level="INFO",  # Never store DEBUG to keep logs clean
@@ -92,7 +96,7 @@ def _init_logging() -> None:
     # Dedicated sink for tool-call debug logs (keeps main log clean).
     # Filter uses the bound "tool_call" extra field set by log_tool_call
     # decorator — precise match instead of fragile string search.
-    _tool_call_sink_id = logger.add(
+    _sinks.tool_call_sink_id = logger.add(
         DebugConfig.logs_path.parent / "tools.log",
         rotation="10 MB",
         level="DEBUG",
@@ -389,12 +393,12 @@ async def _cleanup_on_failure() -> None:
         _state.db_engine = None
 
     # Remove log sinks last so that cleanup logging above is captured.
-    if _log_sink_id is not None:
-        logger.remove(_log_sink_id)
-        _log_sink_id = None
-    if _tool_call_sink_id is not None:
-        logger.remove(_tool_call_sink_id)
-        _tool_call_sink_id = None
+    if _sinks.log_sink_id is not None:
+        logger.remove(_sinks.log_sink_id)
+        _sinks.log_sink_id = None
+    if _sinks.tool_call_sink_id is not None:
+        logger.remove(_sinks.tool_call_sink_id)
+        _sinks.tool_call_sink_id = None
 
 
 async def _abort_startup(exc: Exception, phase: str) -> None:
@@ -583,13 +587,12 @@ def _reset_app_state() -> None:
 
 
 def _remove_log_sinks() -> None:
-    global _log_sink_id, _tool_call_sink_id
-    if _log_sink_id is not None:
-        logger.remove(_log_sink_id)
-        _log_sink_id = None
-    if _tool_call_sink_id is not None:
-        logger.remove(_tool_call_sink_id)
-        _tool_call_sink_id = None
+    if _sinks.log_sink_id is not None:
+        logger.remove(_sinks.log_sink_id)
+        _sinks.log_sink_id = None
+    if _sinks.tool_call_sink_id is not None:
+        logger.remove(_sinks.tool_call_sink_id)
+        _sinks.tool_call_sink_id = None
 
 
 async def on_app_shutdown_handler() -> None:

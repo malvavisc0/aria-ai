@@ -8,13 +8,17 @@ overriding monkeypatched env vars in tests.
 
 from os import getenv
 
-_env_loaded = False
+
+class _EnvLoader:
+    loaded = False
+
+
+_loader = _EnvLoader()
 
 
 def _ensure_env() -> None:
     """Load the .env file from ARIA_HOME on first use."""
-    global _env_loaded
-    if _env_loaded:
+    if _loader.loaded:
         return
     import os
     from pathlib import Path
@@ -31,7 +35,7 @@ def _ensure_env() -> None:
         # Fallback: try CWD .env (backward compat)
         load_dotenv()
 
-    _env_loaded = True
+    _loader.loaded = True
 
 
 def reload_env() -> None:
@@ -43,7 +47,6 @@ def reload_env() -> None:
     modules (e.g. ``Vllm.remote``).  Those modules must be re-imported
     or their attributes refreshed explicitly.
     """
-    global _env_loaded
     import os
     from pathlib import Path
 
@@ -57,7 +60,7 @@ def reload_env() -> None:
     else:
         load_dotenv(override=True)
 
-    _env_loaded = True
+    _loader.loaded = True
 
 
 def get_bool_env(key: str, default: bool = False) -> bool:

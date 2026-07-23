@@ -2,20 +2,23 @@
 
 from loguru import logger
 
-from .database import get_database
+from .database import ReasoningDatabase, get_database
 from .session import ReasoningSession
 
-# Lazy database instance — only created when first accessed.
-# This avoids creating the production database at import time.
-_db = None
+
+class _DbHolder:
+    db: ReasoningDatabase | None = None
+
+    @staticmethod
+    def get():
+        if _DbHolder.db is None:
+            _DbHolder.db = get_database()
+        return _DbHolder.db
 
 
 def _get_db():
     """Get or create the database instance (lazy initialization)."""
-    global _db
-    if _db is None:
-        _db = get_database()
-    return _db
+    return _DbHolder.get()
 
 
 def get_active_session_id(agent_id: str) -> str | None:

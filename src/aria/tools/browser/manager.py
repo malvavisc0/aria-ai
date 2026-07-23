@@ -42,8 +42,13 @@ from aria.tools.browser.constants import (
     LIGHTPANDA_DEFAULT_PORT,
 )
 
+
 # Module-level singleton — set during app startup
-_manager: Optional["LightpandaManager"] = None
+class _BrowserManagerHolder:
+    manager: Optional["LightpandaManager"] = None
+
+
+_holder = _BrowserManagerHolder()
 
 
 def _build_content_filepath(url: str, action: str) -> Path:
@@ -59,7 +64,7 @@ def get_browser_manager() -> Optional["LightpandaManager"]:
 
     Returns None if Lightpanda is not installed or not started.
     """
-    return _manager
+    return _holder.manager
 
 
 def set_browser_manager(manager: Optional["LightpandaManager"]) -> None:
@@ -67,8 +72,7 @@ def set_browser_manager(manager: Optional["LightpandaManager"]) -> None:
 
     Called from on_app_startup() and on_app_shutdown().
     """
-    global _manager
-    _manager = manager
+    _holder.manager = manager
 
 
 class LightpandaManager:

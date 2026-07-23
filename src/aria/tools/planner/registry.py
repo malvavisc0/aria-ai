@@ -4,14 +4,19 @@ from loguru import logger
 
 from .database import PlannerDatabase
 
-_db = None
+
+class _DbHolder:
+    db: PlannerDatabase | None = None
+
+    @staticmethod
+    def get():
+        if _DbHolder.db is None:
+            _DbHolder.db = PlannerDatabase()
+        return _DbHolder.db
 
 
 def _get_db() -> PlannerDatabase:
-    global _db
-    if _db is None:
-        _db = PlannerDatabase()
-    return _db
+    return _DbHolder.get()
 
 
 def get_active_plan_id(agent_id: str) -> str | None:

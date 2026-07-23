@@ -27,13 +27,17 @@ from aria.db.models import User
 from aria.web.session import restore_chat_history, wait_for_initialization
 from aria.web.state import _state
 
-_cached_data_layer: SQLiteSQLAlchemyDataLayer | None = None
+
+class _DataLayerCache:
+    instance: SQLiteSQLAlchemyDataLayer | None = None
+
+
+_cache = _DataLayerCache()
 
 
 def reset_data_layer_cache() -> None:
     """Clear the cached data layer (called on shutdown)."""
-    global _cached_data_layer
-    _cached_data_layer = None
+    _cache.instance = None
 
 
 def get_data_layer_handler() -> SQLiteSQLAlchemyDataLayer:
@@ -46,19 +50,18 @@ def get_data_layer_handler() -> SQLiteSQLAlchemyDataLayer:
     Returns:
         SQLiteSQLAlchemyDataLayer: Configured data layer instance.
     """
-    global _cached_data_layer
-    if _cached_data_layer is not None:
-        return _cached_data_layer
+    if _cache.instance is not None:
+        return _cache.instance
 
     storage_client = LocalStorageClient(
         storage_path=StorageConfig.path, base_url="/storage"
     )
-    _cached_data_layer = SQLiteSQLAlchemyDataLayer(
+    _cache.instance = SQLiteSQLAlchemyDataLayer(
         conninfo=SQLiteConfig.conn_info,
         storage_provider=storage_client,
         show_logger=True,
     )
-    return _cached_data_layer
+    return _cache.instance
 
 
 async def auth_callback_handler(username: str, password: str) -> cl.User | None:
