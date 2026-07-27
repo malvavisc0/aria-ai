@@ -62,21 +62,22 @@ def _init_langfuse() -> None:
         "LANGFUSE_PUBLIC_KEY",
         "LANGFUSE_BASE_URL",
     )
-    if all(os.getenv(k) for k in _langfuse_keys):
-        from langfuse import get_client
-        from openinference.instrumentation.llama_index import (
-            LlamaIndexInstrumentor,
-        )
-
-        get_client()
-        LlamaIndexInstrumentor().instrument()
-        logger.info("Langfuse instrumentation initialized")
-    else:
-        _missing = [k for k in _langfuse_keys if not os.getenv(k)]
+    _missing = [k for k in _langfuse_keys if not os.getenv(k)]
+    if _missing:
         logger.warning(
             f"Langfuse instrumentation disabled — "
             f"missing env vars: {', '.join(_missing)}"
         )
+        return
+
+    from langfuse import get_client
+    from openinference.instrumentation.llama_index import (
+        LlamaIndexInstrumentor,
+    )
+
+    get_client()
+    LlamaIndexInstrumentor().instrument()
+    logger.info("Langfuse instrumentation initialized")
 
 
 def _init_logging() -> None:
