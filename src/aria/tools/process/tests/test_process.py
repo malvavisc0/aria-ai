@@ -89,20 +89,31 @@ class TestProcessManager:
         assert "error" in data["data"]
         assert "blocked" in data["data"]["error"].lower()
 
-    def test_sudo_is_allowed(self):
-        """Test that sudo is NOT blocked (flexibility)."""
-        # sudo is allowed — it will fail with 'command not found' or
-        # permission error, but should not be blocked by the filter
+    def test_start_sudo_blocked(self):
+        """Test that sudo is rejected by the process tool (privilege escalation)."""
         result = process(
-            "sudo allowed",
+            "Privilege escalation attempt",
             action="start",
             name="sudo_test",
-            command=sys.executable,
-            args=["-c", "print('sudo is fine')"],
+            command="sudo",
+            args=["apt", "update"],
         )
         data = json.loads(result)
-        # Should succeed starting (not blocked)
-        assert data["data"]["action"] == "start"
+        assert "error" in data["data"]
+        assert "blocked" in data["data"]["error"].lower()
+
+    def test_start_doas_blocked(self):
+        """Test that doas is rejected — list must stay in sync with shell tool."""
+        result = process(
+            "Privilege escalation attempt via doas",
+            action="start",
+            name="doas_test",
+            command="doas",
+            args=["apt", "update"],
+        )
+        data = json.loads(result)
+        assert "error" in data["data"]
+        assert "blocked" in data["data"]["error"].lower()
 
     def test_start_missing_name(self):
         """Test start without name returns error."""

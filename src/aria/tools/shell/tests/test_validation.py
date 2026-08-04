@@ -61,9 +61,25 @@ class TestIsBlockedCommand:
         """Test that wipe is blocked."""
         assert _is_blocked_command("wipe /dev/sda") is True
 
-    def test_sudo_not_blocked(self):
-        """Test that sudo is no longer blocked (harmless without root)."""
-        assert _is_blocked_command("sudo rm -rf /") is False
+    def test_sudo_blocked(self):
+        """Test that sudo is blocked (privilege escalation)."""
+        assert _is_blocked_command("sudo rm -rf /") is True
+
+    def test_su_blocked(self):
+        """Test that su is blocked (privilege escalation)."""
+        assert _is_blocked_command("su -c 'reboot'") is True
+
+    def test_doas_blocked(self):
+        """Test that doas is blocked (privilege escalation)."""
+        assert _is_blocked_command("doas apt update") is True
+
+    def test_pkexec_blocked(self):
+        """Test that pkexec is blocked (privilege escalation)."""
+        assert _is_blocked_command("pkexec reboot") is True
+
+    def test_sudo_blocked_in_pipe(self):
+        """Test sudo as second command in a pipeline is caught."""
+        assert _is_blocked_command("echo x | sudo tee /etc/y") is True
 
     def test_chmod_not_blocked(self):
         """Test that chmod is no longer blocked (harmless without root)."""
@@ -148,9 +164,10 @@ class TestValidateCommand:
         with pytest.raises(CommandBlockedError):
             _validate_command("echo hello | dd of=/dev/null")
 
-    def test_sudo_not_blocked(self):
-        """Test that sudo no longer raises (removed from blocklist)."""
-        _validate_command("sudo echo hello")  # Should not raise
+    def test_sudo_raises_blocked_error(self):
+        """Test that sudo raises CommandBlockedError."""
+        with pytest.raises(CommandBlockedError, match="blocked"):
+            _validate_command("sudo echo hello")
 
     def test_valid_command_passes(self):
         """Test that valid commands pass validation."""

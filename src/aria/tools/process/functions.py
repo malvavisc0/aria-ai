@@ -28,6 +28,7 @@ from aria.server.process_utils import (
 )
 from aria.tools import Reason, tool_response
 from aria.tools.decorators import log_tool_call
+from aria.tools.shell.constants import BLOCKED_COMMANDS
 from aria.tools.shell.validation import _extract_all_command_names
 
 # State file for cross-invocation persistence
@@ -42,17 +43,9 @@ _MAX_LOG_BYTES = 10_000
 # Configurable concurrency limit (default: 10)
 _MAX_PROCESSES = int(os.environ.get("ARIA_MAX_PROCESSES", "10"))
 
-# Blocked command names (same approach as shell tool — by command name, not substring)
-_BLOCKED_COMMANDS = [
-    "shutdown",
-    "reboot",
-    "halt",
-    "poweroff",
-    "mkfs",
-    "dd",
-    "shred",
-    "wipe",
-]
+# Blocked command names — sourced from the shell tool so both tools stay in sync.
+# The process tool does NOT maintain its own copy of the list.
+_BLOCKED_COMMANDS = BLOCKED_COMMANDS
 
 
 # ---------------------------------------------------------------------------

@@ -59,6 +59,11 @@ BLOCKED_COMMANDS = [
     "yum",
     "dnf",
     "pacman",
+    # Privilege escalation — agents must not attempt to gain root
+    "sudo",
+    "su",
+    "doas",
+    "pkexec",
 ]
 
 # Default working directory for shell commands — the agent workspace.

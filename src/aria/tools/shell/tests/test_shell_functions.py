@@ -60,7 +60,6 @@ class TestValidateCommand:
         _validate_command("chown user:group myfile")
         _validate_command("ifconfig")
         _validate_command("mount")
-        _validate_command("sudo echo hello")  # sudo removed from blocklist
 
     def test_is_blocked_command_detects_dd(self):
         """Test _is_blocked_command detects dd."""
