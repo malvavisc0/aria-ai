@@ -28,7 +28,7 @@ class Vllm:
     # e.g. ``v0.24.0`` → ``0.24.0``).  The prebuilt PyPI wheel is
     # installed into a separate venv at ``~/.aria/venvs/vllm`` so
     # Aria's own dependency tree stays clean.
-    version: str = get_optional_env("ARIA_VLLM_VERSION", "0.24.0")
+    version: str = get_optional_env("ARIA_VLLM_VERSION", "0.26.0")
 
     @classmethod
     def get_venv_path(cls) -> Path:
@@ -86,9 +86,7 @@ class Vllm:
     dtype: str = get_optional_env("ARIA_VLLM_DTYPE", "auto")
     kv_cache_dtype: str = get_optional_env("ARIA_VLLM_KV_CACHE_DTYPE", "auto")
     api_key: str = get_optional_env("ARIA_VLLM_API_KEY", "sk-aria")
-    tool_call_parser: str = get_optional_env(
-        "ARIA_VLLM_TOOL_CALL_PARSER", "qwen3_coder"
-    )
+    tool_call_parser: str = get_optional_env("ARIA_VLLM_TOOL_CALL_PARSER", "qwen3_coder")
     reasoning_parser: str = get_optional_env("ARIA_VLLM_REASONING_PARSER", "")
     chat_template_kwargs: str = get_optional_env("ARIA_VLLM_CHAT_TEMPLATE_KWARGS", "")
     vision_enabled: bool = (
@@ -152,9 +150,7 @@ class Vllm:
     top_p: float = float(get_optional_env("ARIA_VLLM_TOP_P", "0.95"))
     top_k: int = int(get_optional_env("ARIA_VLLM_TOP_K", "20"))
     min_p: float = float(get_optional_env("ARIA_VLLM_MIN_P", "0.0"))
-    presence_penalty: float = float(
-        get_optional_env("ARIA_VLLM_PRESENCE_PENALTY", "0.0")
-    )
+    presence_penalty: float = float(get_optional_env("ARIA_VLLM_PRESENCE_PENALTY", "0.0"))
     repetition_penalty: float = float(
         get_optional_env("ARIA_VLLM_REPETITION_PENALTY", "1.0")
     )
