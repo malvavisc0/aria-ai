@@ -256,6 +256,7 @@ class VllmServerManager:
         gpu_memory_utilization: float,
         kv_cache_dtype: str,
         tensor_parallel_size: int = 1,
+        enforce_eager: bool = False,
     ) -> int:
         """Clamp ``max_model_len`` to what the GPU KV cache can hold.
 
@@ -303,8 +304,13 @@ class VllmServerManager:
         if model_size_mb <= 0:
             return requested_context  # Model not on disk — skip check
 
-        # vLLM overhead: CUDA graphs (~800 MiB) + scratch buffers + headroom
-        overhead_mb = 1536
+        # vLLM overhead: activation/scratch buffers and CUDA context.
+        # CUDA graph memory is profiled separately by vLLM v0.21+,
+        # so we only need to account for the non-profiled fixed costs.
+        # Eager mode (--enforce-eager) skips graph capture entirely, so
+        # its overhead is lower.  Keep in sync with
+        # calculate_gpu_memory_utilization()'s defaults.
+        overhead_mb = 768 if enforce_eager else 1536
 
         managed_vram_mb = int(total_vram_mb * gpu_memory_utilization)
         per_gpu_model_mb, _, _ = estimate_per_gpu_memory_mb(
@@ -788,6 +794,7 @@ class VllmServerManager:
             gpu_memory_utilization=gpu_mem,
             kv_cache_dtype=VllmConfig.kv_cache_dtype,
             tensor_parallel_size=VllmConfig.tensor_parallel_size,
+            enforce_eager=VllmConfig.enforce_eager,
         )
 
         kv_offload_size = self._resolve_kv_offload_size(max_model_len)
@@ -846,6 +853,7 @@ class VllmServerManager:
             kv_cache_dtype=VllmConfig.kv_cache_dtype,
             free_vram_mb=free_vram,
             tensor_parallel_size=VllmConfig.tensor_parallel_size,
+            enforce_eager=VllmConfig.enforce_eager,
         )
 
     def _resolve_kv_offload_size(self, max_model_len: int) -> float | None:

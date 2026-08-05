@@ -685,9 +685,10 @@ def calculate_gpu_memory_utilization(
     kv_cache_dtype: str = "auto",
     safety_factor: float = 1.20,
     headroom_mb: int = 1024,
-    vllm_overhead_mb: int = 512,
+    vllm_overhead_mb: int | None = None,
     free_vram_mb: int = 0,
     tensor_parallel_size: int = 1,
+    enforce_eager: bool = False,
 ) -> float:
     """Calculate the optimal ``gpu_memory_utilization`` fraction for vLLM.
 
@@ -725,8 +726,10 @@ def calculate_gpu_memory_utilization(
             Default ``1.20`` (20% safety margin).
         headroom_mb: Fixed VRAM reserved for the OS, display, and thermal
             headroom.  Default 1024 MiB (1 GiB).
-        vllm_overhead_mb: Fixed overhead for vLLM CUDA kernels, buffers,
-            and scratch memory.  Default 512 MiB.
+        vllm_overhead_mb: Fixed overhead for vLLM activation/scratch
+            buffers and CUDA context (CUDA graph memory is profiled
+            separately by vLLM v0.21+).  Defaults to 1536 MiB
+            (non-eager) or 768 MiB (enforce_eager).
         free_vram_mb: Per-GPU free VRAM (not summed across GPUs).
         tensor_parallel_size: Number of GPUs for tensor parallelism.
             Model weights and KV cache are divided by this value to get
@@ -752,9 +755,19 @@ def calculate_gpu_memory_utilization(
     from aria.helpers.memory import get_model_file_size
 
     MIN_UTILIZATION = 0.50
-    MAX_UTILIZATION = 0.90
+    MAX_UTILIZATION = 0.95
     FALLBACK = 0.85
     DEFAULT_MODEL_SIZE_MB = 4096  # Assume ~4 GiB if model path is unknown
+
+    # vLLM v0.21+ automatically profiles and reserves CUDA graph memory
+    # within the gpu_memory_utilization budget (see
+    # VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS).  Our overhead only needs
+    # to cover the *other* fixed costs: activation/scratch buffers, CUDA
+    # context, and similar non-profiled memory.  Eager mode
+    # (--enforce-eager) skips graph capture entirely, so its overhead is
+    # lower.  Callers may still override via ``vllm_overhead_mb``.
+    if vllm_overhead_mb is None:
+        vllm_overhead_mb = 768 if enforce_eager else 1536
 
     # Guard: if VRAM detection failed, return a safe fallback
     if total_vram_mb <= 0:

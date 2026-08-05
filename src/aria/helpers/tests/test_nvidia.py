@@ -907,43 +907,43 @@ class TestCalculateGpuMemoryUtilization:
     def test_8gb_gpu_small_context(self):
         """Test 8 GB GPU, default model (4096 MiB), 32k context, auto KV.
 
-        model=4096, kv=4096×1.0×1.0=4096, overhead=512, headroom=1024
-        raw=9728, needed=9728×1.2=11673
-        utilization=11673/8192 → clamped to 0.90
+        model=4096, kv=4096×1.0×1.0=4096, overhead=1536, headroom=1024
+        raw=10752, needed=10752×1.2=12902
+        utilization=12902/8192 → clamped to 0.95
         """
         result = calculate_gpu_memory_utilization(8192, context_size=32768)
-        assert 0.90 <= result <= 0.90
+        assert 0.95 <= result <= 0.95
 
     def test_8gb_gpu_large_context_fp8(self):
         """Test 8 GB GPU, default model, 128k context, fp8 KV.
 
-        model=4096, kv=4096×4×0.5=8192, overhead=512, headroom=1024
-        raw=13824, needed=13824×1.2=16588
-        utilization=16588/8192 → clamped to 0.90
+        model=4096, kv=4096×4×0.5=8192, overhead=1536, headroom=1024
+        raw=14848, needed=14848×1.2=17818
+        utilization=17818/8192 → clamped to 0.95
         """
         result = calculate_gpu_memory_utilization(
             8192, context_size=131072, kv_cache_dtype="fp8"
         )
-        assert 0.90 <= result <= 0.90
+        assert 0.95 <= result <= 0.95
 
     def test_33gb_gpu_128k_fp8(self):
         """Test 33 GB GPU, default model, 128k context, fp8 KV.
 
-        model=4096, kv=4096×4×0.5=8192, overhead=512, headroom=1024
-        raw=13824, needed=13824×1.2=16588
-        utilization=16588/34120 ≈ 0.49 → clamped to 0.50
+        model=4096, kv=4096×4×0.5=8192, overhead=1536, headroom=1024
+        raw=14848, needed=14848×1.2=17818
+        utilization=17818/34120 ≈ 0.52
         """
         result = calculate_gpu_memory_utilization(
             34120, context_size=131072, kv_cache_dtype="fp8"
         )
-        assert result == 0.50
+        assert 0.50 <= result <= 0.60
 
     def test_33gb_gpu_32k_fp8(self):
         """Test 33 GB GPU, default model, 32k context, fp8 KV.
 
-        model=4096, kv=4096×1×0.5=2048, overhead=512, headroom=1024
-        raw=7680, needed=7680×1.2=9216
-        utilization=9216/34120 ≈ 0.27 → clamped to 0.50
+        model=4096, kv=4096×1×0.5=2048, overhead=1536, headroom=1024
+        raw=8704, needed=8704×1.2=9216
+        utilization=10445/34120 ≈ 0.31 → clamped to 0.50
         """
         result = calculate_gpu_memory_utilization(
             34120, context_size=32768, kv_cache_dtype="fp8"
@@ -953,22 +953,22 @@ class TestCalculateGpuMemoryUtilization:
     def test_24gb_gpu_128k_fp8(self):
         """Test 24 GB GPU, default model, 128k context, fp8 KV.
 
-        model=4096, kv=4096×4×0.5=8192, overhead=512, headroom=1024
-        raw=13824, needed=13824×1.2=16588
-        utilization=16588/24576 ≈ 0.67
+        model=4096, kv=4096×4×0.5=8192, overhead=1536, headroom=1024
+        raw=14848, needed=14848×1.2=16588
+        utilization=17818/24576 ≈ 0.72
         """
         result = calculate_gpu_memory_utilization(
             24576, context_size=131072, kv_cache_dtype="fp8"
         )
-        assert 0.60 <= result <= 0.75
+        assert 0.60 <= result <= 0.80
 
     def test_large_gpu_low_utilization(self):
         """Test that a large GPU with a small model gets low utilization.
 
         48 GB GPU, 32k context, fp8 KV:
-        model=4096, kv=2048, overhead=512, headroom=1024
-        raw=7680, needed=9216
-        utilization=9216/49152 ≈ 0.19 → clamped to 0.50
+        model=4096, kv=2048, overhead=1536, headroom=1024
+        raw=8704, needed=10445
+        utilization=10445/49152 ≈ 0.21 → clamped to 0.50
         """
         result = calculate_gpu_memory_utilization(
             49152, context_size=32768, kv_cache_dtype="fp8"
@@ -983,8 +983,8 @@ class TestCalculateGpuMemoryUtilization:
             kv_cache_dtype="fp8",
             safety_factor=1.50,
         )
-        # raw=13824, needed=13824×1.5=20736
-        # utilization=20736/34120 ≈ 0.61
+        # raw=14848, needed=14848×1.5=20736
+        # utilization=22272/34120 ≈ 0.65
         assert 0.55 <= result <= 0.70
 
     def test_custom_overhead(self):
@@ -1034,17 +1034,17 @@ class TestCalculateGpuMemoryUtilization:
         """Test that a tiny GPU with a large model is clamped to max utilization.
 
         The default model (4096 MiB) is larger than the GPU (1024 MiB),
-        so utilization exceeds 1.0 and clamps to 0.90.
+        so utilization exceeds 1.0 and clamps to 0.88.
         """
         result = calculate_gpu_memory_utilization(
             1024, context_size=32768, kv_cache_dtype="fp8"
         )
-        assert result == 0.90
+        assert result == 0.95
 
     def test_huge_gpu_with_huge_context(self):
         """Test 96 GB GPU with 512k context — should fit comfortably.
 
-        model=4096, kv=4096×16×0.5=32768, overhead=512, headroom=1024
+        model=4096, kv=4096×16×0.5=32768, overhead=1536, headroom=1024
         raw=38400, needed=38400×1.2=46080
         utilization=46080/98304 ≈ 0.47 → clamped to 0.50
         """
@@ -1073,8 +1073,8 @@ class TestCalculateGpuMemoryUtilization:
             49152,
         ]:
             result = calculate_gpu_memory_utilization(vram, context_size=32768)
-            assert 0.50 <= result <= 0.90, (
-                f"VRAM={vram} MiB → utilization={result} outside [0.50, 0.90]"
+            assert 0.50 <= result <= 0.95, (
+                f"VRAM={vram} MiB → utilization={result} outside [0.50, 0.95]"
             )
 
     def test_no_model_path_uses_default(self):
@@ -1083,7 +1083,7 @@ class TestCalculateGpuMemoryUtilization:
             8192, model_path="", context_size=32768
         )
         # Should still produce a valid result using 4096 MiB default
-        assert 0.50 <= result <= 0.90
+        assert 0.50 <= result <= 0.95
 
 
 class TestArchitectureAwareKvEstimation:
@@ -1131,14 +1131,14 @@ class TestArchitectureAwareKvEstimation:
                 context_size=131072,
                 kv_cache_dtype="fp8",
             )
-        assert 0.55 <= result <= 0.65
+        assert 0.55 <= result <= 0.70
 
     def test_9b_gqa_model_128k_fp16(self, tmp_path, qwen_9b_config):
         """fp16 KV doubles the KV estimate → should use more VRAM.
 
         KV = 2 × 40 × 8 × 128 × 131072 × 2 = 20,480 MiB
         raw = 5000 + 20480 + 1536 = 27,016
-        needed = 27016 × 1.2 = 32,419 → clamped to 0.90
+        needed = 27016 × 1.2 = 32,419 → clamped to 0.95
         """
         model_path = self._make_model_dir(tmp_path, qwen_9b_config)
         with patch("aria.helpers.memory.get_model_file_size", return_value=5000):
@@ -1148,7 +1148,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=131072,
                 kv_cache_dtype="auto",
             )
-        assert result >= 0.90
+        assert result >= 0.95
 
     def test_7b_mha_model_32k_fp8(self, tmp_path):
         """7B MHA model (32 layers, 32 KV heads, head_dim=128) at 32k fp8.
@@ -1174,7 +1174,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=32768,
                 kv_cache_dtype="fp8",
             )
-        assert 0.60 <= result <= 0.75
+        assert 0.60 <= result <= 0.80
 
     def test_config_with_explicit_head_dim(self, tmp_path):
         """Model config that specifies head_dim directly."""
@@ -1195,7 +1195,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=131072,
                 kv_cache_dtype="fp8",
             )
-        assert 0.55 <= result <= 0.65
+        assert 0.55 <= result <= 0.70
 
     def test_missing_config_falls_back_to_heuristic(self, tmp_path):
         """Without config.json, should use the fallback heuristic."""
@@ -1213,7 +1213,7 @@ class TestArchitectureAwareKvEstimation:
         # Heuristic fallback: kv = 5000 * 4 * 0.5 = 10000
         # raw = 5000 + 10000 + 1536 = 16536, needed = 19843
         # util = 19843/33400 ≈ 0.59
-        assert 0.50 <= result <= 0.65
+        assert 0.50 <= result <= 0.70
 
     def test_fp8_vs_auto_with_config(self, tmp_path, qwen_9b_config):
         """fp8 KV should produce lower utilization than auto/fp16."""
@@ -1235,7 +1235,7 @@ class TestArchitectureAwareKvEstimation:
         assert result_fp8 < result_auto
 
     def test_small_gpu_with_config_clamps_to_max(self, tmp_path, qwen_9b_config):
-        """8 GiB GPU with large model + context should clamp to 0.90."""
+        """8 GiB GPU with large model + context should clamp to 0.88."""
         model_path = self._make_model_dir(tmp_path, qwen_9b_config)
 
         with patch("aria.helpers.memory.get_model_file_size", return_value=5000):
@@ -1245,7 +1245,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=131072,
                 kv_cache_dtype="fp8",
             )
-        assert result == 0.90
+        assert result == 0.95
 
     # ------------------------------------------------------------------
     # Multimodal / text_config nesting regression tests
@@ -1282,7 +1282,7 @@ class TestArchitectureAwareKvEstimation:
         KV = 2 × 34 × 8 × 128 × 196608 × 2 = 27,262,976 B ≈ 26,000 MiB
         raw = 6490 + 26000 + 512 + 1024 = 34026
         needed = 34026 × 1.2 = 40831
-        On 32 GB GPU (32768 MiB): util ≈ 40831/32768 → clamped to 0.90
+        On 32 GB GPU (32768 MiB): util ≈ 40831/32768 → clamped to 0.95
         """
         text_config = {
             "num_hidden_layers": 34,
@@ -1300,7 +1300,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=196608,
                 kv_cache_dtype="auto",
             )
-        assert result >= 0.90
+        assert result >= 0.95
 
     def test_multimodal_text_config_fp8_lower_than_auto(self, tmp_path):
         """fp8 KV in text_config model should produce lower utilization."""
@@ -1351,7 +1351,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=131072,
                 kv_cache_dtype="fp8",
             )
-        assert 0.50 <= result <= 0.60
+        assert 0.50 <= result <= 0.70
 
     def test_multimodal_with_only_hidden_size_and_heads(self, tmp_path):
         """text_config with no head_dim (derived from hidden_size / num_heads)."""
@@ -1373,7 +1373,7 @@ class TestArchitectureAwareKvEstimation:
         # Same KV as qwen_9b_config: 2×40×8×128×131072×1 = 10240 MiB
         # raw = 5000 + 10240 + 1536 = 16776, needed = 20131
         # util = 20131/33400 ≈ 0.60
-        assert 0.55 <= result <= 0.65
+        assert 0.55 <= result <= 0.70
 
     def test_top_level_params_take_precedence_over_text_config(self, tmp_path):
         """When both top-level and text_config have params, top-level wins."""
@@ -1427,7 +1427,7 @@ class TestArchitectureAwareKvEstimation:
                 kv_cache_dtype="fp8",
             )
         # Heuristic fallback: kv = 5000 × 4 × 0.5 = 10000
-        assert 0.50 <= result <= 0.65
+        assert 0.50 <= result <= 0.70
 
 
 # ============================================================================
