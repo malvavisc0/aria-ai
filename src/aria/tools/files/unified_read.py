@@ -26,8 +26,6 @@ from aria.tools.files._internals import (
 from aria.tools.files.decorators import with_file_operation_error_handling
 from aria.tools.files.exceptions import FileOperationError
 
-# No additional imports needed
-
 MAX_CONTENT_FILE_SIZE = 1024 * 1024  # 1MB
 MAX_FILES_SEARCH = 100
 MAX_LINES_PER_FILE = 10000
@@ -157,6 +155,10 @@ class SearchFilesSchema(BaseModel):
 def _read_lines_streaming(file_path: Path, offset: int, length: int) -> list[str]:
     """Read lines from file using streaming.
 
+    Lines exceeding ``MAX_LINE_LENGTH`` are truncated with a notice so the
+    agent knows to read the file with a smaller ``length`` or use other
+    tools for the full content.
+
     Args:
         file_path: Path to the file
         offset: Starting line number (0-indexed)
@@ -165,6 +167,8 @@ def _read_lines_streaming(file_path: Path, offset: int, length: int) -> list[str
     Returns:
         List[str]: Lines read from file (without newline characters)
     """
+    from aria.tools.files.constants import MAX_LINE_LENGTH
+
     lines = []
     try:
         with open(file_path, encoding="utf-8") as f:
@@ -173,7 +177,14 @@ def _read_lines_streaming(file_path: Path, offset: int, length: int) -> list[str
                     continue
                 if length > 0 and i >= offset + length:
                     break
-                lines.append(line.rstrip("\n\r"))
+                text = line.rstrip("\n\r")
+                if len(text) > MAX_LINE_LENGTH:
+                    text = (
+                        text[:MAX_LINE_LENGTH] + f"\n[...line {i} truncated — "
+                        f"{len(text) - MAX_LINE_LENGTH:,} chars omitted. "
+                        f"Use a smaller length to read this file.]"
+                    )
+                lines.append(text)
         return lines
     except OSError as exc:
         raise FileOperationError(f"Failed to read file: {exc}") from exc

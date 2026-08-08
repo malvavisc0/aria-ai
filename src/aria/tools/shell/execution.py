@@ -4,23 +4,19 @@ This module provides internal helpers for command execution and
 response building.
 """
 
-import hashlib
 import re
 import subprocess
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from aria.tools.constants import BASE_DIR
+from aria.tools._output import write_tool_output
 from aria.tools.shell.validation import _extract_command_name
 
 # Strip ANSI escape sequences (colors, cursor movement, etc.)
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\].*?\x07")
-
-_OUTPUT_DIR = BASE_DIR / "shell_output"
 
 # Max chars for head/tail preview embedded in the JSON response.
 _HEAD_TAIL_PREVIEW = 500
@@ -29,24 +25,6 @@ _HEAD_TAIL_PREVIEW = 500
 def _strip_ansi(text: str) -> str:
     """Remove ANSI escape codes from text."""
     return _ANSI_RE.sub("", text) if text else ""
-
-
-def _write_output_file(text: str, suffix: str) -> str:
-    """Write text to a timestamped file and return the path string.
-
-    Args:
-        text: Content to persist.
-        suffix: Filename suffix for the file (e.g. 'stdout').
-
-    Returns:
-        Absolute path to the written file.
-    """
-    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    path = _OUTPUT_DIR / f"{ts}_{suffix}_{digest}.txt"
-    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return str(path)
 
 
 def _head_tail_preview(text: str) -> str:
@@ -109,10 +87,10 @@ def _build_response(
 
     # Persist to files so the agent can read in chunks
     if clean_stdout:
-        data["stdout_file"] = _write_output_file(clean_stdout, "stdout")
+        data["stdout_file"] = write_tool_output("shell", "stdout", clean_stdout)
         data["stdout_head_tail"] = _head_tail_preview(clean_stdout)
     if clean_stderr:
-        data["stderr_file"] = _write_output_file(clean_stderr, "stderr")
+        data["stderr_file"] = write_tool_output("shell", "stderr", clean_stderr)
         data["stderr_head_tail"] = _head_tail_preview(clean_stderr)
     if timed_out:
         data["timed_out"] = True

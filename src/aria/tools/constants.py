@@ -8,7 +8,6 @@ providing a single source of truth for common configuration.
 import os
 from pathlib import Path
 
-from aria.config import get_optional_env
 from aria.config.folders import Workspace
 
 # ============================================================================
@@ -48,14 +47,3 @@ MAX_TIMEOUT = int(os.environ.get("ARIA_MAX_TIMEOUT", "600"))
 
 # Network request timeout (seconds)
 NETWORK_TIMEOUT = 10
-
-# ============================================================================
-# Tool Output Limits (context-aware)
-# ============================================================================
-
-# Maximum characters a single tool call may return.
-# Derived from TOKEN_LIMIT so it scales with the configured context window.
-# Budget: each tool call gets ~12.5% of TOKEN_LIMIT (~4 chars per token).
-# This allows ~8 tool outputs in context simultaneously before the memory
-# system starts flushing older messages.
-_TOKEN_LIMIT = int(get_optional_env("TOKEN_LIMIT", "65536"))

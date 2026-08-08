@@ -5,17 +5,16 @@ This module contains private helper functions used by the main Python runner
 module. These functions should not be imported directly by external modules.
 """
 
-import hashlib
 import io
 import signal
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from datetime import datetime
 from typing import Any
 
 from loguru import logger
 
 from aria.tools import get_function_name, tool_error_response, utc_timestamp
-from aria.tools.constants import BASE_DIR, MAX_TIMEOUT
+from aria.tools._output import write_tool_output
+from aria.tools.constants import MAX_TIMEOUT
 from aria.tools.development.constants import RESTRICTED_BUILTINS
 from aria.tools.development.exceptions import PythonSecurityError
 
@@ -275,21 +274,15 @@ def _capture_execution_output(
 
     Raises:
         TimeoutError: If execution exceeds timeout
-        Exception: Any exception raised during execution
-
-    Note:
-        Uses the same dictionary for both global and local namespaces
-        to ensure imports work correctly. This is required for Python's
-        import statement to properly bind module names.
+        SystemExit: If the script calls ``sys.exit()`` — output is still
+            persisted; the file paths are attached as ``stdout_file`` and
+            ``stderr_file`` attributes on the exception.
+        Exception: Any other exception raised during execution
     """
     import sys
 
-    # Save original sys.argv and set clean argv for execution
-    # This prevents argparse from trying to parse parent process arguments
     original_argv = sys.argv.copy()
 
-    # Set sys.argv to custom value or default to script name only
-    # This allows argparse.parse_args() to work correctly
     if argv is None:
         sys.argv = [filename]
     else:
@@ -298,37 +291,30 @@ def _capture_execution_output(
     logger.debug(f"Executing code: {filename}")
     logger.debug(f"Set sys.argv to: {sys.argv}")
 
-    # Create output files in the python_output directory
-    _output_dir = BASE_DIR / "python_output"
-    _output_dir.mkdir(parents=True, exist_ok=True)
-
-    digest = hashlib.sha1(filename.encode("utf-8")).hexdigest()[:8]
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    stdout_file = _output_dir / f"{ts}_stdout_{digest}.txt"
-    stderr_file = _output_dir / f"{ts}_stderr_{digest}.txt"
+    stdout_capture = io.StringIO()
+    stderr_capture = io.StringIO()
 
     try:
-        stdout_capture = io.StringIO()
-        stderr_capture = io.StringIO()
-
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
             with _time_limit(timeout):
-                # FIX: Use same dict for global and local namespaces
-                # This ensures imports bind correctly to the namespace
                 exec(code, safe_globals, safe_globals)
-
-        stdout_text = stdout_capture.getvalue()
-        stderr_text = stderr_capture.getvalue()
-
-        # Always create the files so callers can rely on their existence
-        stdout_file.write_text(stdout_text, encoding="utf-8")
-        stderr_file.write_text(stderr_text, encoding="utf-8")
-
-        return str(stdout_file), str(stderr_file)
+    except BaseException as exc:
+        # Persist output even on exception (e.g. SystemExit) so the
+        # agent can read any stdout/stderr produced before the error.
+        exc.stdout_file = write_tool_output(  # type: ignore[attr-defined]
+            "python", "stdout", stdout_capture.getvalue()
+        )
+        exc.stderr_file = write_tool_output(  # type: ignore[attr-defined]
+            "python", "stderr", stderr_capture.getvalue()
+        )
+        raise
     finally:
-        # Always restore original sys.argv
         sys.argv = original_argv
         logger.debug(f"Restored sys.argv to: {sys.argv}")
+
+    stdout_path = write_tool_output("python", "stdout", stdout_capture.getvalue())
+    stderr_path = write_tool_output("python", "stderr", stderr_capture.getvalue())
+    return stdout_path, stderr_path
 
 
 def _execute_without_capture(

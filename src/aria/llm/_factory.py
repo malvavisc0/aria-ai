@@ -97,9 +97,9 @@ def get_agent_workflow(llm: OpenAILike) -> AgentWorkflow:
         agents=[chatter],
         root_agent=chatter.name,
         # Pass None so setup_agent skips the DEFAULT_STATE_PROMPT injection
-        # (a falsy {} makes the `if state` guard at multi_agent_workflow.py
-        # evaluate False).  reduce_state lazily initialises the state on the
-        # first ToolCallResult via its state-is-None fallback.
+        # (the framework coerces None to a falsy {}, which skips the state
+        # prompt guard).  reduce_state re-seeds a proper WorkflowState on
+        # the first ToolCallResult via its `if not state:` fallback.
         initial_state=None,
     )
     return workflow

@@ -103,7 +103,7 @@ class StatefulAgentWorkflow(AgentWorkflow):
             The updated workflow state persisted back into ``ctx.store``.
         """
         state = await ctx.store.get("state", default=None)
-        if state is None:
+        if not state:
             state = dict(initial_workflow_state())
 
         reduced_state = state_reducer(cast(WorkflowState, state), ev)

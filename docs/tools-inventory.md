@@ -230,7 +230,10 @@ Execute or validate Python code. Provide **exactly one** of `code` or `file`.
 
 **Returns (check_only):** `{ "valid": true, "message": "Syntax is valid" }`
 
-**Returns (execution):** `{ "success": true, "stdout": "...", "stderr": "...", "has_output": true }`
+**Returns (execution):** `{ "success": true, "stdout_file": "/path/to/output.txt", "exit_code": 0 }`
+
+Fields `stdout_file` and `stderr_file` are present only when the corresponding
+output is non-empty. Use `read_file` on the returned paths to inspect output.
 
 ```python
 python("Testing algorithm", code="print(sum(range(10)))")
@@ -750,17 +753,22 @@ Single commands return a **flat response** (no wrapper):
   "command": "echo hello",
   "return_code": 0,
   "execution_time": 0.001,
-  "stdout": "hello"
+  "stdout_file": "/path/to/shell_output/20260101_120000_stdout_a1b2c3d4.txt",
+  "stdout_head_tail": "hello"
 }
 ```
+
+Fields `stdout_file`/`stderr_file` and `stdout_head_tail`/`stderr_head_tail`
+are present only when the corresponding output is non-empty. Use `read_file`
+on the returned paths to inspect full output.
 
 Batch commands (2+) return a **results array**:
 
 ```json
 {
   "results": [
-    {"command": "echo hello", "return_code": 0, "stdout": "hello", "execution_time": 0.001},
-    {"command": "echo world", "return_code": 0, "stdout": "world", "execution_time": 0.001}
+    {"command": "echo hello", "return_code": 0, "stdout_file": "/path/.../stdout_*.txt", "stdout_head_tail": "hello", "execution_time": 0.001},
+    {"command": "echo world", "return_code": 0, "stdout_file": "/path/.../stdout_*.txt", "stdout_head_tail": "world", "execution_time": 0.001}
   ],
   "execution_time": 0.002,
   "stopped_early": false

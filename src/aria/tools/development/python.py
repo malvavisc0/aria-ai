@@ -197,7 +197,12 @@ def _dispatch_execution_error(
 
 
 def _system_exit_response(
-    exc: SystemExit, filename: str, timeout: int, source: str
+    exc: SystemExit,
+    filename: str,
+    timeout: int,
+    source: str,
+    stdout_file: str = "",
+    stderr_file: str = "",
 ) -> str:
     """Build the response for a script that called ``sys.exit()``."""
     exit_code = exc.code if exc.code is not None else 0
@@ -207,13 +212,18 @@ def _system_exit_response(
         if exit_code == 0
         else f"Script exited with code {exit_code}"
     )
+    result: dict[str, Any] = {
+        "success": exit_code == 0,
+        "exit_code": exit_code,
+        "message": message,
+    }
+    if _has_content(stdout_file):
+        result["stdout_file"] = stdout_file
+    if _has_content(stderr_file):
+        result["stderr_file"] = stderr_file
     return _build_response(
         operation="python",
-        result={
-            "success": exit_code == 0,
-            "exit_code": exit_code,
-            "message": message,
-        },
+        result=result,
         filename=filename,
         timeout=timeout,
         source=source,
@@ -281,7 +291,14 @@ def _python_execute(
         )
 
     except SystemExit as e:
-        return _system_exit_response(e, filename, timeout, source_kind)
+        return _system_exit_response(
+            e,
+            filename,
+            timeout,
+            source_kind,
+            stdout_file=getattr(e, "stdout_file", ""),
+            stderr_file=getattr(e, "stderr_file", ""),
+        )
 
     except Exception as e:
         return _dispatch_execution_error(e, filename, timeout, source_kind)
