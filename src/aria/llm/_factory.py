@@ -5,10 +5,9 @@ from chromadb.api import ClientAPI as ChromaClientAPI
 from llama_index.core.agent.workflow import AgentWorkflow
 from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.memory import (
-    FactExtractionMemoryBlock,
+    BaseMemoryBlock,
     InsertMethod,
     Memory,
-    VectorMemoryBlock,
 )
 from llama_index.embeddings.huggingface import HuggingFaceEmbedding
 from llama_index.llms.openai_like import OpenAILike
@@ -19,6 +18,7 @@ from aria.agents import get_chatter_agent
 from ._sanitize import SanitizedOpenAILike
 from ._state import StatefulAgentWorkflow
 from ._utils import get_instructions_extras
+from .memory import IdempotentVectorMemoryBlock
 
 
 def get_chat_llm(
@@ -110,13 +110,19 @@ def get_default_memory(
     embed_model: BaseEmbedding,
     thread_id: str,
     token_limit: int = 32768,
-    llm: OpenAILike | None = None,
 ) -> Memory:
     """Create a Memory instance backed by a per-thread ChromaDB vector store.
 
-    Uses an embeddings-first approach: a small recent history buffer
-    (~10% of token_limit, ~3-4 interactions) plus vector retrieval and
-    fact extraction for older messages.
+    Uses a vector-retrieval-only memory block: the live ``Memory`` queue
+    keeps the most recent turns as raw text, and older turns are
+    flushed to Chroma where they are retrieved by semantic similarity
+    when relevant to the current user message.
+
+    The historical ``FactExtractionMemoryBlock`` was removed because
+    its ``facts`` field is an in-process pydantic attribute that is
+    discarded at shutdown — the 75% of flush time it spent running
+    ``llm.achat`` per batch bought nothing that survived the process.
+    See ``docs/fix-chat-resume-freeze.md`` (Fix 1c).
 
     Args:
         vector_db: ChromaDB client for the thread collection.
@@ -124,35 +130,21 @@ def get_default_memory(
         thread_id: Thread ID used as ChromaDB collection name and session ID.
         token_limit: Total token budget for history + vector context.
             Default 32768 — leaves room for system prompt and tool schemas.
-        llm: If provided, enables fact extraction from flushed messages.
 
     Returns:
         A configured :class:`Memory` instance.
     """
     collection = vector_db.get_or_create_collection(thread_id)
 
-    memory_blocks: list = []
-
-    if llm is not None:
-        memory_blocks.append(
-            FactExtractionMemoryBlock(
-                name="extracted_facts",
-                llm=llm,
-                max_facts=50,
-                priority=1,
-            )
-        )
-
-    memory_blocks.append(
-        VectorMemoryBlock(
-            name="vector_memory",
-            vector_store=ChromaVectorStore(chroma_collection=collection),
-            embed_model=embed_model,
-            similarity_top_k=3,
-            retrieval_context_window=2,
-            priority=2,
-        )
+    block = IdempotentVectorMemoryBlock(
+        name="vector_memory",
+        vector_store=ChromaVectorStore(chroma_collection=collection),
+        embed_model=embed_model,
+        similarity_top_k=3,
+        retrieval_context_window=2,
+        priority=2,
     )
+    memory_blocks: list[BaseMemoryBlock] = [block]
 
     from aria.config.models import Embeddings as EmbeddingsConfig
 

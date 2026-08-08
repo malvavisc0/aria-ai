@@ -16,6 +16,7 @@ import base64
 import io
 import shutil
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 
 import chainlit as cl
@@ -25,7 +26,6 @@ from llama_index.core.base.llms.types import (
     MessageRole,
     ToolCallBlock,
 )
-from llama_index.core.memory import Memory
 from loguru import logger
 from PIL import Image
 
@@ -33,12 +33,19 @@ from aria.config.folders import Uploads as UploadsConfig
 from aria.config.folders import Workspace as WorkspaceConfig
 from aria.config.models import Embeddings as EmbeddingsConfig
 from aria.llm import get_default_memory
+from aria.llm.memory import BackgroundFlushMemory, wrap_memory
 from aria.web.state import ROOT_MESSAGE_TYPES, _state
 
 # Maximum dimension (width or height) for images sent to the vision API.
 # Larger images are resized to prevent processor failures in vLLM
 # (e.g. Qwen3VLProcessor crashing on 3840×2160 images).
 _MAX_VISION_DIMENSION = 1024
+
+# Fraction of the memory queue budget used when restoring history on
+# resume.  Filling the budget exactly would make the very next message
+# cross the waterfall threshold and re-embed turns that are already
+# stored, so the restored tail is deliberately kept below it.
+_RESUME_BUDGET_HEADROOM = 0.9
 
 # Image MIME types and extensions for detection
 _IMAGE_MIME_TYPES = {
@@ -99,17 +106,20 @@ class _ElementInfo:
         return (self.mime in _IMAGE_MIME_TYPES) or (self.ext in _IMAGE_EXTENSIONS)
 
 
-def create_memory(thread_id: str) -> Memory:
+def create_memory(thread_id: str) -> BackgroundFlushMemory:
     """Create a new conversation memory instance for a thread.
 
-    Initializes memory with vector database and embeddings model
-    for storing conversation history.
+    Returns a :class:`BackgroundFlushMemory` wrapper that delegates
+    every ``Memory`` call but runs the embedding waterfall
+    (``_manage_queue``) as a background task so live turns never
+    block on the ~18s/batch flush cost.  See
+    ``aria.web.memory_flush`` and ``docs/fix-chat-resume-freeze.md``.
 
     Args:
         thread_id: Unique identifier for the conversation thread.
 
     Returns:
-        Memory: Configured memory instance for the thread.
+        Memory instance for the thread.
 
     Raises:
         ValueError: If thread_id is None or empty.
@@ -121,13 +131,34 @@ def create_memory(thread_id: str) -> Memory:
     assert vector_db is not None
     embed_model = _state.embeddings
     assert embed_model is not None
-    return get_default_memory(
-        vector_db=vector_db,
-        thread_id=thread_id,
-        embed_model=embed_model,
-        token_limit=EmbeddingsConfig.token_limit,
-        llm=_state.llm,
+    return wrap_memory(
+        get_default_memory(
+            vector_db=vector_db,
+            thread_id=thread_id,
+            embed_model=embed_model,
+            token_limit=EmbeddingsConfig.token_limit,
+        )
     )
+
+
+async def drain_memory(memory: BackgroundFlushMemory | None) -> None:
+    """Await outstanding background flush work before discarding *memory*.
+
+    Must be called every time a memory instance is dropped or replaced
+    (session end, thread switch, edit reset).  Without it the in-flight
+    ``_manage_queue`` task is orphaned and those turns are never
+    embedded into Chroma, so they are lost once the trimmed history no
+    longer contains them.
+
+    Never raises: a failed drain must not break the surrounding
+    lifecycle event.
+    """
+    if memory is None:
+        return
+    try:
+        await memory.drain()
+    except Exception:
+        logger.warning("Failed to drain background memory flush", exc_info=True)
 
 
 async def wait_for_initialization(timeout: float = 30.0) -> bool:
@@ -602,6 +633,69 @@ def _sanitize_chat_history(
     return step3
 
 
+def _last_user_assistant_pair(messages: list[ChatMessage]) -> list[ChatMessage]:
+    """Return the last ``user`` message and whatever follows it.
+
+    Used as a fallback by ``_trim_to_budget`` when the budget is so
+    small that the backward walk only collected assistant messages
+    (which are then dropped to enforce the user-first constraint).
+    Guarantees at least one turn survives so resume never leaves
+    memory empty.
+    """
+    for i in range(len(messages) - 1, -1, -1):
+        if messages[i].role == MessageRole.USER:
+            return messages[i : i + 2]
+    return messages[-1:] if messages else []
+
+
+def _trim_to_budget(
+    messages: list[ChatMessage],
+    budget: int,
+    token_counter: Callable[[ChatMessage], int],
+) -> list[ChatMessage]:
+    """Keep only the newest tail of *messages* that fits within *budget* tokens.
+
+    Walks from the newest message backwards and keeps messages whose
+    cumulative token count stays within *budget*.  Two constraints from
+    ``Memory._manage_queue`` are enforced so the result is safe to feed
+    straight into ``Memory.aset``:
+
+    1. The returned list must start with a ``user`` message.
+    2. The trailing ``user → assistant`` pair is kept even when it
+       pushes the tail over the budget, so the newest user turn is
+       never silently lost.
+
+    A single message larger than the budget is kept so nothing
+    disappears.
+
+    *token_counter* should be the live memory's ``_estimate_token_count``
+    so no second tokenizer is constructed.
+
+    Returns a fresh list; *messages* is not mutated.
+    """
+    tail: list[ChatMessage] = []
+    running = 0
+    for msg in reversed(messages):
+        msg_tok = token_counter(msg)
+        if running + msg_tok > budget and tail:
+            break
+        running += msg_tok
+        tail.append(msg)
+    if not tail:
+        return []
+
+    # Drop trailing non-user messages so the result starts with a user turn.
+    while tail and tail[-1].role != MessageRole.USER:
+        tail.pop()
+    if not tail:
+        # The newest messages were all assistant and exceeded the budget.
+        # Force-include the last user→assistant pair so the newest turn
+        # is never silently lost, even if it exceeds the budget.
+        return _last_user_assistant_pair(messages)
+
+    return list(reversed(tail))
+
+
 def _collect_conversation_steps(chat_steps: list) -> list:
     conversation = [m for m in chat_steps if m.get("type") in ROOT_MESSAGE_TYPES]
     conversation.sort(
@@ -625,7 +719,7 @@ def _step_to_chat_message(step) -> ChatMessage | None:
     return ChatMessage(role=role, content=content)
 
 
-async def restore_chat_history(thread: ThreadDict) -> Memory:
+async def restore_chat_history(thread: ThreadDict) -> BackgroundFlushMemory:
     """Restore conversation history from a thread dictionary.
 
     Creates memory for the thread and populates it with messages
@@ -641,7 +735,7 @@ async def restore_chat_history(thread: ThreadDict) -> Memory:
         thread: Thread dictionary containing conversation steps.
 
     Returns:
-        Memory: Memory instance populated with conversation history.
+        Populated memory instance for the thread.
 
     Raises:
         ValueError: If thread does not contain a valid 'id' field.
@@ -674,8 +768,31 @@ async def restore_chat_history(thread: ThreadDict) -> Memory:
             f"messages (removed non-alternating roles)"
         )
 
-    if chat_history:
-        await memory.aput_messages(chat_history)
+    # Trim to the memory queue budget so the first aput stays free.
+    # Without trimming, the full history exceeds the token budget and
+    # triggers the embedding waterfall (~18s) on every resume.  The
+    # headroom keeps the restored tail just below the threshold so the
+    # first new message does not immediately re-cross it.
+    budget = int(
+        EmbeddingsConfig.token_limit
+        * EmbeddingsConfig.chat_history_token_ratio
+        * _RESUME_BUDGET_HEADROOM
+    )
+    trimmed = _trim_to_budget(chat_history, budget, memory._estimate_token_count)
+    dropped = chat_history[: len(chat_history) - len(trimmed)]
+    logger.debug(
+        f"Trimmed chat history: {len(chat_history)} → {len(trimmed)} "
+        f"messages (budget={budget} tok, {len(dropped)} dropped)"
+    )
+    if trimmed:
+        await memory.aset(trimmed)
 
-    logger.info(f"Restored {len(chat_history)} messages for thread {thread_id}")
+    # The dropped turns must still be retrievable.  They are only in
+    # Chroma if a previous session flushed them, which is not guaranteed
+    # if that session was killed before it could drain.  Re-embedding is
+    # idempotent (content-hashed node IDs), so replaying them costs
+    # nothing when they are already stored.
+    memory.schedule_embed(dropped)
+
+    logger.info(f"Restored {len(trimmed)} messages for thread {thread_id}")
     return memory

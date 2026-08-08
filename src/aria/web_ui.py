@@ -12,6 +12,7 @@ from chainlit.types import ThreadDict
 from aria.web.hooks import (
     auth_callback_handler,
     get_data_layer_handler,
+    on_chat_end_handler,
     on_chat_resume_handler,
     on_chat_start_handler,
 )
@@ -42,6 +43,11 @@ async def auth_callback(username: str, password: str) -> cl.User | None:
 @cl.on_chat_start
 async def on_chat_start() -> None:
     await on_chat_start_handler()
+
+
+@cl.on_chat_end
+async def on_chat_end() -> None:
+    await on_chat_end_handler()
 
 
 @cl.on_chat_resume

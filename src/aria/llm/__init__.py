@@ -19,10 +19,15 @@ from ._state import (
     state_reducer,
 )
 from ._utils import generate_agent_id, get_instructions_extras
+from .memory import BackgroundFlushMemory, IdempotentVectorMemoryBlock, wrap_memory
 
 __all__ = [
     # _sanitize
     "SanitizedOpenAILike",
+    # memory
+    "BackgroundFlushMemory",
+    "IdempotentVectorMemoryBlock",
+    "wrap_memory",
     # _state
     "StatefulAgentWorkflow",
     "WorkflowState",

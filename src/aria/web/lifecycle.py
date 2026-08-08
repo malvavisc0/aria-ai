@@ -464,6 +464,24 @@ async def _init_critical_infra() -> None:
     _init_database()
 
 
+def _warn_low_history_ratio() -> None:
+    """Warn if CHAT_HISTORY_TOKEN_RATIO is set below 0.30.
+
+    A low ratio drives the embedding waterfall to flush on every turn,
+    costing ~18s/batch on the UI critical path.  Existing ``.env`` files
+    that still set ``0.10`` (the old default) silently override the new
+    ``0.50`` default and keep the freeze.
+    """
+    ratio = EmbeddingsConfig.chat_history_token_ratio
+    if ratio < 0.30:
+        logger.warning(
+            f"CHAT_HISTORY_TOKEN_RATIO={ratio:.2f} is below 0.30 — "
+            "this drives per-turn embedding flushes (~18s/batch) on the "
+            "UI thread.  Set CHAT_HISTORY_TOKEN_RATIO=0.50 in ~/.aria/.env. "
+            "See docs/fix-chat-resume-freeze.md."
+        )
+
+
 async def _finalize_subsystems(embed_task) -> None:
     try:
         await embed_task
@@ -486,6 +504,8 @@ async def on_app_startup_handler() -> None:
         await _init_critical_infra()
     except Exception as e:
         await _abort_startup(e, "critical")
+
+    _warn_low_history_ratio()
 
     # Phase 2 – vLLM startup
     logger.info("Loading embeddings model (concurrent with vLLM)...")

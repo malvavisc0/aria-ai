@@ -25,6 +25,7 @@ import socket
 import subprocess
 import time
 from pathlib import Path
+from typing import NamedTuple
 from urllib.error import URLError
 from urllib.request import urlopen
 
@@ -83,6 +84,17 @@ def _resolve_quant_and_dtype(
     ):
         effective_dtype = "float16"
     return effective_quant, effective_dtype
+
+
+class _KvBreakdown(NamedTuple):
+    """Per-GPU memory breakdown used for KV-cache context clamping."""
+
+    tp: int
+    total_vram_mb: int
+    managed_vram_mb: int
+    per_gpu_model_mb: float
+    overhead_mb: int
+    available_kv_mb: float
 
 
 def _kv_offloading_active(
@@ -250,6 +262,82 @@ class VllmServerManager:
         return requested_context
 
     @staticmethod
+    def _available_kv_breakdown(
+        model_path: str,
+        gpu_memory_utilization: float,
+        tensor_parallel_size: int,
+        enforce_eager: bool,
+    ) -> _KvBreakdown | None:
+        """Compute the per-GPU memory available for the KV cache.
+
+        Returns ``None`` when VRAM or model size cannot be determined —
+        the caller should then skip clamping and let vLLM decide.
+        """
+        from aria.helpers.memory import get_model_file_size
+        from aria.helpers.nvidia import estimate_per_gpu_memory_mb
+
+        total_vram_mb = get_per_gpu_vram_mb()
+        if total_vram_mb <= 0:
+            return None
+
+        model_size_mb = get_model_file_size(Path(model_path))
+        if model_size_mb <= 0:
+            return None
+
+        # vLLM overhead: activation/scratch buffers and CUDA context.
+        # CUDA graph memory is profiled separately by vLLM v0.21+,
+        # so we only need to account for the non-profiled fixed costs.
+        # Eager mode (--enforce-eager) skips graph capture entirely, so
+        # its overhead is lower.  Keep in sync with
+        # calculate_gpu_memory_utilization()'s defaults.
+        overhead_mb = 768 if enforce_eager else 1536
+        tp = max(1, tensor_parallel_size)
+
+        managed_vram_mb = int(total_vram_mb * gpu_memory_utilization)
+        per_gpu_model_mb, _, _ = estimate_per_gpu_memory_mb(
+            model_weights_mb=model_size_mb,
+            kv_cache_mb=0,
+            tensor_parallel_size=tp,
+            overhead_mb=overhead_mb,
+        )
+        available_kv_mb = managed_vram_mb - per_gpu_model_mb - overhead_mb
+        if available_kv_mb <= 0:
+            return None
+
+        return _KvBreakdown(
+            tp=tp,
+            total_vram_mb=total_vram_mb,
+            managed_vram_mb=managed_vram_mb,
+            per_gpu_model_mb=per_gpu_model_mb,
+            overhead_mb=overhead_mb,
+            available_kv_mb=available_kv_mb,
+        )
+
+    @staticmethod
+    def _max_context_for_kv(
+        model_path: str,
+        available_kv_mb: float,
+        tp: int,
+        kv_cache_dtype: str,
+    ) -> int | None:
+        """Derive the largest context length that fits *available_kv_mb*.
+
+        Uses a small reference context to compute per-token KV bytes per
+        GPU, then scales.  Returns ``None`` when the estimate fails.
+        """
+        reference_ctx = 4096
+        kv_ref_mb = _estimate_kv_cache_mb(model_path, reference_ctx, kv_cache_dtype)
+        if kv_ref_mb is None or kv_ref_mb <= 0:
+            return None
+
+        kv_ref_per_gpu_mb = kv_ref_mb / tp
+        bytes_per_token_per_gpu = (kv_ref_per_gpu_mb * 1024 * 1024) / reference_ctx
+        max_context = int((available_kv_mb * 1024 * 1024) / bytes_per_token_per_gpu)
+
+        # Align down to 256 (vLLM's KV cache block size) for clean allocation
+        return (max_context // 256) * 256
+
+    @staticmethod
     def _clamp_context_to_gpu_kv(
         model_path: str,
         requested_context: int,
@@ -285,75 +373,36 @@ class VllmServerManager:
             Effective ``max_model_len`` — either the requested value or
             the maximum the GPU can support, whichever is smaller.
         """
-        from pathlib import Path
-
-        from aria.helpers.memory import get_model_file_size
-        from aria.helpers.nvidia import (
-            _estimate_kv_cache_mb,
-            estimate_per_gpu_memory_mb,
-            get_per_gpu_vram_mb,
+        breakdown = VllmServerManager._available_kv_breakdown(
+            model_path,
+            gpu_memory_utilization,
+            tensor_parallel_size,
+            enforce_eager,
         )
+        if breakdown is None:
+            return requested_context
 
-        total_vram_mb = get_per_gpu_vram_mb()
-        if total_vram_mb <= 0:
-            return requested_context  # Cannot detect VRAM — skip check
-
-        tp = max(1, tensor_parallel_size)
-
-        model_size_mb = get_model_file_size(Path(model_path))
-        if model_size_mb <= 0:
-            return requested_context  # Model not on disk — skip check
-
-        # vLLM overhead: activation/scratch buffers and CUDA context.
-        # CUDA graph memory is profiled separately by vLLM v0.21+,
-        # so we only need to account for the non-profiled fixed costs.
-        # Eager mode (--enforce-eager) skips graph capture entirely, so
-        # its overhead is lower.  Keep in sync with
-        # calculate_gpu_memory_utilization()'s defaults.
-        overhead_mb = 768 if enforce_eager else 1536
-
-        managed_vram_mb = int(total_vram_mb * gpu_memory_utilization)
-        per_gpu_model_mb, _, _ = estimate_per_gpu_memory_mb(
-            model_weights_mb=model_size_mb,
-            kv_cache_mb=0,
-            tensor_parallel_size=tp,
-            overhead_mb=overhead_mb,
-        )
-        available_kv_mb = managed_vram_mb - per_gpu_model_mb - overhead_mb
-
-        if available_kv_mb <= 0:
-            return requested_context  # Not enough info — let vLLM handle it
-
-        # Estimate KV cache for the requested context (total, then per-GPU)
         kv_mb = _estimate_kv_cache_mb(model_path, requested_context, kv_cache_dtype)
         if kv_mb is None or kv_mb <= 0:
-            return requested_context  # Cannot estimate — skip check
+            return requested_context
 
-        per_gpu_kv_mb = kv_mb / tp
+        per_gpu_kv_mb = kv_mb / breakdown.tp
+        if per_gpu_kv_mb <= breakdown.available_kv_mb:
+            return requested_context
 
-        if per_gpu_kv_mb <= available_kv_mb:
-            return requested_context  # Fits — no clamping needed
-
-        # --- Requested context doesn't fit — find the maximum that does ---
-        # Use a small reference context to derive bytes-per-token per GPU
-        reference_ctx = 4096
-        kv_ref_mb = _estimate_kv_cache_mb(model_path, reference_ctx, kv_cache_dtype)
-        if kv_ref_mb is None or kv_ref_mb <= 0:
-            return requested_context  # Cannot estimate — skip check
-
-        kv_ref_per_gpu_mb = kv_ref_mb / tp
-        kv_bytes_per_token_per_gpu = (kv_ref_per_gpu_mb * 1024 * 1024) / reference_ctx
-        max_context = int((available_kv_mb * 1024 * 1024) / kv_bytes_per_token_per_gpu)
-
-        # Align down to 256 (vLLM's KV cache block size) for clean allocation
-        max_context = (max_context // 256) * 256
-
-        if max_context >= requested_context:
-            return requested_context  # After rounding, still fits
-
-        per_gpu_kv_clamped_mb = int(
-            max_context * kv_bytes_per_token_per_gpu / (1024 * 1024)
+        max_context = VllmServerManager._max_context_for_kv(
+            model_path, breakdown.available_kv_mb, breakdown.tp, kv_cache_dtype
         )
+        if max_context is None or max_context >= requested_context:
+            return requested_context
+
+        per_gpu_kv_clamped_mb = _estimate_kv_cache_mb(
+            model_path, max_context, kv_cache_dtype
+        )
+        if per_gpu_kv_clamped_mb is not None:
+            per_gpu_kv_clamped_mb = int(per_gpu_kv_clamped_mb / breakdown.tp)
+        else:
+            per_gpu_kv_clamped_mb = 0
         logger.warning(
             "Auto-clamping max_model_len: {requested:,} → {clamped:,}\n"
             "  Reason: GPU KV cache cannot fit {requested:,} tokens.\n"
@@ -375,13 +424,13 @@ class VllmServerManager:
             "({clamped:,} tokens, {dtype})",
             requested=requested_context,
             clamped=max_context,
-            tp=tp,
-            vram=total_vram_mb,
+            tp=breakdown.tp,
+            vram=breakdown.total_vram_mb,
             util=gpu_memory_utilization,
-            managed=managed_vram_mb,
-            model=per_gpu_model_mb,
-            overhead=overhead_mb,
-            avail=available_kv_mb,
+            managed=breakdown.managed_vram_mb,
+            model=breakdown.per_gpu_model_mb,
+            overhead=breakdown.overhead_mb,
+            avail=breakdown.available_kv_mb,
             kv_orig=per_gpu_kv_mb,
             kv_clmp=per_gpu_kv_clamped_mb,
             dtype=kv_cache_dtype,

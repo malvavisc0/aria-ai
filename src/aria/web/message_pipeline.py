@@ -20,7 +20,6 @@ from typing import Any
 import chainlit as cl
 import httpx
 from llama_index.core.agent.workflow import AgentOutput, AgentStream, ToolCall
-from llama_index.core.memory import Memory
 from loguru import logger
 from workflows.handler import WorkflowHandler
 
@@ -28,11 +27,13 @@ from aria.agents.prompt_enhancer import PromptEnhancementResult
 from aria.config.api import Vllm as VllmConfig
 from aria.config.models import Chat as ChatConfig
 from aria.helpers.ui import maybe_remove_step, send_tool_step
+from aria.llm.memory import BackgroundFlushMemory
 from aria.web.hooks import get_data_layer_handler
 from aria.web.session import (
     _sanitize_chat_history,
     convert_documents_to_markdown,
     create_memory,
+    drain_memory,
     extract_file_paths,
     extract_image_data,
     restore_chat_history,
@@ -74,7 +75,7 @@ def _history_fingerprint(messages: list) -> int:
     return h
 
 
-async def _sanitize_memory(memory: Memory) -> None:
+async def _sanitize_memory(memory: BackgroundFlushMemory) -> None:
     """Ensure memory chat history has valid user/assistant alternation.
 
     After a failed live turn the ``Memory`` chat store may contain a
@@ -82,10 +83,13 @@ async def _sanitize_memory(memory: Memory) -> None:
     alternation violations).  This normalises the history so the next
     model invocation sees strictly alternating roles.
 
-    Uses ``memory.set()`` (bypasses token-limit waterfall) because this
-    is a corrective rewrite, not a new-message insertion.
+    Reads via ``memory.aget_all()`` (raw chat store, no injected vector
+    context) and writes via ``memory.aset()`` (replaces without running
+    the token-limit waterfall).  Both are required: ``aget`` would
+    splice the retrieved block output into the last user message and a
+    subsequent ``set`` would persist that injected blob permanently.
     """
-    messages = await memory.aget()
+    messages = await memory.aget_all()
     if not messages:
         return
     before = _history_fingerprint(messages)
@@ -96,10 +100,10 @@ async def _sanitize_memory(memory: Memory) -> None:
             f"Sanitized memory chat history: {len(messages)} → "
             f"{len(sanitized)} messages (repaired alternation)"
         )
-        memory.set(sanitized)
+        await memory.aset(sanitized)
 
 
-async def _rollback_memory(memory: Memory | None) -> None:
+async def _rollback_memory(memory: BackgroundFlushMemory | None) -> None:
     """Repair dangling state left by a failed workflow run.
 
     When an LLM/infrastructure error occurs after ``AgentWorkflow.run()``
@@ -116,7 +120,7 @@ async def _rollback_memory(memory: Memory | None) -> None:
     if memory is None:
         return
     try:
-        messages = await memory.aget()
+        messages = await memory.aget_all()
         if not messages:
             return
         before = _history_fingerprint(messages)
@@ -127,7 +131,7 @@ async def _rollback_memory(memory: Memory | None) -> None:
                 "Rolling back dangling/partial turn from memory "
                 f"({len(messages)} → {len(repaired)} messages)"
             )
-            memory.set(repaired)
+            await memory.aset(repaired)
     except Exception:
         logger.warning("Failed to rollback memory", exc_info=True)
 
@@ -171,7 +175,7 @@ class _EditThreadMissingError(RuntimeError):
 
 async def _reset_memory_for_edit(
     thread_id: str,
-) -> Memory:
+) -> BackgroundFlushMemory:
     """Reset and rebuild memory after a message edit.
 
     Deletes the vector collection for the thread, creates fresh
@@ -193,7 +197,6 @@ async def _reset_memory_for_edit(
             exc_info=True,
         )
 
-    memory = create_memory(thread_id)
     data_layer = get_data_layer_handler()
     thread = await data_layer.get_thread(thread_id)
     if not thread:
@@ -201,8 +204,7 @@ async def _reset_memory_for_edit(
             f"Thread {thread_id} not found; cannot apply edit to a thread "
             "that no longer exists."
         )
-    memory = await restore_chat_history(thread)
-    return memory
+    return await restore_chat_history(thread)
 
 
 _IMAGE_DESCRIBE_PROMPT = "Describe this image concisely in 2-3 sentences."
@@ -562,7 +564,7 @@ async def _stream_agent_response(
 async def _fail_turn(
     *,
     message: cl.Message,
-    memory: Memory | None,
+    memory: BackgroundFlushMemory | None,
     pipeline_meta: dict,
     error: BaseException,
     user_message: str,
@@ -585,7 +587,9 @@ async def _fail_turn(
     await cl.Message(content=user_message).send()
 
 
-async def _workflow_init(message: cl.Message) -> tuple[Memory, str, dict, bool]:
+async def _workflow_init(
+    message: cl.Message,
+) -> tuple[BackgroundFlushMemory, str, dict, bool]:
     """Prepare memory + handler for a workflow run.
 
     Returns ``(memory, prompt, pipeline_meta, is_edit)``.
@@ -594,6 +598,7 @@ async def _workflow_init(message: cl.Message) -> tuple[Memory, str, dict, bool]:
     is_edit = bool(message.metadata and message.metadata.get(_PROCESSED_KEY))
     memory = cl.user_session.get("memory")
     if memory is None or memory.session_id != message.thread_id:
+        await drain_memory(memory)
         memory = create_memory(message.thread_id)
         cl.user_session.set("memory", memory)
         logger.debug(f"Created new Memory for thread {message.thread_id}")
@@ -603,6 +608,7 @@ async def _workflow_init(message: cl.Message) -> tuple[Memory, str, dict, bool]:
             f"Edit detected for message {message.id}, "
             "resetting memory from persisted history"
         )
+        await drain_memory(memory)
         memory = await _reset_memory_for_edit(message.thread_id)
         cl.user_session.set("memory", memory)
 
@@ -631,7 +637,7 @@ async def _stream_and_finalize(
     output: cl.Message,
     pipeline_meta: dict,
     prompt: str,
-    memory: Memory,
+    memory: BackgroundFlushMemory,
 ) -> dict:
     handler = _state.agents_workflow.run(  # type: ignore[union-attr]
         user_msg=prompt,
@@ -689,7 +695,7 @@ async def on_message_handler(message: cl.Message) -> None:
         await _warn_not_initialized()
         return
 
-    memory: Memory | None = None
+    memory: BackgroundFlushMemory | None = None
     pipeline_meta: dict = {}
     try:
         _state.validate_initialized()

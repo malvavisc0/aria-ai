@@ -57,26 +57,9 @@ def _load_processes() -> dict[str, dict]:
     """Load persisted process entries from disk.
 
     Dead processes are kept in state so logs remain accessible.
-    Use _prune_stale() explicitly when cleanup is desired.
     """
     state = load_state(_STATE_FILE)
     return dict(state.get("processes", {}))
-
-
-def _prune_stale(entries: dict[str, dict]) -> dict[str, dict]:
-    """Remove entries for processes that are no longer running."""
-    pruned = False
-    for name in list(entries):
-        pid = entries[name].get("pid")
-        if pid is None or not is_process_running(pid):
-            _cleanup_logs(name)
-            del entries[name]
-            pruned = True
-
-    if pruned:
-        _save_processes(entries)
-
-    return entries
 
 
 def _save_processes(entries: dict[str, dict]) -> None:

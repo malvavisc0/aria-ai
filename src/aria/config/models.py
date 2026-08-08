@@ -159,7 +159,7 @@ class Embeddings:
             return requested
 
     chat_history_token_ratio = _Lazy(
-        lambda: float(get_optional_env("CHAT_HISTORY_TOKEN_RATIO", "0.10"))
+        lambda: float(get_optional_env("CHAT_HISTORY_TOKEN_RATIO", "0.50"))
     )
     model_path = _Lazy(
         lambda: _resolve_model_path(get_optional_env("EMBED_MODEL_PATH", ""))

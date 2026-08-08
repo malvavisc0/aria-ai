@@ -2,7 +2,7 @@
 
 This module provides callback handlers for Chainlit events including:
 - Authentication (login/logout)
-- Chat session lifecycle (start, resume)
+- Chat session lifecycle (start, resume, end)
 - Data layer initialization
 
 These handlers are invoked by Chainlit at various points in the app lifecycle.
@@ -24,7 +24,11 @@ from aria.db.auth import verify_password
 from aria.db.layer import SQLiteSQLAlchemyDataLayer
 from aria.db.local_storage_client import LocalStorageClient
 from aria.db.models import User
-from aria.web.session import restore_chat_history, wait_for_initialization
+from aria.web.session import (
+    drain_memory,
+    restore_chat_history,
+    wait_for_initialization,
+)
 from aria.web.state import _state
 
 
@@ -116,10 +120,12 @@ async def auth_callback_handler(username: str, password: str) -> cl.User | None:
 async def on_chat_start_handler() -> None:
     """Handle the start of a new chat session.
 
-    Called by Chainlit when a new chat session begins. Clears any
-    stale memory from the previous thread and sets up custom
-    commands available in the chat interface.
+    Called by Chainlit when a new chat session begins. Drains and clears
+    any stale memory from the previous thread (so its pending embedding
+    work is not orphaned) and sets up custom commands available in the
+    chat interface.
     """
+    await drain_memory(cl.user_session.get("memory"))
     cl.user_session.set("memory", None)
     logger.debug("Starting new chat session")
     await cl.context.emitter.set_commands(
@@ -134,6 +140,22 @@ async def on_chat_start_handler() -> None:
             }
         ]
     )
+
+
+async def on_chat_end_handler() -> None:
+    """Handle the end of a chat session.
+
+    Called by Chainlit when a chat session ends (user disconnects or
+    starts a new chat).  Awaits any in-flight background memory flush so
+    the embedding waterfall completes before the session's memory is
+    discarded — without this, trimmed-off turns are never persisted to
+    Chroma.  See ``docs/fix-chat-resume-freeze.md`` (Fix 1b).
+    """
+    memory = cl.user_session.get("memory")
+    if memory is None:
+        return
+    await drain_memory(memory)
+    cl.user_session.set("memory", None)
 
 
 async def on_chat_resume_handler(thread: ThreadDict) -> None:

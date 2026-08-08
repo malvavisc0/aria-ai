@@ -9,6 +9,26 @@ import pytest
 from aria.web import message_pipeline as pipeline
 
 
+class _FakeMemory:
+    """In-memory fake Memory for sanitize/rollback tests.
+
+    Backed by a list; supports the ``aget``/``aget_all``/``aset``
+    contract that ``_sanitize_memory`` and ``_rollback_memory`` use.
+    """
+
+    def __init__(self, msgs: Any = ()) -> None:
+        self._msgs = list(msgs)
+
+    async def aget(self, input: Any = None) -> list:
+        return list(self._msgs)
+
+    async def aget_all(self, status: Any = None) -> list:
+        return list(self._msgs)
+
+    async def aset(self, messages: Any) -> None:
+        self._msgs = list(messages)
+
+
 class TestStreamAgentResponse:
     """Tests for the simplified _stream_agent_response."""
 
@@ -291,17 +311,6 @@ class TestSanitizeMemory:
     @staticmethod
     def _make_memory(*messages) -> Any:
         """Build a fake Memory backed by an in-memory list."""
-
-        class _FakeMemory:
-            def __init__(self, msgs):
-                self._msgs = list(msgs)
-
-            async def aget(self, input=None):
-                return list(self._msgs)
-
-            def set(self, messages):
-                self._msgs = list(messages)
-
         return _FakeMemory(messages)
 
     @pytest.mark.asyncio
@@ -355,6 +364,46 @@ class TestSanitizeMemory:
         result = await memory.aget()
         assert [m.content for m in result] == ["q", "a"]
 
+    @pytest.mark.asyncio
+    async def test_round_trip_preserves_aget_all_when_already_valid(self) -> None:
+        """Regression: sanitize must read the raw chat store, not the rendered one.
+
+        If ``aget()`` (which splices the retrieved vector context into the
+        last user message) were read and ``set()`` were written, the
+        injected blob would be persisted permanently and grow unbounded
+        across repairs.  Reading ``aget_all()`` + writing ``aset()``
+        leaves valid history byte-identical.
+        """
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q1"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
+            ChatMessage(role=MessageRole.USER, content="q2"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a2"),
+        ]
+        memory = self._make_memory(*msgs)
+        before = await memory.aget_all()
+        await pipeline._sanitize_memory(memory)
+        after = await memory.aget_all()
+        assert [m.content for m in after] == [m.content for m in before]
+        assert [m.role for m in after] == [m.role for m in before]
+
+    @pytest.mark.asyncio
+    async def test_repair_never_grows_message_length(self) -> None:
+        """Regression: no message should grow across a sanitize round-trip."""
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
+        ]
+        memory = self._make_memory(*msgs)
+        before_lens = [len(m.content or "") for m in await memory.aget_all()]
+        await pipeline._sanitize_memory(memory)
+        after_lens = [len(m.content or "") for m in await memory.aget_all()]
+        assert after_lens == before_lens
+
 
 # ---------------------------------------------------------------------------
 # _rollback_memory — removes dangling user message after failure
@@ -366,16 +415,6 @@ class TestRollbackMemory:
 
     @staticmethod
     def _make_memory(*messages) -> Any:
-        class _FakeMemory:
-            def __init__(self, msgs):
-                self._msgs = list(msgs)
-
-            async def aget(self, input=None):
-                return list(self._msgs)
-
-            def set(self, messages):
-                self._msgs = list(messages)
-
         return _FakeMemory(messages)
 
     @pytest.mark.asyncio
@@ -415,6 +454,21 @@ class TestRollbackMemory:
         await pipeline._rollback_memory(memory)
         result = await memory.aget()
         assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_round_trip_preserves_aget_all_when_already_valid(self) -> None:
+        """Regression: rollback reads raw chat store, never grows messages."""
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q1"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
+        ]
+        memory = self._make_memory(*msgs)
+        before = await memory.aget_all()
+        await pipeline._rollback_memory(memory)
+        after = await memory.aget_all()
+        assert [m.content for m in after] == [m.content for m in before]
 
 
 # ---------------------------------------------------------------------------
@@ -907,7 +961,9 @@ class TestEditDetection:
             "user_session",
             SimpleNamespace(
                 get=lambda k: MagicMock(
-                    session_id="thread-1", aget=AsyncMock(return_value=[])
+                    session_id="thread-1",
+                    aget=AsyncMock(return_value=[]),
+                    aget_all=AsyncMock(return_value=[]),
                 ),
                 set=lambda k, v: None,
             ),
@@ -963,7 +1019,9 @@ class TestEditDetection:
             "user_session",
             SimpleNamespace(
                 get=lambda k: MagicMock(
-                    session_id="thread-1", aget=AsyncMock(return_value=[])
+                    session_id="thread-1",
+                    aget=AsyncMock(return_value=[]),
+                    aget_all=AsyncMock(return_value=[]),
                 ),
                 set=lambda k, v: None,
             ),
