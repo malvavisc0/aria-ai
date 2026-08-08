@@ -332,6 +332,12 @@ button:disabled,
   padding-left: 0.875rem;
   border-left: 2px solid hsl(var(--primary));
   color: hsl(var(--muted-foreground));
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.cl-message-content blockquote [role="article"] {
+  line-height: 1.5;
 }
 
 .cl-message-content a,
