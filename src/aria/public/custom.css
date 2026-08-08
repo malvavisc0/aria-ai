@@ -3,10 +3,12 @@
 :root {
   --aria-ease: cubic-bezier(0.2, 0, 0, 1);
   --aria-duration: 160ms;
-  --aria-shadow: 0 1px 2px rgb(43 35 25 / 0.04), 0 8px 24px rgb(43 35 25 / 0.04);
-  --aria-shadow-raised: 0 12px 32px rgb(43 35 25 / 0.12);
+  --aria-shadow: 0 1px 2px rgb(12 18 30 / 0.20), 0 8px 24px rgb(12 18 30 / 0.28);
+  --aria-shadow-raised: 0 12px 32px rgb(12 18 30 / 0.45);
   --aria-scroll-track: transparent;
-  --aria-scroll-thumb: rgb(77 70 55 / 0.24);
+  --aria-scroll-thumb: hsl(var(--muted-foreground) / 0.38);
+  --aria-hairline: hsl(var(--border) / 0.72);
+  --aria-chat-max-width: 72rem;
 }
 
 html,
@@ -21,25 +23,27 @@ body,
 .cl-input,
 .cl-sidebar,
 .cl-settings,
-.cl-chat-profile {
+.cl-chat-profile,
+.message-content,
+.message-content .prose {
   font-family: var(--font-sans);
-  font-size: 0.875rem;
-  line-height: 1.55;
-  letter-spacing: -0.008em;
+  font-size: 0.84375rem;
+  line-height: 1.5;
+  letter-spacing: -0.012em;
 }
 
 html.light body,
 html[data-theme="light"] body,
 :root[data-theme="light"] body,
 body[data-theme="light"] {
-  background: linear-gradient(135deg, hsl(var(--background)), hsl(42 18% 93%));
+  background: linear-gradient(135deg, hsl(var(--background)), hsl(210 12% 86%));
 }
 
 html.dark body,
 html[data-theme="dark"] body,
 :root[data-theme="dark"] body,
 body[data-theme="dark"] {
-  background: radial-gradient(circle at top right, hsl(104 14% 15%), hsl(var(--background)) 44%);
+  background: radial-gradient(circle at top right, hsl(210 25% 25%), hsl(var(--background)) 50%);
   color-scheme: dark;
 }
 
@@ -49,17 +53,17 @@ h2,
 h3,
 h4 {
   color: hsl(var(--foreground));
-  letter-spacing: -0.02em;
+  letter-spacing: -0.03em;
 }
 
 h1 {
-  font-size: 1.5rem;
+  font-size: 1.375rem;
   line-height: 1.2;
   font-weight: 650;
 }
 
 h2 {
-  font-size: 1.2rem;
+  font-size: 1.125rem;
   line-height: 1.3;
   font-weight: 650;
 }
@@ -71,21 +75,28 @@ h4 {
   font-weight: 600;
 }
 
-.cl-message-content {
+.cl-message-content,
+.message-content {
   width: 100%;
   max-width: none;
-  font-size: 0.875rem;
-  line-height: 1.62;
+  font-size: 0.84375rem;
+  line-height: 1.65;
 }
 
-/* Give the conversation more room without making long responses hard to scan. */
+/* Let the conversation use the available desktop width; Chainlit adds an inline 48rem cap. */
 .cl-chat,
 .cl-chat-container,
 .cl-message-list,
 [data-testid="message-list"],
 [data-testid="chat-messages"],
-main > div:has(.cl-message) {
-  max-width: 88rem !important;
+main > div:has(.cl-message),
+div.flex.flex-col.mx-auto.w-full.flex-grow.p-4:has([data-step-type]),
+div.flex.flex-col.mx-auto.w-full.p-4.pt-0:has(#message-composer),
+[data-step-type] > .flex.flex-col,
+[style*="48rem"],
+[style*="60rem"] {
+  width: 100% !important;
+  max-width: var(--aria-chat-max-width) !important;
 }
 
 .cl-message-content h1 {
@@ -138,14 +149,15 @@ img[alt*="logo" i] {
 .cl-step {
   width: 100%;
   max-width: 100%;
-  border: 1px solid hsl(var(--border)) !important;
+  border: 1px solid var(--aria-hairline) !important;
   border-radius: var(--radius) !important;
   background: hsl(var(--card));
   box-shadow: none !important;
 }
 
 .cl-message {
-  padding: 1rem;
+  padding: 0.875rem 1rem;
+  transition: border-color var(--aria-duration) var(--aria-ease), background-color var(--aria-duration) var(--aria-ease);
 }
 
 .cl-step {
@@ -170,6 +182,15 @@ html[data-theme="light"] .cl-card:hover {
   box-shadow: var(--aria-shadow) !important;
 }
 
+html.light .cl-message,
+html.light .cl-card,
+html.light .cl-step,
+html[data-theme="light"] .cl-message,
+html[data-theme="light"] .cl-card,
+html[data-theme="light"] .cl-step {
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.18) !important;
+}
+
 html.dark .cl-message,
 html.dark .cl-card,
 html.dark .cl-step,
@@ -177,6 +198,11 @@ html[data-theme="dark"] .cl-message,
 html[data-theme="dark"] .cl-card,
 html[data-theme="dark"] .cl-step {
   box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.025) !important;
+}
+
+html.dark .cl-message:nth-child(even),
+html[data-theme="dark"] .cl-message:nth-child(even) {
+  background: hsl(var(--card) / 0.72);
 }
 
 /* Composer and controls have a predictable, accessible focus treatment. */
@@ -207,7 +233,7 @@ button,
 .cl-button {
   border-radius: var(--radius) !important;
   font-family: var(--font-sans);
-  font-size: 0.8125rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: -0.006em;
   transition: background-color var(--aria-duration) var(--aria-ease), border-color var(--aria-duration) var(--aria-ease), color var(--aria-duration) var(--aria-ease), transform var(--aria-duration) var(--aria-ease);
@@ -261,6 +287,7 @@ button:disabled,
 
 .cl-thread-item.active {
   border-left: 2px solid hsl(var(--sidebar-primary));
+  background: linear-gradient(90deg, hsl(var(--sidebar-accent)), transparent) !important;
 }
 
 /* Supporting content stays calm and legible. */
@@ -270,7 +297,7 @@ button:disabled,
   border: 1px solid hsl(var(--border));
   border-radius: calc(var(--radius) - 0.125rem) !important;
   background: hsl(var(--muted)) !important;
-  font-size: 0.8125rem !important;
+  font-size: 0.75rem !important;
   line-height: 1.55;
 }
 
@@ -310,23 +337,57 @@ button:disabled,
   outline-offset: 2px;
 }
 
+html,
+body,
+#root,
+#root > *,
+main,
+[class*="overflow-y-auto"],
 * {
   scrollbar-width: thin;
   scrollbar-color: var(--aria-scroll-thumb) var(--aria-scroll-track);
 }
 
+html::-webkit-scrollbar,
+body::-webkit-scrollbar,
+#root::-webkit-scrollbar,
+#root > *::-webkit-scrollbar,
+main::-webkit-scrollbar,
+[class*="overflow-y-auto"]::-webkit-scrollbar,
 *::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 
+html::-webkit-scrollbar-track,
+body::-webkit-scrollbar-track,
+#root::-webkit-scrollbar-track,
+#root > *::-webkit-scrollbar-track,
+main::-webkit-scrollbar-track,
+[class*="overflow-y-auto"]::-webkit-scrollbar-track,
 *::-webkit-scrollbar-track {
-  background: var(--aria-scroll-track);
+  background: transparent !important;
 }
 
+html::-webkit-scrollbar-thumb,
+body::-webkit-scrollbar-thumb,
+#root::-webkit-scrollbar-thumb,
+#root > *::-webkit-scrollbar-thumb,
+main::-webkit-scrollbar-thumb,
+[class*="overflow-y-auto"]::-webkit-scrollbar-thumb,
 *::-webkit-scrollbar-thumb {
   border-radius: 999px;
-  background: var(--aria-scroll-thumb);
+  background: var(--aria-scroll-thumb) !important;
+}
+
+html::-webkit-scrollbar-thumb:hover,
+body::-webkit-scrollbar-thumb:hover,
+#root::-webkit-scrollbar-thumb:hover,
+#root > *::-webkit-scrollbar-thumb:hover,
+main::-webkit-scrollbar-thumb:hover,
+[class*="overflow-y-auto"]::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.56) !important;
 }
 
 @media (max-width: 768px) {
@@ -334,7 +395,8 @@ button:disabled,
     padding: 0.75rem;
   }
 
-  .cl-message-content {
-    font-size: 0.875rem;
+  .cl-message-content,
+  .message-content {
+    font-size: 0.84375rem;
   }
 }
