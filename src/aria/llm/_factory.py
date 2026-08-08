@@ -98,7 +98,7 @@ def get_agent_workflow(llm: OpenAILike) -> AgentWorkflow:
         root_agent=chatter.name,
         # Cast to plain dict: AgentWorkflow expects Dict, WorkflowState is
         # a TypedDict (structurally compatible at runtime).
-        initial_state=dict(initial_workflow_state(root_agent=chatter.name)),
+        initial_state=dict(initial_workflow_state()),
     )
     return workflow
 
@@ -136,7 +136,7 @@ def get_default_memory(
             FactExtractionMemoryBlock(
                 name="extracted_facts",
                 llm=llm,
-                max_facts=40,
+                max_facts=50,
                 priority=1,
             )
         )
@@ -146,7 +146,7 @@ def get_default_memory(
             name="vector_memory",
             vector_store=ChromaVectorStore(chroma_collection=collection),
             embed_model=embed_model,
-            similarity_top_k=5,
+            similarity_top_k=3,
             retrieval_context_window=2,
             priority=2,
         )

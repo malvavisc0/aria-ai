@@ -6,7 +6,6 @@ pure function, and :class:`StatefulAgentWorkflow` which wires them into
 the LlamaIndex :class:`AgentWorkflow` run-loop.
 """
 
-import copy
 from typing import Any, cast
 
 from llama_index.core.agent.workflow import (
@@ -32,82 +31,37 @@ from aria.llm._compress import (
 _CUMULATIVE_BUDGET_RATIO = 0.15  # 15% of context in chars
 
 
-class ToolCallRecord(TypedDict):
-    """A single tool invocation captured in the workflow state.
-
-    Attributes:
-        agent: Name of the agent that invoked the tool.
-        tool: Name of the tool that was called.
-        args: Keyword arguments passed to the tool.
-        result: String representation of the tool's output.
-        error: Error message if the tool raised an exception, else ``None``.
-    """
-
-    agent: str
-    tool: str
-    args: dict
-    result: str
-    error: str | None
-
-
 class WorkflowState(TypedDict):
-    """Minimal shared state threaded through the agent workflow.
+    """Shared state threaded through the agent workflow.
 
-    This dict is seeded into ``ctx.store`` by :func:`get_agent_workflow` via
-    ``AgentWorkflow(initial_state=...)``. In this project, live updates are
-    performed by :class:`StatefulAgentWorkflow`, which applies
-    :func:`state_reducer` after every :class:`AgentOutput` and
-    :class:`ToolCallResult` event so that the state reflects the latest
-    activity within the current workflow context.
+    Seeded into ``ctx.store`` by :func:`get_agent_workflow` via
+    ``AgentWorkflow(initial_state=...)``. Live updates are performed by
+    :class:`StatefulAgentWorkflow`, which applies :func:`state_reducer`
+    after every :class:`ToolCallResult` event.
 
     Attributes:
-        current_agent: Name of the agent that is currently active.
-        tool_calls: Append-only log of every tool invocation during the run.
         last_error: Most recent tool error message, or ``None`` if the last
             tool call succeeded.
     """
 
-    current_agent: str
-    tool_calls: list[ToolCallRecord]
     last_error: str | None
 
 
-def initial_workflow_state(root_agent: str) -> WorkflowState:
+def initial_workflow_state() -> WorkflowState:
     """Return a fresh :class:`WorkflowState` for a new workflow run.
 
-    Args:
-        root_agent: Name of the root agent (used to seed ``current_agent``).
-
     Returns:
-        A :class:`WorkflowState` with empty collections and no error.
-
-    Example::
-
-        state = initial_workflow_state("Aria")
-        # WorkflowState(
-        #     current_agent="Aria", tool_calls=[], last_error=None
-        # )
+        A :class:`WorkflowState` with no recorded error.
     """
-    return WorkflowState(
-        current_agent=root_agent,
-        tool_calls=[],
-        last_error=None,
-    )
+    return WorkflowState(last_error=None)
 
 
 def state_reducer(state: WorkflowState, ev: Any) -> WorkflowState:
     """Update *state* in response to a workflow event.
 
-    This function is designed to be called after relevant events emitted by the
-    :class:`AgentWorkflow` run loop. In this project it is invoked by
-    :class:`StatefulAgentWorkflow` after agent-output and tool-result steps. It
-    handles two event types:
-
-    * :class:`AgentOutput` — updates ``current_agent``.
-    * :class:`ToolCallResult` — appends a :class:`ToolCallRecord` to
-      ``tool_calls`` and updates ``last_error``.
-
-    All other event types are ignored and the state is returned unchanged.
+    Only :class:`ToolCallResult` is handled: it sets ``last_error`` to the
+    tool's error message (or ``None`` on success). All other events are
+    ignored and the state is returned unchanged.
 
     Args:
         state: The current workflow state dict (mutated in-place and returned).
@@ -115,36 +69,13 @@ def state_reducer(state: WorkflowState, ev: Any) -> WorkflowState:
 
     Returns:
         The updated :class:`WorkflowState`.
-
-    Example::
-
-        from llama_index.core.agent.workflow import AgentOutput
-
-        state = initial_workflow_state("Aria")
-        fake_output = AgentOutput(
-            response=..., current_agent_name="Aria", tool_calls=[]
-        )
-        state = state_reducer(state, fake_output)
-        assert state["current_agent"] == "Aria"
     """
-    if isinstance(ev, AgentOutput):
-        state["current_agent"] = ev.current_agent_name
-
-    elif isinstance(ev, ToolCallResult):
+    if isinstance(ev, ToolCallResult):
         output = ev.tool_output
         is_error: bool = getattr(output, "is_error", False)
-        raw_output: str = str(getattr(output, "content", output))
-
-        record = ToolCallRecord(
-            agent=state["current_agent"],
-            tool=ev.tool_name,
-            args=ev.tool_kwargs,
-            result=raw_output,
-            error=raw_output if is_error else None,
+        state["last_error"] = (
+            str(getattr(output, "content", output)) if is_error else None
         )
-        state["tool_calls"].append(record)
-        state["last_error"] = record["error"]
-
     return state
 
 
@@ -156,33 +87,7 @@ class StatefulAgentWorkflow(AgentWorkflow):
     but it does not provide a reducer hook for streamed workflow events. This
     subclass closes that gap by applying :func:`state_reducer` to the live
     context state.
-
-    A pristine copy of the initial state is kept in ``_state_template`` so
-    that every new workflow run receives a fresh, un-mutated state —
-    preventing cross-conversation leakage of accumulated tool-call records.
     """
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        super().__init__(*args, **kwargs)
-        # Store a deep copy that is never mutated, so each run can start
-        # from a clean slate regardless of how many tool calls happened
-        # in previous conversations.
-        self._state_template: dict = copy.deepcopy(self.initial_state)
-
-    async def _init_context(self, ctx: Any, ev: Any) -> None:
-        """Initialise context with a *fresh* copy of the initial state.
-
-        The parent ``_init_context`` sets ``ctx.store["state"]`` to
-        ``self.initial_state`` — a single dict instance that is shared
-        across all runs.  Because :func:`state_reducer` mutates that
-        dict in-place (appending to ``tool_calls``), the state silently
-        accumulates records from every previous conversation.
-
-        Overriding here to deep-copy from the pristine ``_state_template``
-        ensures each run starts with an empty ``tool_calls`` list.
-        """
-        await super()._init_context(ctx, ev)
-        await ctx.store.set("state", copy.deepcopy(self._state_template))
 
     async def reduce_state(self, ctx: Any, ev: Any) -> "WorkflowState":
         """Apply :func:`state_reducer` to the stored state.
@@ -196,11 +101,34 @@ class StatefulAgentWorkflow(AgentWorkflow):
         """
         state = await ctx.store.get("state", default=None)
         if state is None:
-            state = dict(initial_workflow_state(root_agent=self.root_agent))
+            state = dict(initial_workflow_state())
 
         reduced_state = state_reducer(cast(WorkflowState, state), ev)
         await ctx.store.set("state", reduced_state)
         return reduced_state
+
+    @staticmethod
+    def _approx_tokens(messages: list[ChatMessage]) -> int:
+        """Estimate token count from a chat-message list.
+
+        Counts characters across each message's ``blocks`` (the typed field)
+        rather than the ``content`` property, which only joins ``TextBlock``
+        text and ignores images, tool-call blocks, etc. Falls back to
+        ``str()`` only for non-text block shapes.
+        """
+
+        def block_chars(block: Any) -> int:
+            if block is None:
+                return 0
+            text = getattr(block, "text", None)
+            if isinstance(text, str):
+                return len(text)
+            return len(str(block))
+
+        total = 0
+        for m in messages:
+            total += sum(block_chars(b) for b in m.blocks)
+        return total // 4
 
     async def _inject_pressure_warning(
         self, ctx: Any, messages: list[ChatMessage]
@@ -221,7 +149,7 @@ class StatefulAgentWorkflow(AgentWorkflow):
         except Exception:
             return messages
 
-        approx_tokens = sum(len(str(m.content or "")) // 4 for m in messages)
+        approx_tokens = self._approx_tokens(messages)
         usage_ratio = approx_tokens / context_size if context_size else 0
 
         if usage_ratio >= SCRATCHPAD_PRESSURE_THRESHOLD:
@@ -283,7 +211,7 @@ class StatefulAgentWorkflow(AgentWorkflow):
         ev.input = await self._inject_pressure_warning(ctx, ev.input)
 
         msg_count = len(ev.input)
-        approx_tokens = sum(len(str(m.content or "")) // 4 for m in ev.input)
+        approx_tokens = self._approx_tokens(ev.input)
         logger.info(
             f"run_agent_step: {msg_count} messages, "
             f"~{approx_tokens} tokens "

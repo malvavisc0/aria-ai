@@ -14,7 +14,6 @@ from ._factory import (
 from ._sanitize import SanitizedOpenAILike
 from ._state import (
     StatefulAgentWorkflow,
-    ToolCallRecord,
     WorkflowState,
     initial_workflow_state,
     state_reducer,
@@ -26,7 +25,6 @@ __all__ = [
     "SanitizedOpenAILike",
     # _state
     "StatefulAgentWorkflow",
-    "ToolCallRecord",
     "WorkflowState",
     "initial_workflow_state",
     "state_reducer",
