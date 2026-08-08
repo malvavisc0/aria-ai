@@ -135,11 +135,30 @@ pre,
 .cl-logo,
 .cl-header-logo,
 header img[src*="logo" i],
-aside img[src*="logo" i],
-img[alt*="logo" i] {
+aside img[src*="logo" i] {
   width: auto !important;
   height: 1.375rem !important;
   max-width: 7.5rem !important;
+  object-fit: contain;
+}
+
+#welcome-screen img.logo,
+img.logo[alt="logo"] {
+  width: 6.25rem !important;
+  height: auto !important;
+  max-width: 6.25rem !important;
+  object-fit: contain;
+}
+
+/* The assistant mark needs more presence than Chainlit's default 20px avatar. */
+span:has(img[alt*="Avatar" i]) {
+  width: 3rem !important;
+  height: 3rem !important;
+}
+
+span:has(img[alt*="Avatar" i]) img {
+  width: 100% !important;
+  height: 100% !important;
   object-fit: contain;
 }
 
