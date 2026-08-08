@@ -306,7 +306,7 @@ button:disabled,
 
 .cl-thread-item.active {
   border-left: 2px solid hsl(var(--sidebar-primary));
-  background: linear-gradient(90deg, hsl(var(--sidebar-accent)), transparent) !important;
+  background: hsl(var(--sidebar-accent)) !important;
 }
 
 /* Supporting content stays calm and legible. */
@@ -462,7 +462,7 @@ html.light main {
 }
 
 [data-sidebar="menu-button"][data-active="true"] {
-  background: linear-gradient(90deg, hsl(var(--sidebar-accent)), transparent) !important;
+  background: hsl(var(--sidebar-accent)) !important;
   box-shadow: inset 2px 0 0 hsl(var(--sidebar-primary));
 }
 

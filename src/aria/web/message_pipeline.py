@@ -39,6 +39,7 @@ from aria.web.session import (
     restore_chat_history,
 )
 from aria.web.state import AppStateNotInitializedError, _state
+from aria.web.thread_titler import maybe_title_thread
 
 # Metadata key used to mark messages as processed (for edit detection)
 _PROCESSED_KEY = "processed"
@@ -678,6 +679,27 @@ def _route_pipeline_error(error_msg: str) -> str:
     return _generic_error_message()
 
 
+def _maybe_rename_thread(message: cl.Message, output: cl.Message) -> None:
+    """Fire a background title-generation task on the first turn only.
+
+    Uses a per-session flag (set in ``on_chat_start`` / ``on_chat_resume``)
+    so titles are generated exactly once per thread and never on resumed
+    conversations.  The task is fire-and-forget — failures are logged
+    inside :func:`maybe_title_thread` and never reach the user.
+    """
+    if cl.user_session.get("thread_titled"):
+        return
+    cl.user_session.set("thread_titled", True)
+    task = asyncio.create_task(
+        maybe_title_thread(
+            thread_id=message.thread_id,
+            user_message=message.content,
+            assistant_reply=output.content,
+        )
+    )
+    cl.user_session.set("_pending_title_task", task)
+
+
 async def on_message_handler(message: cl.Message) -> None:
     """Handle incoming user messages and execute the agent workflow.
 
@@ -703,6 +725,8 @@ async def on_message_handler(message: cl.Message) -> None:
 
         output = await _send_empty_placeholder()
         await _stream_and_finalize(message, output, pipeline_meta, prompt, memory)
+
+        _maybe_rename_thread(message, output)
 
     except AppStateNotInitializedError as e:
         await _fail_turn(

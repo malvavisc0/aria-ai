@@ -127,6 +127,7 @@ async def on_chat_start_handler() -> None:
     """
     await drain_memory(cl.user_session.get("memory"))
     cl.user_session.set("memory", None)
+    cl.user_session.set("thread_titled", False)
     logger.debug("Starting new chat session")
     await cl.context.emitter.set_commands(
         [
@@ -169,6 +170,7 @@ async def on_chat_resume_handler(thread: ThreadDict) -> None:
         thread: Thread dictionary containing conversation history
             and metadata from the previous session.
     """
+    cl.user_session.set("thread_titled", True)
     try:
         if not _state.is_initialized():
             logger.info(
