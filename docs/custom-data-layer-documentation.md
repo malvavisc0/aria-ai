@@ -100,8 +100,7 @@ async def update_thread(
 **Example:**
 ```python
 await data_layer.update_thread(
-    thread_id="thread-123",
-    tags=["important", "bug", "feature"]
+    thread_id="thread-123", tags=["important", "bug", "feature"]
 )
 # Stored in DB as: '["important", "bug", "feature"]'
 ```
@@ -121,13 +120,15 @@ async def create_step(self, step_dict: StepDict)
 
 **Example:**
 ```python
-await data_layer.create_step({
-    "id": "step-123",
-    "name": "Assistant Response",
-    "type": "assistant_message",
-    "tags": ["ai", "response"],
-    "metadata": {"model": "gpt-4"}
-})
+await data_layer.create_step(
+    {
+        "id": "step-123",
+        "name": "Assistant Response",
+        "type": "assistant_message",
+        "tags": ["ai", "response"],
+        "metadata": {"model": "gpt-4"},
+    }
+)
 ```
 
 ##### `get_all_user_threads()`
@@ -289,8 +290,7 @@ client = LocalStorageClient(storage_path=".files/storage")
 
 # Production setup with HTTP URLs
 client = LocalStorageClient(
-    storage_path="/var/www/files",
-    base_url="https://example.com/files"
+    storage_path="/var/www/files", base_url="https://example.com/files"
 )
 ```
 
@@ -331,17 +331,13 @@ async def upload_file(
 ```python
 # Upload image
 result = await client.upload_file(
-    object_key="images/avatar.png",
-    data=image_bytes,
-    mime="image/png"
+    object_key="images/avatar.png", data=image_bytes, mime="image/png"
 )
 # Returns: {'object_key': 'images/avatar.png', 'url': 'file://...'}
 
 # Upload text file
 result = await client.upload_file(
-    object_key="docs/readme.txt",
-    data="Hello, world!",
-    mime="text/plain"
+    object_key="docs/readme.txt", data="Hello, world!", mime="text/plain"
 )
 ```
 
@@ -450,14 +446,16 @@ SQLAlchemy models that define the database schema for SQLite. These models match
 ```python
 class User(Base):
     __tablename__ = "users"
-    
+
     id = Column(String(36), primary_key=True)
     identifier = Column(Text, nullable=False, unique=True)
     metadata_ = Column("metadata", Text, nullable=False)
     createdAt = Column(Text)
     password = Column(Text, nullable=True)
-    
-    threads = relationship("Thread", back_populates="user", cascade="all, delete-orphan")
+
+    threads = relationship(
+        "Thread", back_populates="user", cascade="all, delete-orphan"
+    )
 ```
 
 **Purpose:** Stores user accounts and authentication data.
@@ -477,19 +475,36 @@ class User(Base):
 ```python
 class Thread(Base):
     __tablename__ = "threads"
-    
+
     id = Column(String(36), primary_key=True)
     createdAt = Column(Text)
     name = Column(Text)
-    userId = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    userId = Column(
+        String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=True
+    )
     userIdentifier = Column(Text)
     tags = Column(Text)  # JSON array as string
     metadata_ = Column("metadata", Text)  # JSON object as string
-    
+
     user = relationship("User", back_populates="threads")
-    steps = relationship("Step", back_populates="thread", cascade="all, delete-orphan", passive_deletes=True)
-    elements = relationship("Element", back_populates="thread", cascade="all, delete-orphan", passive_deletes=True)
-    feedbacks = relationship("Feedback", back_populates="thread", cascade="all, delete-orphan", passive_deletes=True)
+    steps = relationship(
+        "Step",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    elements = relationship(
+        "Element",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    feedbacks = relationship(
+        "Feedback",
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
 ```
 
 **Purpose:** Stores conversation threads.
@@ -516,11 +531,13 @@ class Thread(Base):
 ```python
 class Step(Base):
     __tablename__ = "steps"
-    
+
     id = Column(String(36), primary_key=True)
     name = Column(Text, nullable=False)
     type = Column(Text, nullable=False)
-    threadId = Column(String(36), ForeignKey("threads.id", ondelete="CASCADE"), nullable=False)
+    threadId = Column(
+        String(36), ForeignKey("threads.id", ondelete="CASCADE"), nullable=False
+    )
     parentId = Column(String(36))
     streaming = Column(Boolean, nullable=False)
     waitForAnswer = Column(Boolean)
@@ -538,7 +555,7 @@ class Step(Base):
     language = Column(Text)
     indent = Column(Integer)
     defaultOpen = Column(Boolean)
-    
+
     thread = relationship("Thread", back_populates="steps")
 ```
 
@@ -579,9 +596,11 @@ class Step(Base):
 ```python
 class Element(Base):
     __tablename__ = "elements"
-    
+
     id = Column(String(36), primary_key=True)
-    threadId = Column(String(36), ForeignKey("threads.id", ondelete="CASCADE"), nullable=True)
+    threadId = Column(
+        String(36), ForeignKey("threads.id", ondelete="CASCADE"), nullable=True
+    )
     type = Column(Text)
     url = Column(Text)
     chainlitKey = Column(Text)
@@ -594,7 +613,7 @@ class Element(Base):
     forId = Column(String(36))
     mime = Column(Text)
     props = Column(Text)  # JSON object as string
-    
+
     thread = relationship("Thread", back_populates="elements")
 ```
 
@@ -628,13 +647,15 @@ class Element(Base):
 ```python
 class Feedback(Base):
     __tablename__ = "feedbacks"
-    
+
     id = Column(String(36), primary_key=True)
     forId = Column(String(36), nullable=False)
-    threadId = Column(String(36), ForeignKey("threads.id", ondelete="CASCADE"), nullable=False)
+    threadId = Column(
+        String(36), ForeignKey("threads.id", ondelete="CASCADE"), nullable=False
+    )
     value = Column(Integer, nullable=False)
     comment = Column(Text)
-    
+
     thread = relationship("Thread", back_populates="feedbacks")
 ```
 
@@ -867,7 +888,7 @@ storage_client = LocalStorageClient(storage_path=".files/storage")
 data_layer = SQLiteSQLAlchemyDataLayer(
     conninfo="sqlite+aiosqlite:///./data/chainlit.db",
     storage_provider=storage_client,
-    show_logger=True
+    show_logger=True,
 )
 ```
 
@@ -882,11 +903,7 @@ await data_layer.update_thread(
     thread_id=thread_id,
     name="Bug Report Discussion",
     tags=["bug", "high-priority", "frontend"],
-    metadata={
-        "severity": "high",
-        "component": "ui",
-        "reporter": "user@example.com"
-    }
+    metadata={"severity": "high", "component": "ui", "reporter": "user@example.com"},
 )
 
 # Retrieve the thread
@@ -921,17 +938,13 @@ step_dict: StepDict = {
     "streaming": False,
     "output": "Here's the solution to your problem...",
     "tags": ["ai-generated", "helpful"],
-    "metadata": {
-        "model": "gpt-4",
-        "tokens": 150,
-        "temperature": 0.7
-    },
+    "metadata": {"model": "gpt-4", "tokens": 150, "temperature": 0.7},
     "generation": {
         "provider": "openai",
         "model": "gpt-4",
         "completion_tokens": 150,
-        "prompt_tokens": 50
-    }
+        "prompt_tokens": 50,
+    },
 }
 
 await data_layer.create_step(step_dict)
@@ -951,9 +964,7 @@ from chainlit.element import ElementDict
 # Upload a file
 file_data = b"Binary file content..."
 upload_result = await storage_client.upload_file(
-    object_key="documents/report.pdf",
-    data=file_data,
-    mime="application/pdf"
+    object_key="documents/report.pdf", data=file_data, mime="application/pdf"
 )
 
 # Create an element
@@ -966,10 +977,7 @@ element_dict: ElementDict = {
     "objectKey": upload_result["object_key"],
     "mime": "application/pdf",
     "forId": step_dict["id"],
-    "props": {
-        "size": len(file_data),
-        "pages": 10
-    }
+    "props": {"size": len(file_data), "pages": 10},
 }
 
 await data_layer.create_element(element_dict)
@@ -989,8 +997,7 @@ import json
 
 # Create a new user with password
 user = User(
-    identifier="john@example.com",
-    metadata={"name": "John Doe", "role": "admin"}
+    identifier="john@example.com", metadata={"name": "John Doe", "role": "admin"}
 )
 
 # Hash the password
@@ -1013,46 +1020,41 @@ else:
 ```python
 import chainlit as cl
 
+
 @cl.on_chat_start
 async def start():
     # Data layer is automatically available via cl.user_session
     # Threads are automatically created and managed by Chainlit
-    
+
     # Send a message (automatically creates a step)
     await cl.Message(
-        content="Hello! How can I help you today?",
-        author="Assistant"
+        content="Hello! How can I help you today?", author="Assistant"
     ).send()
-    
+
     # Upload an image element
-    image = cl.Image(
-        name="diagram",
-        path="./images/architecture.png",
-        display="inline"
-    )
+    image = cl.Image(name="diagram", path="./images/architecture.png", display="inline")
     await cl.Message(
-        content="Here's the architecture diagram:",
-        elements=[image]
+        content="Here's the architecture diagram:", elements=[image]
     ).send()
+
 
 @cl.password_auth_callback
 async def auth_callback(username: str, password: str):
     """Authenticate user against database."""
     # Get data layer
     data_layer = cl.user_session.get("data_layer")
-    
+
     # Fetch user from database
     user = await data_layer.get_user(username)
     if not user:
         return None
-    
+
     # Verify password
     if verify_password(password, user.get("password", "")):
         return cl.User(
-            identifier=username,
-            metadata=json.loads(user.get("metadata", "{}"))
+            identifier=username, metadata=json.loads(user.get("metadata", "{}"))
         )
-    
+
     return None
 ```
 
@@ -1114,19 +1116,20 @@ async def data_layer(temp_db_path: Path) -> SQLiteSQLAlchemyDataLayer:
     """Create data layer instance with temporary database."""
     async_url = f"sqlite+aiosqlite:///{temp_db_path}"
     layer = SQLiteSQLAlchemyDataLayer(
-        conninfo=async_url,
-        storage_provider=None,
-        show_logger=False
+        conninfo=async_url, storage_provider=None, show_logger=False
     )
     yield layer
     # Cleanup happens automatically
 
+
 @pytest.fixture
 async def raw_db_query(temp_db_path: Path):
     """Execute raw SQL queries for verification."""
+
     async def query(sql: str, params: dict):
         # Execute query and return results
         ...
+
     return query
 ```
 
@@ -1139,7 +1142,7 @@ async def raw_db_query(temp_db_path: Path):
 await data_layer.update_thread(
     thread_id=thread_id,
     tags=["tag1", "tag2"],  # Will be serialized automatically
-    metadata={"key": "value"}  # Will be serialized automatically
+    metadata={"key": "value"},  # Will be serialized automatically
 )
 
 # ❌ Bad: Don't manually serialize (data layer handles it)
@@ -1156,7 +1159,7 @@ await data_layer.update_thread(
 await data_layer.update_thread(
     thread_id=thread_id,
     tags=None,  # Will be handled correctly
-    metadata=None
+    metadata=None,
 )
 
 # ❌ Bad: Don't use empty strings for None
@@ -1191,11 +1194,12 @@ tags = thread["tags"]  # May raise KeyError or TypeError
 from typing import Optional, List, Dict
 from chainlit.step import StepDict
 
+
 async def create_message_step(
     thread_id: str,
     content: str,
     tags: Optional[List[str]] = None,
-    metadata: Optional[Dict] = None
+    metadata: Optional[Dict] = None,
 ) -> StepDict:
     step_dict: StepDict = {
         "id": str(uuid.uuid4()),
@@ -1204,7 +1208,7 @@ async def create_message_step(
         "threadId": thread_id,
         "output": content,
         "tags": tags or [],
-        "metadata": metadata or {}
+        "metadata": metadata or {},
     }
     await data_layer.create_step(step_dict)
     return step_dict
@@ -1257,7 +1261,7 @@ user.password = user_password  # NEVER!
 # ✅ Good: Use indexed columns in queries
 threads = await data_layer.list_threads(
     pagination=Pagination(first=10),
-    filters=ThreadFilter(userId=user_id)  # Uses index
+    filters=ThreadFilter(userId=user_id),  # Uses index
 )
 
 # ✅ Good: Sort by indexed columns
@@ -1342,6 +1346,7 @@ storage_client = LocalStorageClient(storage_path=".files/storage")
 
 # Check permissions if errors occur
 import os
+
 storage_path = ".files/storage"
 if not os.access(storage_path, os.W_OK):
     print(f"Storage path {storage_path} is not writable!")

@@ -4,24 +4,69 @@ This module provides internal helpers for command execution and
 response building.
 """
 
+import hashlib
 import re
 import subprocess
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from loguru import logger
 
-from aria.tools.shell.constants import MAX_OUTPUT_SIZE
+from aria.tools.constants import BASE_DIR
 from aria.tools.shell.validation import _extract_command_name
 
 # Strip ANSI escape sequences (colors, cursor movement, etc.)
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]|\x1b\].*?\x07")
 
+_OUTPUT_DIR = BASE_DIR / "shell_output"
+
+# Max chars for head/tail preview embedded in the JSON response.
+_HEAD_TAIL_PREVIEW = 500
+
 
 def _strip_ansi(text: str) -> str:
     """Remove ANSI escape codes from text."""
     return _ANSI_RE.sub("", text) if text else ""
+
+
+def _write_output_file(text: str, suffix: str) -> str:
+    """Write text to a timestamped file and return the path string.
+
+    Args:
+        text: Content to persist.
+        suffix: Filename suffix for the file (e.g. 'stdout').
+
+    Returns:
+        Absolute path to the written file.
+    """
+    digest = hashlib.sha1(text.encode("utf-8")).hexdigest()[:8]
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    path = _OUTPUT_DIR / f"{ts}_{suffix}_{digest}.txt"
+    _OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def _head_tail_preview(text: str) -> str:
+    """Return a short head + tail preview of *text* for the JSON envelope.
+
+    Args:
+        text: Full text to preview.
+
+    Returns:
+        Short head/tail preview string.
+    """
+    if not text:
+        return ""
+    head = text[:_HEAD_TAIL_PREVIEW]
+    tail_start = max(0, len(text) - _HEAD_TAIL_PREVIEW)
+    tail = text[tail_start:]
+    preview = head
+    if len(text) > _HEAD_TAIL_PREVIEW * 2:
+        preview = f"{head}...[{len(text) - _HEAD_TAIL_PREVIEW * 2} chars omitted]{tail}"
+    return preview
 
 
 def _build_response(
@@ -37,7 +82,8 @@ def _build_response(
 ) -> dict[str, Any]:
     """Build a lean command execution response dict.
 
-    Only includes non-empty fields to minimize token usage.
+    Outputs are persisted to files; the response contains file paths
+    plus small head/tail previews so the agent can read more if needed.
 
     Args:
         operation: The operation name (unused, kept for API compat).
@@ -52,9 +98,8 @@ def _build_response(
     Returns:
         Response dictionary with minimal data payload.
     """
-    # Clean and truncate output
-    clean_stdout = _strip_ansi(stdout)[:MAX_OUTPUT_SIZE].rstrip()
-    clean_stderr = _strip_ansi(stderr)[:MAX_OUTPUT_SIZE].rstrip()
+    clean_stdout = _strip_ansi(stdout)
+    clean_stderr = _strip_ansi(stderr)
 
     data: dict[str, Any] = {
         "command": command,
@@ -62,11 +107,13 @@ def _build_response(
         "execution_time": round(execution_time, 3),
     }
 
-    # Only include non-empty fields
+    # Persist to files so the agent can read in chunks
     if clean_stdout:
-        data["stdout"] = clean_stdout
+        data["stdout_file"] = _write_output_file(clean_stdout, "stdout")
+        data["stdout_head_tail"] = _head_tail_preview(clean_stdout)
     if clean_stderr:
-        data["stderr"] = clean_stderr
+        data["stderr_file"] = _write_output_file(clean_stderr, "stderr")
+        data["stderr_head_tail"] = _head_tail_preview(clean_stderr)
     if timed_out:
         data["timed_out"] = True
 

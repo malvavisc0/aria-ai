@@ -118,7 +118,7 @@ class TestShellSingleCommand:
 
         assert envelope["tool"] == "shell"
         assert cmd_data["return_code"] == 0
-        assert "hello" in cmd_data["stdout"]
+        assert "hello" in cmd_data["stdout_head_tail"]
 
     def test_execute_dict_command(self):
         """Test executing a command via dict format."""
@@ -130,7 +130,7 @@ class TestShellSingleCommand:
         cmd_data = self._get_result_data(result)
 
         assert cmd_data["return_code"] == 0
-        assert "hello" in cmd_data["stdout"]
+        assert "hello" in cmd_data["stdout_head_tail"]
 
     def test_execute_command_with_timeout(self):
         """Test command execution with custom timeout."""
@@ -155,7 +155,7 @@ class TestShellSingleCommand:
             cmd_data = self._get_result_data(result)
 
             assert cmd_data["return_code"] == 0
-            assert tmpdir in cmd_data["stdout"]
+            assert tmpdir in cmd_data["stdout_head_tail"]
 
     def test_execute_command_timeout(self):
         """Test command execution timeout."""
@@ -229,7 +229,7 @@ class TestShellSingleCommand:
             cmd_data = self._get_result_data(result)
 
             assert cmd_data["return_code"] == 0
-            assert "test content" in cmd_data["stdout"]
+            assert "test content" in cmd_data["stdout_head_tail"]
 
     def test_execute_command_not_found_returns_127(self):
         """Test that a missing command returns 127."""
@@ -253,7 +253,7 @@ class TestShellSingleCommand:
 
         assert "results" not in data["data"]
         assert data["data"]["return_code"] == 0
-        assert "test" in data["data"]["stdout"]
+        assert "test" in data["data"]["stdout_head_tail"]
 
     def test_shell_pipe(self):
         """Test that shell pipes work."""
@@ -265,7 +265,7 @@ class TestShellSingleCommand:
         cmd_data = self._get_result_data(result)
 
         assert cmd_data["return_code"] == 0
-        assert "HELLO WORLD" in cmd_data["stdout"]
+        assert "HELLO WORLD" in cmd_data["stdout_head_tail"]
 
     def test_shell_redirect(self):
         """Test that shell redirects work."""
@@ -291,7 +291,7 @@ class TestShellSingleCommand:
         cmd_data = self._get_result_data(result)
 
         assert cmd_data["return_code"] == 0
-        assert len(cmd_data["stdout"].strip()) > 0
+        assert len(cmd_data["stdout_head_tail"].strip()) > 0
 
     def test_shell_chaining(self):
         """Test that command chaining with && works."""
@@ -303,8 +303,8 @@ class TestShellSingleCommand:
         cmd_data = self._get_result_data(result)
 
         assert cmd_data["return_code"] == 0
-        assert "first" in cmd_data["stdout"]
-        assert "second" in cmd_data["stdout"]
+        assert "first" in cmd_data["stdout_head_tail"]
+        assert "second" in cmd_data["stdout_head_tail"]
 
 
 class TestShellBatch:

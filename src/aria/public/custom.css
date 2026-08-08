@@ -152,8 +152,8 @@ img.logo[alt="logo"] {
 
 /* The assistant mark needs more presence than Chainlit's default 20px avatar. */
 span:has(img[alt*="Avatar" i]) {
-  width: 3rem !important;
-  height: 3rem !important;
+  width: 2rem !important;
+  height: 2rem !important;
 }
 
 span:has(img[alt*="Avatar" i]) img {
@@ -418,4 +418,76 @@ main::-webkit-scrollbar-thumb:hover,
   .message-content {
     font-size: 0.84375rem;
   }
+}
+
+/* Refine the live Chainlit surfaces used by the current frontend. */
+main {
+  background: hsl(var(--background)) !important;
+}
+
+html.dark main {
+  background: radial-gradient(circle at 50% -20%, hsl(210 25% 25% / 0.72), hsl(var(--background)) 48%) !important;
+}
+
+html.light main {
+  background: linear-gradient(145deg, hsl(var(--background)), hsl(210 12% 87%)) !important;
+}
+
+#header {
+  border-bottom: 1px solid hsl(var(--border) / 0.65);
+  background: hsl(var(--background) / 0.72);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+[data-sidebar="sidebar"] {
+  border-right: 1px solid hsl(var(--sidebar-border) / 0.72);
+  background: hsl(var(--sidebar-background) / 0.94) !important;
+}
+
+[data-sidebar="menu-button"] {
+  transition: background-color var(--aria-duration) var(--aria-ease),
+    color var(--aria-duration) var(--aria-ease),
+    transform var(--aria-duration) var(--aria-ease);
+}
+
+[data-sidebar="menu-button"]:hover {
+  background: hsl(var(--sidebar-accent) / 0.72) !important;
+}
+
+[data-sidebar="menu-button"][data-active="true"] {
+  background: linear-gradient(90deg, hsl(var(--sidebar-accent)), transparent) !important;
+  box-shadow: inset 2px 0 0 hsl(var(--sidebar-primary));
+}
+
+#message-composer {
+  border: 1px solid hsl(var(--border) / 0.82);
+  background: hsl(var(--card) / 0.92) !important;
+  box-shadow: 0 10px 32px rgb(12 18 30 / 0.12),
+    inset 0 1px 0 hsl(0 0% 100% / 0.04);
+  transition: border-color var(--aria-duration) var(--aria-ease),
+    box-shadow var(--aria-duration) var(--aria-ease),
+    transform var(--aria-duration) var(--aria-ease);
+}
+
+#message-composer:focus-within {
+  border-color: hsl(var(--ring) / 0.72);
+  box-shadow: 0 12px 36px rgb(12 18 30 / 0.16),
+    0 0 0 3px hsl(var(--ring) / 0.12),
+    inset 0 1px 0 hsl(0 0% 100% / 0.05);
+}
+
+#chat-submit:not(:disabled) {
+  box-shadow: 0 4px 12px hsl(var(--primary) / 0.24);
+  transition: transform var(--aria-duration) var(--aria-ease),
+    box-shadow var(--aria-duration) var(--aria-ease);
+}
+
+#chat-submit:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px hsl(var(--primary) / 0.32);
+}
+
+.watermark {
+  opacity: 0.72;
 }

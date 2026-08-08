@@ -35,9 +35,6 @@ def detect_shell() -> str:
 
 SHELL = detect_shell()
 
-MAX_OUTPUT_SIZE = (
-    32 * 1024
-)  # 32KB — capped further by MAX_TOOL_OUTPUT_CHARS in tool_success_response
 MAX_LINE_LENGTH = 10000
 
 BLOCKED_COMMANDS = [

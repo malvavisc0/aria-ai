@@ -59,4 +59,3 @@ NETWORK_TIMEOUT = 10
 # This allows ~8 tool outputs in context simultaneously before the memory
 # system starts flushing older messages.
 _TOKEN_LIMIT = int(get_optional_env("TOKEN_LIMIT", "65536"))
-MAX_TOOL_OUTPUT_CHARS = (_TOKEN_LIMIT // 8) * 4

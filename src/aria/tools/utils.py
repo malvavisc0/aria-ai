@@ -69,25 +69,6 @@ def _default_json_handler(obj: Any) -> str:
     return str(obj)
 
 
-def _truncate_json(json_str: str) -> str:
-    """Truncate serialized JSON if it exceeds MAX_TOOL_OUTPUT_CHARS.
-
-    Appends a notice when truncation occurs so the agent knows
-    the output was clipped and can request smaller chunks.
-    """
-    from aria.tools.constants import MAX_TOOL_OUTPUT_CHARS
-
-    if len(json_str) <= MAX_TOOL_OUTPUT_CHARS:
-        return json_str
-
-    notice = (
-        f"\n\n[...truncated — output was {len(json_str):,} chars, "
-        f"limit is {MAX_TOOL_OUTPUT_CHARS:,}. "
-        f"Use offset/length or max_results to request smaller chunks.]"
-    )
-    return json_str[: MAX_TOOL_OUTPUT_CHARS - len(notice)] + notice
-
-
 def tool_success_response(
     tool: str,
     reason: str,
@@ -96,10 +77,7 @@ def tool_success_response(
 ) -> str:
     """Generate a standardized JSON success response.
 
-    The serialized output is capped at ``MAX_TOOL_OUTPUT_CHARS`` to prevent
-    a single tool call from consuming the entire context window.  When
-    truncation occurs, a notice is appended so the agent can request
-    smaller chunks (e.g. via ``offset``/``length`` or ``max_results``).
+    Returns a JSON string with standardized success format.
 
     Args:
         tool: Name of the tool that generated the response.
@@ -124,7 +102,7 @@ def tool_success_response(
     if context:
         response["context"] = context
 
-    return _truncate_json(safe_json(response))
+    return safe_json(response)
 
 
 def tool_error_response(

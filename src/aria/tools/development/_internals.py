@@ -5,15 +5,17 @@ This module contains private helper functions used by the main Python runner
 module. These functions should not be imported directly by external modules.
 """
 
+import hashlib
 import io
 import signal
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
+from datetime import datetime
 from typing import Any
 
 from loguru import logger
 
 from aria.tools import get_function_name, tool_error_response, utc_timestamp
-from aria.tools.constants import MAX_TIMEOUT
+from aria.tools.constants import BASE_DIR, MAX_TIMEOUT
 from aria.tools.development.constants import RESTRICTED_BUILTINS
 from aria.tools.development.exceptions import PythonSecurityError
 
@@ -259,7 +261,7 @@ def _capture_execution_output(
     filename: str = "<string>",
     argv: list[str] | None = None,
 ) -> tuple[str, str]:
-    """Execute code and capture stdout/stderr.
+    """Execute code and capture stdout/stderr to files.
 
     Args:
         code: Python code to execute
@@ -269,7 +271,7 @@ def _capture_execution_output(
         argv: Custom sys.argv for the script (default: [filename])
 
     Returns:
-        tuple: (stdout_text, stderr_text)
+        tuple: (stdout_file_path, stderr_file_path)
 
     Raises:
         TimeoutError: If execution exceeds timeout
@@ -296,6 +298,15 @@ def _capture_execution_output(
     logger.debug(f"Executing code: {filename}")
     logger.debug(f"Set sys.argv to: {sys.argv}")
 
+    # Create output files in the python_output directory
+    _output_dir = BASE_DIR / "python_output"
+    _output_dir.mkdir(parents=True, exist_ok=True)
+
+    digest = hashlib.sha1(filename.encode("utf-8")).hexdigest()[:8]
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    stdout_file = _output_dir / f"{ts}_stdout_{digest}.txt"
+    stderr_file = _output_dir / f"{ts}_stderr_{digest}.txt"
+
     try:
         stdout_capture = io.StringIO()
         stderr_capture = io.StringIO()
@@ -306,7 +317,14 @@ def _capture_execution_output(
                 # This ensures imports bind correctly to the namespace
                 exec(code, safe_globals, safe_globals)
 
-        return stdout_capture.getvalue(), stderr_capture.getvalue()
+        stdout_text = stdout_capture.getvalue()
+        stderr_text = stderr_capture.getvalue()
+
+        # Always create the files so callers can rely on their existence
+        stdout_file.write_text(stdout_text, encoding="utf-8")
+        stderr_file.write_text(stderr_text, encoding="utf-8")
+
+        return str(stdout_file), str(stderr_file)
     finally:
         # Always restore original sys.argv
         sys.argv = original_argv

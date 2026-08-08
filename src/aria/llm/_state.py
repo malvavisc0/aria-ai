@@ -6,6 +6,7 @@ pure function, and :class:`StatefulAgentWorkflow` which wires them into
 the LlamaIndex :class:`AgentWorkflow` run-loop.
 """
 
+import os
 from typing import Any, cast
 
 from llama_index.core.agent.workflow import (
@@ -20,15 +21,17 @@ from llama_index.core.tools.types import ToolOutput
 from loguru import logger
 from typing_extensions import TypedDict
 
-from aria.llm._compress import (
-    SCRATCHPAD_PRESSURE_THRESHOLD,
-    compress_tool_output,
-)
 
-# Cumulative tool output budget as fraction of context (chars).
-# When total tool output within a turn exceeds this, even "small"
-# outputs get compressed to prevent silent accumulation.
-_CUMULATIVE_BUDGET_RATIO = 0.15  # 15% of context in chars
+def _env_float(key: str, default: float) -> float:
+    try:
+        return float(os.environ.get(key, ""))
+    except (TypeError, ValueError):
+        return default
+
+
+# Per-turn scratchpad pressure threshold (fraction of context_size).
+# When exceeded, the agent is told to consolidate and produce a final answer.
+SCRATCHPAD_PRESSURE_THRESHOLD = _env_float("ARIA_SCRATCHPAD_PRESSURE_THRESHOLD", 0.40)
 
 
 class WorkflowState(TypedDict):
@@ -218,22 +221,9 @@ class StatefulAgentWorkflow(AgentWorkflow):
             f"(roles: {[m.role.value for m in ev.input[:5]]}...)"
         )
 
-        try:
-            output = await super().run_agent_step(ctx, ev)
-        except Exception:
-            raise
+        output = await super().run_agent_step(ctx, ev)
         await self.reduce_state(ctx, output)
         return await self._run_with_empty_response_fallback(ctx, ev, output)
-
-    async def _get_cumulative_budget(self, ctx: Any) -> int:
-        """Get the cumulative tool-output char budget for this turn."""
-        try:
-            from aria.config.api import Vllm as VllmConfig
-
-            ctx_chars = VllmConfig.chat_context_size * 4
-        except Exception:
-            ctx_chars = 32768 * 4
-        return int(ctx_chars * _CUMULATIVE_BUDGET_RATIO)
 
     async def call_tool(self, ctx: Any, ev: ToolCall) -> ToolCallResult:
         """Run the parent tool call step and synchronize custom state.
@@ -269,46 +259,7 @@ class StatefulAgentWorkflow(AgentWorkflow):
                 return_direct=False,
             )
 
-        # --- Record raw output in state BEFORE compression ---
         await self.reduce_state(ctx, result)
-
-        # --- Compress tool output to control scratchpad growth ---
-        output = result.tool_output
-        if not output.is_error:
-            raw_content = str(getattr(output, "content", ""))
-
-            # Track cumulative tool output for budget enforcement.
-            cumulative = await ctx.store.get("_turn_tool_chars", default=0)
-            cumulative += len(raw_content)
-            await ctx.store.set("_turn_tool_chars", cumulative)
-
-            budget = await self._get_cumulative_budget(ctx)
-            force = cumulative > budget
-
-            compressed = compress_tool_output(raw_content, ev.tool_name)
-            # If cumulative budget exceeded and normal compression
-            # didn't trigger (output was "small"), force compression.
-            if force and compressed == raw_content and len(raw_content) > 200:
-                from aria.llm._compress import _get_thresholds
-
-                t = _get_thresholds()
-                h_size = t["head_chars"] // 2
-                t_size = t["tail_chars"] // 2
-                head = raw_content[:h_size]
-                tail = raw_content[-t_size:]
-                dropped = len(raw_content) - len(head) - len(tail)
-                if dropped > 0:
-                    compressed = (
-                        head + f"\n\n[...budget-compressed — dropped "
-                        f"{dropped:,} chars. Cumulative output "
-                        f"({cumulative:,} chars) exceeds turn "
-                        f"budget ({budget:,} chars).]" + tail
-                    )
-
-            if compressed != raw_content:
-                output.raw_output = raw_content
-                output.content = compressed
-
         return result
 
 

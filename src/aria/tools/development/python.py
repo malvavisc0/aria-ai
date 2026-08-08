@@ -3,6 +3,7 @@
 import ast
 import os
 import traceback
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -22,6 +23,22 @@ from aria.tools.development.decorators import (
     with_runner_error_handling,
 )
 from aria.tools.development.exceptions import PythonSecurityError
+
+
+def _has_content(file_path: str) -> bool:
+    """Return True if *file_path* exists and has non-zero size."""
+    return bool(file_path) and Path(file_path).stat().st_size > 0
+
+
+def _setup_file_context(
+    safe_globals: dict[str, Any], is_file: bool, filename: str
+) -> None:
+    """Populate ``__file__`` and ``__dir__`` when executing a file."""
+    if not is_file:
+        return
+    safe_globals["__file__"] = os.path.abspath(filename)
+    safe_globals["__dir__"] = os.path.dirname(os.path.abspath(filename))
+    logger.debug(f"Set __file__ to: {safe_globals['__file__']}")
 
 
 @tool_function(
@@ -54,7 +71,7 @@ def python(
         check_only: If True, validate syntax without executing.
 
     Returns:
-        JSON with result data (stdout, stderr, traceback, etc.).
+        JSON with result data (stdout_file, stderr_file, traceback, etc.).
     """
     if code is None and file is None:
         raise PythonSecurityError("Provide exactly one of 'code' or 'file'.")
@@ -136,8 +153,6 @@ def _error_response(
         "success": False,
         "error_type": error_type or type(exc).__name__,
         "message": str(exc),
-        "stdout": "",
-        "stderr": "",
     }
     if include_tb:
         result["traceback"] = traceback.format_exc()
@@ -198,8 +213,6 @@ def _system_exit_response(
             "success": exit_code == 0,
             "exit_code": exit_code,
             "message": message,
-            "stdout": "",
-            "stderr": "",
         },
         filename=filename,
         timeout=timeout,
@@ -236,16 +249,11 @@ def _python_execute(
     if is_file:
         filename = os.path.abspath(file) if os.path.exists(file) else file
 
+    safe_globals = _create_safe_globals()
+    _setup_file_context(safe_globals, is_file, filename)
+
     try:
-        safe_globals = _create_safe_globals()
-
-        # Add __file__ and __dir__ for file context
-        if is_file:
-            safe_globals["__file__"] = os.path.abspath(filename)
-            safe_globals["__dir__"] = os.path.dirname(os.path.abspath(filename))
-            logger.debug(f"Set __file__ to: {safe_globals['__file__']}")
-
-        stdout_text, stderr_text = _capture_execution_output(
+        stdout_file, stderr_file = _capture_execution_output(
             source,  # type: ignore[arg-type]
             safe_globals,
             timeout,
@@ -253,19 +261,20 @@ def _python_execute(
             args,
         )
 
-        logger.info(
-            f"{source_kind.capitalize()} executed successfully: {filename} "
-            f"(stdout: {len(stdout_text)} bytes, stderr: {len(stderr_text)} bytes)"
-        )
+        result: dict[str, Any] = {
+            "success": True,
+            "exit_code": 0,
+        }
+        if _has_content(stdout_file):
+            result["stdout_file"] = stdout_file
+        if _has_content(stderr_file):
+            result["stderr_file"] = stderr_file
+
+        logger.info(f"{source_kind.capitalize()} executed successfully: {filename}")
 
         return _build_response(
             operation="python",
-            result={
-                "success": True,
-                "stdout": stdout_text,
-                "stderr": stderr_text,
-                "has_output": bool(stdout_text or stderr_text),
-            },
+            result=result,
             filename=filename,
             timeout=timeout,
             source=source_kind,

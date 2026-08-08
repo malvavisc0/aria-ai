@@ -284,13 +284,13 @@ _state._startup_complete = True
 ```python
 @dataclass
 class AppState:
-    llm: OpenAI | None = None                    # Required
-    embeddings: OpenAIEmbedding | None = None    # Required
-    vector_db: ClientAPI | None = None           # Required
-    agents_workflow: AgentWorkflow | None = None # Required
+    llm: OpenAI | None = None  # Required
+    embeddings: OpenAIEmbedding | None = None  # Required
+    vector_db: ClientAPI | None = None  # Required
+    agents_workflow: AgentWorkflow | None = None  # Required
     prompt_enhancer: PromptEnhancerAgent | None = None  # Optional
-    vllm_manager: VLLMServerManager | None = None       # Optional
-    db_engine: Engine | None = None              # Required
+    vllm_manager: VLLMServerManager | None = None  # Optional
+    db_engine: Engine | None = None  # Required
     _startup_complete: bool = field(default=False, repr=False)
 ```
 

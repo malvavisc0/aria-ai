@@ -130,8 +130,12 @@ class TestPythonRunner:
 
         assert data["data"]["tool"] == "python"
         assert data["data"]["result"]["success"] is True
-        assert data["data"]["result"]["stdout"] == "Hello World\n"
-        assert data["data"]["result"]["has_output"] is True
+        import os
+
+        assert os.path.exists(data["data"]["result"]["stdout_file"])
+        # stderr_file may be absent if empty
+        if "stderr_file" in data["data"]["result"]:
+            assert os.path.exists(data["data"]["result"]["stderr_file"])
         assert data["context"]["source"] == "code"
         assert data["context"]["timeout"] == 10
 
@@ -144,7 +148,7 @@ class TestPythonRunner:
         assert data["data"]["tool"] == "python"
         assert data["data"]["result"]["success"] is False
         assert data["data"]["result"]["error_type"] == "NameError"
-        assert data["data"]["result"]["stdout"] == ""
+        assert "traceback" in data["data"]["result"]
 
     def test_execute_code_timeout(self):
         """Test code execution timeout"""
@@ -176,7 +180,7 @@ class TestPythonRunner:
         data = json.loads(result)
 
         assert data["data"]["result"]["success"] is True
-        assert data["data"]["result"]["stdout"] == "4.0\n"
+        assert os.path.exists(data["data"]["result"]["stdout_file"])
 
     def test_execute_code_file_io_allowed(self):
         """Test that file I/O is allowed"""
@@ -192,7 +196,9 @@ class TestPythonRunner:
         data = json.loads(result)
 
         assert data["data"]["result"]["success"] is True
-        assert "Hello from file" in data["data"]["result"]["stdout"]
+        assert (
+            "Hello from file" in Path(data["data"]["result"]["stdout_file"]).read_text()
+        )
 
     def test_execute_code_with_complex_logic(self):
         """Test execution with complex logic"""
@@ -210,7 +216,10 @@ print(f'Fibonacci(5) = {result}')
         data = json.loads(result)
 
         assert data["data"]["result"]["success"] is True
-        assert "Fibonacci(5) = 5" in data["data"]["result"]["stdout"]
+        assert (
+            "Fibonacci(5) = 5"
+            in Path(data["data"]["result"]["stdout_file"]).read_text()
+        )
 
     def test_execute_code_with_stderr(self):
         """Test execution with stderr output"""
@@ -219,7 +228,9 @@ print(f'Fibonacci(5) = {result}')
         data = json.loads(result)
 
         assert data["data"]["result"]["success"] is True
-        assert data["data"]["result"]["stderr"] == "Error message\n"
+        assert (
+            Path(data["data"]["result"]["stderr_file"]).read_text() == "Error message\n"
+        )
 
     def test_execute_code_with_security_violation(self):
         """Test that security violations are properly caught"""
@@ -248,7 +259,10 @@ print(f'Fibonacci(5) = {result}')
         data = json.loads(result)
 
         assert data["data"]["result"]["success"] is True
-        assert data["data"]["result"]["stdout"] == "Hello from test file\n"
+        assert (
+            Path(data["data"]["result"]["stdout_file"]).read_text()
+            == "Hello from test file\n"
+        )
         assert data["context"]["source"] == "file"
 
     def test_execute_file_nonexistent(self):

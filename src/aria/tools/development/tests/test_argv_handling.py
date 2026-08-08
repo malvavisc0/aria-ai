@@ -34,7 +34,10 @@ print(f'Hello {args.name}')
         result = python("Testing argparse", code=code)
         result_dict = json.loads(result)
         assert result_dict["data"]["result"]["success"] is True
-        assert "Hello World" in result_dict["data"]["result"]["stdout"]
+        assert (
+            "Hello World"
+            in Path(result_dict["data"]["result"]["stdout_file"]).read_text()
+        )
 
     def test_argparse_with_custom_argv(self):
         """
@@ -54,7 +57,10 @@ print(f'Hello {args.name}')
         )
         result_dict = json.loads(result)
         assert result_dict["data"]["result"]["success"] is True
-        assert "Hello Custom" in result_dict["data"]["result"]["stdout"]
+        assert (
+            "Hello Custom"
+            in Path(result_dict["data"]["result"]["stdout_file"]).read_text()
+        )
 
     def test_sys_exit_zero(self):
         """
@@ -86,4 +92,7 @@ print(f'Hello {args.name}')
             args=["test.py", "arg1", "arg2"],
         )
         result_dict1 = json.loads(result1)
-        assert "arg1 arg2" in result_dict1["data"]["result"]["stdout"]
+        assert (
+            "arg1 arg2"
+            in Path(result_dict1["data"]["result"]["stdout_file"]).read_text()
+        )

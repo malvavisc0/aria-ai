@@ -161,6 +161,7 @@ Load tools by category. `None` loads `ALL_CATEGORIES`. Deduplicates by name so t
 
 ```python
 from aria.tools.registry import get_tools, CORE, FILES, AX
+
 all_tools = get_tools()
 tools = get_tools([CORE, FILES, AX])
 ```
@@ -345,9 +346,13 @@ General-purpose HTTP requests via `httpx` with redirect following.
 
 ```python
 http_request("Fetching data", "GET", "https://api.example.com/users")
-http_request("Creating user", "POST", "https://api.example.com/users",
-             headers={"Content-Type": "application/json"},
-             body='{"name": "Alice"}')
+http_request(
+    "Creating user",
+    "POST",
+    "https://api.example.com/users",
+    headers={"Content-Type": "application/json"},
+    body='{"name": "Alice"}',
+)
 ```
 
 ---
@@ -477,16 +482,29 @@ Consolidates 7 previous functions into one. SQLite-backed execution plans.
 | `reorder` | `execution_id`, `step_ids` | Reordered steps |
 
 ```python
-result = plan("Planning deploy", action="create",
-              task="Deploy v2.0",
-              steps=["Run tests", "Build image", "Deploy staging", "Deploy prod"])
+result = plan(
+    "Planning deploy",
+    action="create",
+    task="Deploy v2.0",
+    steps=["Run tests", "Build image", "Deploy staging", "Deploy prod"],
+)
 
-plan("Starting tests", action="update",
-     execution_id="abc123", step_id="step_1", status="in_progress")
+plan(
+    "Starting tests",
+    action="update",
+    execution_id="abc123",
+    step_id="step_1",
+    status="in_progress",
+)
 
-plan("Tests passed", action="update",
-     execution_id="abc123", step_id="step_1", status="completed",
-     result="All 42 tests passed")
+plan(
+    "Tests passed",
+    action="update",
+    execution_id="abc123",
+    step_id="step_1",
+    status="completed",
+    result="All 42 tests passed",
+)
 ```
 
 ---
@@ -527,8 +545,13 @@ Background process manager. State is persisted to `data/processes.json` (survive
 **Security:** Blocklist includes `shutdown`, `reboot`, `halt`, `poweroff`, `mkfs`, `dd`, `shred`, `wipe` (matched by command name).
 
 ```python
-process("Starting server", action="start",
-        name="devserver", command="python", args=["-m", "http.server", "8080"])
+process(
+    "Starting server",
+    action="start",
+    name="devserver",
+    command="python",
+    args=["-m", "http.server", "8080"],
+)
 process("Checking", action="status", name="devserver")
 process("Reading logs", action="logs", name="devserver")
 process("Stopping", action="stop", name="devserver")
@@ -571,12 +594,21 @@ Structured analysis tool. One active session per agent (auto-managed).
 
 ```python
 reasoning("Analyzing options", action="start")
-reasoning("Evaluating A", action="step",
-          content="Microservices provide better scalability...",
-          cognitive_mode="analysis", reasoning_type="deductive",
-          evidence=["Netflix case study"], confidence=0.8)
-reasoning("Checking bias", action="reflect",
-          content="May be over-weighting scalability", on_step=1)
+reasoning(
+    "Evaluating A",
+    action="step",
+    content="Microservices provide better scalability...",
+    cognitive_mode="analysis",
+    reasoning_type="deductive",
+    evidence=["Netflix case study"],
+    confidence=0.8,
+)
+reasoning(
+    "Checking bias",
+    action="reflect",
+    content="May be over-weighting scalability",
+    on_step=1,
+)
 reasoning("Quality check", action="evaluate")
 reasoning("Done", action="end")
 ```
@@ -739,11 +771,14 @@ Blocked commands return `return_code: 1` with an `error` field. Timed-out comman
 
 ```python
 shell("Git status", commands="git status")
-shell("Building", commands=[
-    "git pull",
-    "pip install -r requirements.txt",
-    "python -m pytest",
-])
+shell(
+    "Building",
+    commands=[
+        "git pull",
+        "pip install -r requirements.txt",
+        "python -m pytest",
+    ],
+)
 ```
 
 ---
@@ -795,22 +830,52 @@ Unified dispatcher that routes `family`/`command` pairs to native Python functio
 
 ```python
 # Web search
-ax(reason="Find Python tutorials", family="web", command="search", args={"query": "python asyncio tutorial"})
+ax(
+    reason="Find Python tutorials",
+    family="web",
+    command="search",
+    args={"query": "python asyncio tutorial"},
+)
 
 # Visit a page (renders JS)
-ax(reason="Reading docs", family="web", command="visit", args={"url": "https://example.com"})
+ax(
+    reason="Reading docs",
+    family="web",
+    command="visit",
+    args={"url": "https://example.com"},
+)
 
 # Stock price
-ax(reason="Check AAPL price", family="finance", command="stock", args={"ticker": "AAPL"})
+ax(
+    reason="Check AAPL price",
+    family="finance",
+    command="stock",
+    args={"ticker": "AAPL"},
+)
 
 # Knowledge store
-ax(reason="Save preference", family="knowledge", command="store", args={"key": "lang", "value": "Python", "tags": ["prefs"]})
+ax(
+    reason="Save preference",
+    family="knowledge",
+    command="store",
+    args={"key": "lang", "value": "Python", "tags": ["prefs"]},
+)
 
 # Process management
-ax(reason="Start dev server", family="processes", command="start", args={"name": "dev", "command": "python", "args": ["-m", "http.server"]})
+ax(
+    reason="Start dev server",
+    family="processes",
+    command="start",
+    args={"name": "dev", "command": "python", "args": ["-m", "http.server"]},
+)
 
 # Spawn a worker
-ax(reason="Delegate research", family="worker", command="spawn", args={"prompt": "...", "expected": "report.md"})
+ax(
+    reason="Delegate research",
+    family="worker",
+    command="spawn",
+    args={"prompt": "...", "expected": "report.md"},
+)
 
 # Discover available CLI tools
 ax(reason="Check available tools", family="check", command="extras")

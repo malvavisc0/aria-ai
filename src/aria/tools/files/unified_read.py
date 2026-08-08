@@ -25,7 +25,8 @@ from aria.tools.files._internals import (
 )
 from aria.tools.files.decorators import with_file_operation_error_handling
 from aria.tools.files.exceptions import FileOperationError
-from aria.tools.utils import _truncate_json
+
+# No additional imports needed
 
 MAX_CONTENT_FILE_SIZE = 1024 * 1024  # 1MB
 MAX_FILES_SEARCH = 100
@@ -298,11 +299,7 @@ def _format_permissions_symbolic(mode: int) -> str:
 
 
 def _ok(tool: str, reason: str, result: dict[str, Any], **metadata) -> str:
-    """Build a success response.
-
-    Output is truncated to MAX_TOOL_OUTPUT_CHARS to prevent a single
-    tool call from consuming the entire context window.
-    """
+    """Build a success response."""
     import json
 
     response = {
@@ -318,7 +315,7 @@ def _ok(tool: str, reason: str, result: dict[str, Any], **metadata) -> str:
             },
         },
     }
-    return _truncate_json(json.dumps(response))
+    return json.dumps(response)
 
 
 def _err(tool: str, reason: str, message: str, **metadata) -> str:
@@ -354,8 +351,7 @@ def read_file(
 ) -> str:
     """Read file contents in chunks. Never reads an entire file at once.
 
-    Output is capped to MAX_TOOL_OUTPUT_CHARS (~32k chars) to prevent a
-    single tool call from consuming the context window.
+    Output is chunked via offset/length parameters.
 
     Args:
         reason: Required. Brief explanation of why you are reading this file.

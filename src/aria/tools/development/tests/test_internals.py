@@ -381,17 +381,18 @@ class TestCaptureExecutionOutput:
         """Test successful output capture"""
         code = "print('Hello World')"
         safe_globals = _create_safe_globals()
-        stdout, stderr = _capture_execution_output(code, safe_globals, 10)
-        assert stdout == "Hello World\n"
-        assert stderr == ""
+        stdout_file, stderr_file = _capture_execution_output(code, safe_globals, 10)
+        assert Path(stdout_file).read_text() == "Hello World\n"
+        # stderr_file is a path to an empty file
+        assert Path(stderr_file).read_text() == ""
 
     def test_capture_execution_output_stderr(self):
         """Test stderr capture"""
         code = "import sys\nsys.stderr.write('Error message\\n')"
         safe_globals = _create_safe_globals()
-        stdout, stderr = _capture_execution_output(code, safe_globals, 10)
-        assert stdout == ""
-        assert stderr == "Error message\n"
+        stdout_file, stderr_file = _capture_execution_output(code, safe_globals, 10)
+        # stderr has actual content
+        assert Path(stderr_file).read_text() == "Error message\n"
 
     def test_capture_execution_output_timeout(self):
         """Test timeout during execution"""
@@ -404,12 +405,13 @@ class TestCaptureExecutionOutput:
         """Test execution with custom sys.argv"""
         code = "import sys\nprint(sys.argv)"
         safe_globals = _create_safe_globals()
-        stdout, stderr = _capture_execution_output(
+        stdout_file, stderr_file = _capture_execution_output(
             code, safe_globals, 10, argv=["script.py", "arg1", "arg2"]
         )
-        assert "script.py" in stdout
-        assert "arg1" in stdout
-        assert "arg2" in stdout
+        stdout_content = Path(stdout_file).read_text() if stdout_file else ""
+        assert "script.py" in stdout_content
+        assert "arg1" in stdout_content
+        assert "arg2" in stdout_content
 
     def test_capture_execution_output_restores_argv(self):
         """Test that sys.argv is restored after execution"""
@@ -570,16 +572,18 @@ class TestEdgeCases:
         """Test execution of empty code"""
         code = ""
         safe_globals = _create_safe_globals()
-        stdout, stderr = _capture_execution_output(code, safe_globals, 10)
-        assert stdout == ""
-        assert stderr == ""
+        stdout_file, stderr_file = _capture_execution_output(code, safe_globals, 10)
+        # Files are always created, even if empty
+        assert Path(stdout_file).read_text() == ""
+        assert Path(stderr_file).read_text() == ""
 
     def test_code_with_imports(self):
         """Test that imports work in safe globals"""
         code = "import math\nprint(math.pi)"
         safe_globals = _create_safe_globals()
-        stdout, stderr = _capture_execution_output(code, safe_globals, 10)
-        assert "3.14" in stdout
+        stdout_file, stderr_file = _capture_execution_output(code, safe_globals, 10)
+        content = Path(stdout_file).read_text() if stdout_file else ""
+        assert "3.14" in content
 
     def test_code_with_multiple_statements(self):
         """Test execution of code with multiple statements"""
@@ -590,8 +594,9 @@ z = x + y
 print(z)
 """
         safe_globals = _create_safe_globals()
-        stdout, stderr = _capture_execution_output(code, safe_globals, 10)
-        assert "30" in stdout
+        stdout_file, stderr_file = _capture_execution_output(code, safe_globals, 10)
+        content = Path(stdout_file).read_text() if stdout_file else ""
+        assert "30" in content
 
     def test_validate_inputs_with_none_values(self):
         """Test validation with None values (should be allowed)"""

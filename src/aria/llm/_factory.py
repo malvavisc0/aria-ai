@@ -17,7 +17,7 @@ from llama_index.vector_stores.chroma import ChromaVectorStore
 from aria.agents import get_chatter_agent
 
 from ._sanitize import SanitizedOpenAILike
-from ._state import StatefulAgentWorkflow, initial_workflow_state
+from ._state import StatefulAgentWorkflow
 from ._utils import get_instructions_extras
 
 
@@ -96,9 +96,11 @@ def get_agent_workflow(llm: OpenAILike) -> AgentWorkflow:
     workflow = StatefulAgentWorkflow(
         agents=[chatter],
         root_agent=chatter.name,
-        # Cast to plain dict: AgentWorkflow expects Dict, WorkflowState is
-        # a TypedDict (structurally compatible at runtime).
-        initial_state=dict(initial_workflow_state()),
+        # Pass None so setup_agent skips the DEFAULT_STATE_PROMPT injection
+        # (a falsy {} makes the `if state` guard at multi_agent_workflow.py
+        # evaluate False).  reduce_state lazily initialises the state on the
+        # first ToolCallResult via its state-is-None fallback.
+        initial_state=None,
     )
     return workflow
 
