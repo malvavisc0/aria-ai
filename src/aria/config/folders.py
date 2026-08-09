@@ -5,12 +5,13 @@ is::
 
     ~/.aria/
     ├── workspace/   agent-facing workspace (file tool BASE_DIR)
-    ├── bin/         downloaded binaries (lightpanda, etc.)
+    │   └── uploads/ user-uploaded files (raw + converted markdown)
+    ├── bin/         downloaded binaries (lightpanda, pdf-vlm shim, etc.)
+    ├── venvs/       isolated tool venvs (vllm, pdf_vlm)
     ├── logs/        all runtime logs (debug, tool-calls, vllm, processes, workers)
     ├── models/      downloaded model files
     ├── db/          sqlite, chromadb
     ├── storage/     local file storage (Chainlit elements)
-    ├── uploads/     user-uploaded files
     ├── workers/     worker agent state
     └── ...
 
@@ -54,6 +55,7 @@ class Venvs:
 
     path = _ARIA_HOME / "venvs"
     vllm = path / "vllm"
+    pdf_vlm = path / "pdf_vlm"
 
 
 class Debug:
@@ -68,12 +70,6 @@ class Storage:
     """Local file storage for Chainlit elements."""
 
     path = _ARIA_HOME / "storage"
-
-
-class Uploads:
-    """User-uploaded files."""
-
-    path = _ARIA_HOME / "uploads"
 
 
 class DB:

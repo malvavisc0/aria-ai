@@ -41,6 +41,9 @@ from aria.cli import (
     system,
     users,
 )
+from aria.cli import (
+    pdf_vlm as pdf_vlm_cli,
+)
 from aria.cli import vllm as vllm_cli
 from aria.config import DEBUG
 
@@ -57,6 +60,7 @@ app = typer.Typer(
 )
 app.add_typer(users.app, name="users")
 app.add_typer(vllm_cli.app, name="vllm")
+app.add_typer(pdf_vlm_cli.app, name="pdf-vlm")
 app.add_typer(lightpanda.app, name="lightpanda")
 app.add_typer(models.app, name="models")
 app.add_typer(config.app, name="config")
@@ -118,6 +122,7 @@ COMMAND_GROUPS = [
         "commands": [
             ("models", "Download and manage models"),
             ("vllm", "Install and manage vLLM"),
+            ("pdf-vlm", "Install and manage Granite-Docling worker"),
             ("lightpanda", "Download and manage Lightpanda browser"),
             ("server", "Start or stop the web UI"),
             ("system", "Inspect hardware and GPU"),

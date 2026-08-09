@@ -34,6 +34,7 @@
 | 💻 | **Code Execution** | Safe Python sandbox and shell commands |
 | 📊 | **Knowledge & Planning** | Persistent knowledge store, structured reasoning, task planning |
 | 👷 | **Worker Agents** | Background workers for heavy tasks (research, code generation, analysis) |
+| 📄 | **Document Conversion** | Convert office/HTML/PDF uploads to markdown on demand via `ax documents convert` (MarkItDown + optional local Granite-Docling for scanned PDFs) |
 | 🔧 | **CLI Tool Commands** | Domain-specific CLI commands for search, finance, IMDb, and more |
 | 🔬 | **Model Fine-Tuning** | LoRA/QLoRA fine-tuning with CLI-driven workflows |
 

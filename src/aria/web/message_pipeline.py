@@ -31,7 +31,6 @@ from aria.llm.memory import BackgroundFlushMemory
 from aria.web.hooks import get_data_layer_handler
 from aria.web.session import (
     _sanitize_chat_history,
-    convert_documents_to_markdown,
     create_memory,
     drain_memory,
     extract_file_paths,
@@ -280,27 +279,16 @@ async def _enhance_prompt(message: cl.Message, prompt: str) -> tuple[str, dict]:
 
 
 async def _append_files_block(prompt: str, file_paths: list[str]) -> str:
-    """Append an ``[Uploaded files]`` block describing converted docs."""
+    """Append an ``[Uploaded files]`` block listing raw file paths."""
     if not file_paths:
         return prompt
-    conversions = await asyncio.to_thread(convert_documents_to_markdown, file_paths)
-    lines: list[str] = []
-    for conv in conversions:
-        if conv["markdown_path"]:
-            lines.append(
-                f"- {conv['name']} (original: {conv['original_path']})\n"
-                f"  Converted to markdown: {conv['markdown_path']} "
-                f"({conv['lines']} lines, {conv['chars']} chars)"
-            )
-        elif conv["error"]:
-            lines.append(
-                f"- {conv['name']}: {conv['original_path']} "
-                f"(conversion failed: {conv['error']})"
-            )
-        else:
-            lines.append(f"- {conv['original_path']}")
+    lines = [f"- {p}" for p in file_paths]
     logger.debug(f"Appended {len(file_paths)} file path(s) to prompt")
-    return f"{prompt}\n\n[Uploaded files]:\n" + "\n".join(lines)
+    return (
+        f"{prompt}\n\n[Uploaded files] (raw paths — "
+        f"use `read_file` directly for text/code files, "
+        f"`ax documents convert` for office/HTML/PDF):\n" + "\n".join(lines)
+    )
 
 
 async def _append_images_block(prompt: str, image_data: list[dict]) -> str:
@@ -338,14 +326,13 @@ async def _handle_message(
 ) -> tuple[str, dict]:
     """Process and enhance a user message before agent execution.
 
-    Orchestrates, in order: prompt enhancement, uploaded-file extraction
-    & conversion, image vision description, and thread-id tagging.  Each
-    step is handled by a dedicated helper so this function reads as a
+    Orchestrates, in order: prompt enhancement, uploaded-file extraction,
+    image vision description, and thread-id tagging.  Each step is
+    handled by a dedicated helper so this function reads as a
     straight-line pipeline.
 
-    File extraction (disk I/O) and document conversion (CPU-bound MarkItDown
-    parsing) run off the event loop via ``asyncio.to_thread`` so a large
-    upload doesn't stall active sessions.
+    File extraction (disk I/O) runs off the event loop via
+    ``asyncio.to_thread`` so a large upload doesn't stall active sessions.
     """
     prompt, enhance_meta = await _enhance_prompt(message, message.content)
 

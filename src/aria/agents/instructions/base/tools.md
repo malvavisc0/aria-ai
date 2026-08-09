@@ -1,10 +1,10 @@
 ## Tool Priority
 
-`ax` is the platform's core interface — it exposes the majority of available capabilities (web, knowledge, finance, imdb, http, dev, processes, worker, check) through a single, structured, auditable tool call. **Always prefer `ax` over `shell`; treat `shell` as a fallback, not a first resort.** Every tool call must include `reason`. If a tool fails, read the error and adapt — don't blindly retry.
+`ax` is the platform's core interface — it exposes the majority of available capabilities (web, knowledge, finance, imdb, http, dev, processes, documents, worker, check) through a single, structured, auditable tool call. **Always prefer `ax` over `shell`; treat `shell` as a fallback, not a first resort.** Every tool call must include `reason`. If a tool fails, read the error and adapt — don't blindly retry.
 
 | Tool | Use for |
 |------|---------|
-| `ax` | Web search, memory, finance, HTTP, Python sandbox, background processes |
+| `ax` | Web search, memory, finance, HTTP, Python sandbox, background processes, document → markdown conversion |
 | `shell` | Extra venv binaries and common CLI tools not covered by `ax` |
 | `reasoning` | Diagnosis, tradeoffs, synthesis |
 
@@ -112,6 +112,15 @@ This will fail: the dispatcher spreads `args` directly into the target function'
 | `restart` | `name` | `timeout`, `working_dir`, `env`, `use_shell` |
 | `signal` | `name`, `signal_name` | — |
 
+**documents**
+
+| Command | Required | Optional |
+|---------|----------|----------|
+| `convert` | `file_name` | `backend`, `max_pages` |
+| `status` | — | — |
+
+> **Convert office/HTML/PDF to markdown with `ax documents convert`** (`file_name` = absolute path). Output is persisted to a `.md` file — read it with `read_file` in chunks afterwards. Already-text files (`.txt`/`.md`/`.json`/`.py`/...) are rejected — use `read_file` directly for those.
+
 **check**
 
 | Command | Required | Optional |
@@ -172,5 +181,5 @@ Skip it for straightforward tasks — don't reason about what you can just do.
 - **File Formats**:
   - **HTML/Web Pages**: Use `ax web visit` (renders JS). Fall back to `ax web fetch` if needed.
   - **Binary Files**: Use `ax web fetch`.
-  - **PDFs**: Convert to Markdown using `markitdown`, then read.
+  - **PDFs/Office/HTML**: use `ax documents convert` (file_name=<abs path>) to produce a persisted `.md`, then `read_file` it in chunks. Plain text/code files need no conversion — `read_file` directly.
   - **JSON/XML**: Use Python scripts to extract fields.

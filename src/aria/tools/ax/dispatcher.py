@@ -30,7 +30,7 @@ class AxSchema(BaseModel):
         description=(
             "Tool family name. Use 'help' to list all families. "
             "Families: web, knowledge, finance, imdb, http, dev, processes, "
-            "check, worker."
+            "documents, check, worker."
         )
     )
     command: str = Field(
@@ -191,6 +191,18 @@ def _worker():
     return worker
 
 
+def _documents_convert():
+    from aria.tools.documents.functions import convert
+
+    return convert
+
+
+def _documents_status():
+    from aria.tools.documents.functions import status
+
+    return status
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table: family → command → (loader, inject_action?)
 # inject_action means the command name is passed as action= parameter
@@ -242,6 +254,10 @@ _DISPATCH: dict[str, dict[str, tuple[Callable, bool]]] = {
         "list": (_process, True),
         "restart": (_process, True),
         "signal": (_process, True),
+    },
+    "documents": {
+        "convert": (_documents_convert, True),
+        "status": (_documents_status, True),
     },
     "check": {
         "extras": (_extras, False),
@@ -303,7 +319,7 @@ def _validate_ax_inputs(reason: str, family: str, command: str) -> str | None:
                     "message": "ax() requires 'family' and 'command' arguments.",
                     "expected": {
                         "reason": "Brief explanation of why you are calling this.",
-                        "family": "Tool family: web, knowledge, finance, imdb, http, dev, processes, check, worker",
+                        "family": "Tool family: web, knowledge, finance, imdb, http, dev, processes, documents, check, worker",
                         "command": "Subcommand within the family",
                         "args": "Optional arguments dict (exclude 'reason')",
                     },

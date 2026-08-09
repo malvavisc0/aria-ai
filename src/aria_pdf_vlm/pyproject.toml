@@ -1,0 +1,15 @@
+[project]
+name = "aria-pdf-vlm"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["torch", "transformers", "pypdfium2"]
+
+[project.scripts]
+pdf-vlm = "aria_pdf_vlm.__main__:main"
+
+[build-system]
+requires = ["setuptools>=75.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]

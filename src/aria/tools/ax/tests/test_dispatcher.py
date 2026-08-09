@@ -44,6 +44,7 @@ class TestDispatchTable:
             "http",
             "dev",
             "processes",
+            "documents",
             "check",
             "worker",
         }

@@ -220,6 +220,51 @@ def _check_lightpanda(checks: list[CheckResult]) -> None:
         )
 
 
+def _check_pdf_vlm(checks: list[CheckResult]) -> None:
+    """Report the pdf-vlm worker state (non-blocking, informational).
+
+    The Granite-Docling worker is optional — the documents tool falls
+    back to MarkItDown when it is not installed. This check always
+    passes; it only surfaces install/model/device state so the user
+    knows what to expect for PDF conversions.
+    """
+    from pathlib import Path
+
+    from aria.config.models import _resolve_model_path
+    from aria.config.pdf import Pdf
+    from aria.scripts.pdf_vlm import detect_device, is_installed
+
+    if not is_installed():
+        checks.append(
+            CheckResult(
+                name="pdf-vlm worker",
+                passed=True,  # optional — never blocks
+                category="binaries",
+                details="not installed (optional; PDFs fall back to MarkItDown; "
+                "install with: aria pdf-vlm install)",
+            )
+        )
+        return
+
+    device = Pdf.vlm_device
+    if device == "auto":
+        device = detect_device()
+
+    model_path = Pdf.model_path or _resolve_model_path(Pdf.vlm_model_id)
+    model_cached = bool(model_path) and Path(model_path).is_dir()
+    state = f"installed (device={device}, model_cached={model_cached})"
+    if not model_cached:
+        state += " — model downloads on first PDF conversion"
+    checks.append(
+        CheckResult(
+            name="pdf-vlm worker",
+            passed=True,
+            category="binaries",
+            details=state,
+        )
+    )
+
+
 def _check_model_exists(model_path: str) -> bool:
     """Check if a model directory exists under ~/.aria/models/.
 
@@ -422,6 +467,7 @@ def run_preflight_checks() -> PreflightResult:
     _check_data_folder(checks)
     _check_binaries(checks)
     _check_lightpanda(checks)
+    _check_pdf_vlm(checks)
     _check_models(checks)
     _check_token_limit(checks)
     _check_memory_requirements(checks)

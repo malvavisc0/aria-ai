@@ -54,7 +54,8 @@ reaction_on_message_received = false
 # Authorize users to spontaneously upload files with messages
 [features.spontaneous_file_upload]
 enabled = true
-# Documents (converted to markdown via MarkItDown) and images (vision API).
+# Documents (persisted raw; the agent converts on demand via `ax documents convert`)
+# and images (vision API).
 accept = [
     "application/pdf",
     "application/msword",
@@ -70,6 +71,10 @@ accept = [
     "text/markdown",
     "text/x-python",
     "text/x-script",
+    "text/javascript",
+    "text/x-typescript",
+    "video/mp2t",
+    "text/x-rst",
     "text/yaml",
     "text/x-yaml",
     "application/xml",

@@ -654,62 +654,6 @@ class TestHandleMessageVision:
         assert meta == {}
 
     @pytest.mark.asyncio
-    async def test_mixed_files_and_images(self, monkeypatch) -> None:
-        monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", True)
-        monkeypatch.setattr(
-            pipeline,
-            "extract_file_paths",
-            lambda msg: ["/tmp/report.pdf"],
-        )
-        monkeypatch.setattr(
-            pipeline,
-            "convert_documents_to_markdown",
-            lambda paths: [
-                {
-                    "original_path": "/tmp/report.pdf",
-                    "markdown_path": "/workspace/uploads/report.md",
-                    "name": "report.pdf",
-                    "lines": 42,
-                    "chars": 1200,
-                    "error": None,
-                }
-            ],
-        )
-        monkeypatch.setattr(
-            pipeline,
-            "extract_image_data",
-            lambda msg: [
-                {
-                    "mime_type": "image/jpeg",
-                    "base64": "b64",
-                    "name": "chart.jpg",
-                }
-            ],
-        )
-        monkeypatch.setattr(
-            pipeline,
-            "_describe_image",
-            AsyncMock(return_value="A bar chart."),
-        )
-
-        message = _mock_message(
-            content="Analyze these",
-            command=None,
-            thread_id="t2",
-            elements=[],
-        )
-
-        prompt, meta = await pipeline._handle_message(message)
-
-        assert "[Uploaded files]:" in prompt
-        assert "report.pdf" in prompt
-        assert "report.md" in prompt
-        assert "42 lines" in prompt
-        assert "[Attached images]:" in prompt
-        assert "A bar chart." in prompt
-        assert meta["attachments"] == ["report.pdf"]
-
-    @pytest.mark.asyncio
     async def test_fallback_when_vision_api_fails(self, monkeypatch) -> None:
         monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", True)
         monkeypatch.setattr(

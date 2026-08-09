@@ -21,7 +21,7 @@ dependencies = [
     "llama-index-llms-openrouter",
     "llama-index-vector-stores-chroma",
     "loguru",
-    "markitdown",
+    "markitdown[pdf]",
     "openinference-instrumentation-llama-index",
     "playwright",
     "pydantic",
@@ -128,6 +128,11 @@ override-dependencies = ["onnxruntime; sys_platform != 'darwin'"]
 # Pin torch to the CPU wheel from the PyTorch CPU index. Embeddings run on CPU
 # by default (device="cpu" in get_embeddings_model). vLLM owns the GPU stack 
 # in its own isolated venv (~/.aria/venvs/vllm). See docs/plan-cpu-torch.md.
+#
+# The Granite-Docling PDF backend pulls in the same heavy stack (torch,
+# docling, docling-ibm-models) and is likewise isolated — installed into
+# ~/.aria/venvs/pdf_vlm and invoked via the `pdf-vlm` shim. It is NOT
+# declared here; the worker declares its own deps in src/aria_pdf_vlm/.
 #
 # `unsafe-best-match` is required (not the default `first-index`): the PyTorch
 # CPU index mirrors some pure-Python packages at STALE versions (e.g. certifi

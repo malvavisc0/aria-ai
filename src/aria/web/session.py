@@ -29,7 +29,6 @@ from llama_index.core.base.llms.types import (
 from loguru import logger
 from PIL import Image
 
-from aria.config.folders import Uploads as UploadsConfig
 from aria.config.folders import Workspace as WorkspaceConfig
 from aria.config.models import Embeddings as EmbeddingsConfig
 from aria.llm import get_default_memory
@@ -270,7 +269,8 @@ def extract_file_paths(message: cl.Message) -> list[str]:
     if not message.elements:
         return []
 
-    UploadsConfig.path.mkdir(parents=True, exist_ok=True)
+    uploads = WorkspaceConfig.path / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
 
     paths = []
     for element in message.elements:
@@ -281,9 +281,8 @@ def extract_file_paths(message: cl.Message) -> list[str]:
         src = Path(info.path)
         dest_name = info.name or src.name
         thread_id = getattr(message, "thread_id", None) or "thread"
-        dest = UploadsConfig.path / (
-            f"{thread_id}_{uuid.uuid4().hex}_{Path(dest_name).name}"
-        )
+        safe_thread = Path(thread_id).name
+        dest = uploads / f"{safe_thread}_{uuid.uuid4().hex}_{Path(dest_name).name}"
 
         try:
             shutil.copy2(info.path, dest)
@@ -292,174 +291,6 @@ def extract_file_paths(message: cl.Message) -> list[str]:
             logger.warning(f"Failed to copy uploaded file {info.path} to {dest}")
             paths.append(info.path)
     return paths
-
-
-# MIME types / extensions supported by MarkItDown for document conversion
-_MARKITDOWN_MIME_TYPES = {
-    # Documents
-    "application/pdf",
-    "application/msword",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/vnd.ms-excel",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.ms-powerpoint",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    # Structured data & markup
-    "text/csv",
-    "text/html",
-    "application/json",
-    "application/xml",
-    "text/xml",
-    "application/x-yaml",
-    "text/yaml",
-    "text/x-yaml",
-    "application/toml",
-    # Plain text & code
-    "text/plain",
-    "text/markdown",
-    "text/x-python",
-    "text/x-script",
-}
-_MARKITDOWN_EXTENSIONS = {
-    # Documents
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx",
-    # Structured data & markup
-    ".csv",
-    ".html",
-    ".htm",
-    ".json",
-    ".xml",
-    ".yaml",
-    ".yml",
-    ".toml",
-    # Plain text & code
-    ".txt",
-    ".md",
-    ".rst",
-    ".py",
-    ".js",
-    ".ts",
-    ".sh",
-    ".log",
-    ".ini",
-    ".cfg",
-}
-
-
-def convert_documents_to_markdown(
-    file_paths: list[str],
-) -> list[dict]:
-    """Convert uploaded documents to markdown using MarkItDown.
-
-    For each file path, attempts conversion via MarkItDown and saves
-    the resulting markdown file into the agent workspace
-    (``~/.aria/workspace/uploads/``).
-
-    Args:
-        file_paths: List of uploaded file paths to convert.
-
-    Returns:
-        A list of dicts with keys:
-            - original_path: str (path to the uploaded file)
-            - markdown_path: str | None (path to converted .md, or None on failure)
-            - name: str (original filename)
-            - lines: int (line count of converted file)
-            - chars: int (character count of converted file)
-            - error: str | None (error message if conversion failed)
-    """
-    if not file_paths:
-        return []
-
-    workspace_uploads = WorkspaceConfig.path / "uploads"
-    workspace_uploads.mkdir(parents=True, exist_ok=True)
-
-    try:
-        from markitdown import MarkItDown
-
-        converter = MarkItDown()
-    except Exception as e:
-        logger.warning(f"MarkItDown unavailable, skipping conversion: {e}")
-        converter = None
-
-    results = []
-    for file_path in file_paths:
-        src = Path(file_path)
-        ext = src.suffix.lower()
-
-        # Check if file is convertible
-        if ext not in _MARKITDOWN_EXTENSIONS:
-            results.append(
-                {
-                    "original_path": file_path,
-                    "markdown_path": None,
-                    "name": src.name,
-                    "lines": 0,
-                    "chars": 0,
-                    "error": None,
-                }
-            )
-            continue
-
-        if converter is None:
-            results.append(
-                {
-                    "original_path": file_path,
-                    "markdown_path": None,
-                    "name": src.name,
-                    "lines": 0,
-                    "chars": 0,
-                    "error": "MarkItDown unavailable",
-                }
-            )
-            continue
-
-        try:
-            result = converter.convert(file_path)
-            md_content = result.text_content or ""
-
-            md_name = f"{src.stem}.md"
-            md_dest = workspace_uploads / md_name
-            # Avoid collisions
-            if md_dest.exists():
-                md_dest = workspace_uploads / f"{src.stem}_{uuid.uuid4().hex[:8]}.md"
-
-            md_dest.write_text(md_content, encoding="utf-8")
-
-            line_count = len(md_content.splitlines())
-            results.append(
-                {
-                    "original_path": file_path,
-                    "markdown_path": str(md_dest),
-                    "name": src.name,
-                    "lines": line_count,
-                    "chars": len(md_content),
-                    "error": None,
-                }
-            )
-            logger.debug(
-                f"Converted {src.name} to markdown: {md_dest} "
-                f"({line_count} lines, {len(md_content)} chars)"
-            )
-        except Exception as e:
-            logger.warning(f"MarkItDown conversion failed for {src.name}: {e}")
-            results.append(
-                {
-                    "original_path": file_path,
-                    "markdown_path": None,
-                    "name": src.name,
-                    "lines": 0,
-                    "chars": 0,
-                    "error": str(e),
-                }
-            )
-
-    return results
 
 
 def _message_tool_call_count(msg: ChatMessage) -> int:

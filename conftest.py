@@ -113,7 +113,6 @@ def _isolate_data_dirs(tmp_path, monkeypatch):
     monkeypatch.setattr(_folders.Debug, "path", aria_home / "logs")
     monkeypatch.setattr(_folders.Debug, "logs_path", aria_home / "logs" / "debug.log")
     monkeypatch.setattr(_folders.Storage, "path", aria_home / "storage")
-    monkeypatch.setattr(_folders.Uploads, "path", aria_home / "uploads")
     monkeypatch.setattr(_folders.DB, "path", aria_home / "db")
     monkeypatch.setattr(_folders.Models, "path", aria_home / "models")
 
