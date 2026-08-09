@@ -6,18 +6,22 @@ How Aria handles images and documents uploaded through the chat UI.
 
 When a user attaches files to a chat message, Aria processes them in a
 pre-processing step **before** the agent sees the prompt. The goal is to
-convert uploads into plain text that flows naturally through the existing
-agent pipeline (memory, compression, fact extraction) without any
-changes to the core workflow.
+make uploads usable by the agent without bloating the prompt or blocking
+the turn on heavy work.
 
-There are two processing paths:
+There are three upload types:
 
-| Upload type | Processing | Result in prompt |
+| Upload type | At upload time | Agent access |
 |---|---|---|
 | **Images** (png, jpg, webp, gif, bmp, tiff) | Vision API → text description | `[Image 1 (photo.jpg)]: A red car on a highway…` |
-| **Documents** (pdf, docx, xlsx, pptx, csv, html) | MarkItDown → markdown file in workspace | `report.pdf → Converted to markdown: ~/.aria/workspace/uploads/report.md (247 lines)` |
-| **Text files** (txt, md, json, xml, yaml, toml, py, js, ts, sh, log, ini, cfg, rst) | MarkItDown → markdown file in workspace | `script.py → Converted to markdown: ~/.aria/workspace/uploads/script.md (42 lines)` |
-| **Other files** | Copied to uploads dir, path passed as-is | `- /path/to/file.bin` |
+| **Documents** (pdf, docx, xlsx, pptx, csv, html) | Persisted raw (no conversion) | path listed in prompt → `ax documents convert` on demand |
+| **Text/code files** (txt, md, json, xml, yaml, toml, py, js, ts, sh, log, ini, cfg, rst) | Persisted raw (no conversion) | read directly with `read_file` |
+
+Raw uploads of **all** types persist to `~/.aria/workspace/uploads/` and
+their paths are listed in an `[Uploaded files]` block. **No document is
+converted at upload time** — conversion happens only when the agent calls
+`ax documents convert`. This keeps uploads instant even for huge files
+and leaves the agent in control of *when* and *whether* to convert.
 
 ## Architecture
 
@@ -28,17 +32,18 @@ User uploads files in Chainlit UI
 ┌─────────────────────────────────┐
 │  message_pipeline._handle_message()
 │                                 │
-│  1. extract_file_paths(msg)     │ ← Non-image files → copy to ~/.aria/uploads/
+│  1. extract_file_paths(msg)     │ ← Non-image files → copy to ~/.aria/workspace/uploads/
 │  2. extract_image_data(msg)     │ ← Images → base64 encoded
-│  3. convert_documents_to_markdown(paths) │ ← MarkItDown conversion
-│  4. _describe_image() per image │ ← Vision API call
-│  5. Assemble prompt with metadata│
+│  3. _describe_image() per image │ ← Vision API call
+│  4. Assemble prompt with metadata│
 └─────────────┬───────────────────┘
               │
               ▼
 ┌─────────────────────────────────┐
 │  AgentWorkflow.run(prompt)      │ ← Text-only, unchanged
-│  (memory, compression, tools)   │
+│  (raw upload paths listed,      │
+│   convert on demand via         │
+│   ax documents convert)         │
 └─────────────────────────────────┘
 ```
 
@@ -98,83 +103,132 @@ call fails (timeout, model error), the prompt falls back to
 
 Fits comfortably in both 32K and 256K context windows.
 
-## Document Processing (MarkItDown)
+## Document Processing (on-demand)
+
+Documents of any type are **not** converted at upload time. The upload
+handler persists the raw file into `~/.aria/workspace/uploads/` and the
+prompt lists its path. Conversion happens only when the agent calls the
+`ax documents convert` tool — there is exactly one conversion path.
 
 ### How it works
 
 1. `extract_file_paths()` in `session.py` copies non-image uploads to
-   `~/.aria/uploads/` with unique filenames (thread ID + UUID).
+   `~/.aria/workspace/uploads/` with unique filenames (thread ID + UUID).
 
-2. `convert_documents_to_markdown()` checks each file's extension against
-   supported types and converts using MarkItDown. The resulting `.md`
-   file is saved to **`~/.aria/workspace/uploads/`** — inside the
-   agent's workspace so it's accessible via file tools.
-
-3. The prompt includes rich metadata:
+2. The prompt lists the raw paths and tells the agent how to access them:
    ```
-   [Uploaded files]:
-   - report.pdf (original: ~/.aria/uploads/t1_abc123_report.pdf)
-     Converted to markdown: ~/.aria/workspace/uploads/report.md (247 lines, 12,450 chars)
+   [Uploaded files] (raw paths — use `read_file` directly for text/code
+   files, `ax documents convert` for office/HTML/PDF):
+   - /path/t1_abc123_report.pdf
    ```
 
-4. The agent can then use its file read tools to inspect the converted
-   markdown, search within it, or answer questions about its content.
+3. When the agent decides it needs a document, it calls
+   `ax documents convert` with the absolute path. Routing is decided by
+   file extension:
+   - **Already-text** (`.txt`, `.md`, `.json`, `.csv`, `.py`, …) → refused;
+     the agent reads them directly with `read_file`.
+   - **Office/HTML** (`.docx`, `.xlsx`, `.pptx`, `.html`, …) → MarkItDown
+     (in-process).
+   - **PDF** → Granite-Docling (isolated worker) when installed, else
+     MarkItDown. Homegrown Granite-Docling handles digital and scanned
+     PDFs uniformly and preserves structure (tables, lists, headings,
+     reading order).
+
+4. The converted `.md` is written to `~/.aria/workspace/uploads/<stem>.md`
+   (next to the raw upload) and the tool returns the path + metadata —
+   never the content:
+   ```
+   {"file_path": ".../workspace/uploads/report.md",
+    "metadata": {"pages": 42, "backend_used": "granite-docling", ...}}
+   ```
+
+5. The agent then reads the `.md` in chunks with `read_file`
+   (`offset` / `length` / `max_lines`), searches within it, or answers
+   questions about its content.
+
+### Why on-demand, not upload-time conversion
+
+- **Huge documents** — a 200-page PDF converted at upload would block the
+  turn even if the agent never reads it. On-demand conversion lets the
+  agent decide *when* and *whether*.
+- **One conversion path** — every document converts through the same
+  tool; there is no separate upload-time route to drift from it.
+
+### Granite-Docling worker
+
+Granite-Docling (`ibm-granite/granite-docling-258M`) runs **locally**
+(no external OCR API) and is **PDF-only**. Because it pulls in the same
+heavy stack as vLLM (`torch`, `transformers`, `docling`), it is installed
+into an **isolated venv** at `~/.aria/venvs/pdf_vlm/` and invoked as a
+subprocess — Aria's own dependency tree never imports it.
+
+Install:
+
+```bash
+uv run aria pdf-vlm install
+```
+
+This auto-pulls CUDA torch when an NVIDIA GPU is detected, else CPU
+torch. Check the worker state with either of:
+
+```bash
+uv run aria pdf-vlm status
+# or, agent-side:
+ax documents status
+```
+
+The worker is optional. If it is not installed, `ax documents convert`
+falls back to MarkItDown for PDFs (`auto` backend) — a quality
+downgrade, not a functional failure.
 
 ### Supported formats
 
-| Format | Extensions | MIME types |
-|---|---|---|
-| PDF | `.pdf` | `application/pdf` |
-| Word | `.doc`, `.docx` | `application/msword`, `application/vnd.openxmlformats-…` |
-| Excel | `.xls`, `.xlsx` | `application/vnd.ms-excel`, `application/vnd.openxmlformats-…` |
-| PowerPoint | `.ppt`, `.pptx` | `application/vnd.ms-powerpoint`, `application/vnd.openxmlformats-…` |
-| CSV | `.csv` | `text/csv` |
-| HTML | `.html`, `.htm` | `text/html` |
-| JSON | `.json` | `application/json` |
-| XML | `.xml` | `text/xml`, `application/xml` |
-| YAML | `.yaml`, `.yml` | `text/yaml`, `text/x-yaml`, `application/x-yaml` |
-| TOML | `.toml` | `application/toml` |
-| Plain text | `.txt`, `.log`, `.ini`, `.cfg` | `text/plain` |
-| Markdown | `.md` | `text/markdown`, `text/plain` |
-| reStructuredText | `.rst` | `text/plain`, `text/x-rst` |
-| Python | `.py` | `text/x-python`, `text/plain` |
-| JavaScript/TypeScript | `.js`, `.ts` | `text/plain` |
-| Shell | `.sh` | `text/x-script`, `text/plain` |
-
-### Why convert to workspace files, not inject content into prompt
-
-- Large documents can be thousands of tokens — too much for the prompt
-- The agent can selectively read sections with file tools
-- The converted file persists across the conversation
-- The agent can grep/search within it
-- No impact on context compression or memory
+The tool converts office/HTML/PDF via MarkItDown and Granite-Docling.
+Already-text formats (`.txt`, `.md`, `.rst`, `.json`, `.csv`, `.xml`,
+`.yaml`/`.yml`, `.toml`, `.log`, `.ini`, `.cfg`, `.py`, `.js`, `.ts`,
+`.sh`) are refused — use `read_file` directly.
 
 ### Error handling
 
-If conversion fails (corrupt file, unsupported content, MarkItDown not
-installed), the metadata reports the error and the original file path
-is still available:
-
-```
-[Uploaded files]:
-- broken.pdf: ~/.aria/uploads/t1_abc_broken.pdf (conversion failed: …)
-```
-
-Unrecognised file types (e.g., `.bin`, `.exe`, `.zip`) are passed through
-as plain file paths without conversion attempted.
+`ax documents convert` returns a structured error for missing files,
+unsupported extensions, oversized files, or failed conversion. The agent
+reads the error and adapts (e.g. falls back, or reports the failure).
 
 ## File locations
 
 | Directory | Purpose |
 |---|---|
-| `~/.aria/uploads/` | Raw uploaded files (all types except images) |
-| `~/.aria/workspace/uploads/` | Converted markdown files (agent-accessible) |
+| `~/.aria/workspace/uploads/` | Raw uploads and converted markdown (agent-accessible) |
+| `~/.aria/venvs/pdf_vlm/` | Isolated Granite-Docling worker venv |
+| `~/.aria/bin/pdf-vlm` | Worker shim (symlink to the venv console-script) |
+
+## Configuration
+
+| Env var | Default | Purpose |
+|---|---|---|
+| `ARIA_PDF_BACKEND` | `auto` | `auto` / `granite-docling` / `markitdown` |
+| `ARIA_PDF_VLM_MODEL` | `ibm-granite/granite-docling-258M` | Model ID |
+| `ARIA_PDF_VLM_DEVICE` | `auto` | `auto` → `cuda` if NVIDIA else `cpu`; override with `cpu`/`cuda`/`mps` |
+| `ARIA_PDF_VLM_MAX_PAGES` | `200` | Max pages per PDF |
+| `ARIA_PDF_VLM_TIMEOUT_SECONDS` | `600` | Subprocess timeout |
+| `ARIA_PDF_MAX_FILE_MB` | `100` | Max input file size |
+| `ARIA_PDF_VLM_VENV` | — | Override the isolated venv path |
+| `ARIA_PDF_VLM_MODEL_PATH` | — | Local model snapshot dir |
+
+Model snapshot: `~/.aria/models/<model-name>/` when
+`ARIA_PDF_VLM_MODEL_PATH` is set or pre-downloaded via
+`aria models download`; otherwise docling downloads to the HF cache
+(`~/.cache/huggingface/`) on first PDF conversion.
 
 ## Source files
 
 | File | Responsibility |
 |---|---|
-| `src/aria/web/session.py` | `extract_image_data()`, `extract_file_paths()`, `convert_documents_to_markdown()` |
+| `src/aria/web/session.py` | `extract_image_data()`, `extract_file_paths()` |
 | `src/aria/web/message_pipeline.py` | `_describe_image()`, `_handle_message()` prompt assembly |
+| `src/aria/config/pdf.py` | `Pdf`, `PdfVlm` configuration |
+| `src/aria/scripts/pdf_vlm.py` | Worker install/detect/uninstall |
+| `src/aria_pdf_vlm/` | Isolated Granite-Docling worker package |
+| `src/aria/tools/documents/` | `ax documents` tool family (`convert`, `status`) |
 | `src/aria/config/api.py` | `Vllm.vision_enabled` configuration |
 | `src/aria/.chainlit/config.toml` | File upload UI settings (`spontaneous_file_upload`) |
