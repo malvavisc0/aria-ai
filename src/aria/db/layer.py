@@ -295,8 +295,7 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
         # on every login would clobber renames made via the GUI/CLI
         # (see gui/dialogs/edit_user.py, cli/users.py).
         update_query = (
-            'UPDATE users SET "metadata" = :metadata '
-            'WHERE "identifier" = :identifier'
+            'UPDATE users SET "metadata" = :metadata WHERE "identifier" = :identifier'
         )
         await self.execute_sql(
             query=update_query,
