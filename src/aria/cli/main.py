@@ -14,6 +14,7 @@ Sub-commands:
     lightpanda: Lightpanda browser binary management (download, status)
     server: Webserver management (run, start, stop, status)
     system: Hardware inspection and process management
+    tools: Tool state maintenance (cleanup-sessions)
 
 Example:
     ```bash
@@ -44,6 +45,9 @@ from aria.cli import (
 from aria.cli import (
     pdf_vlm as pdf_vlm_cli,
 )
+from aria.cli import (
+    tools as tools_cli,
+)
 from aria.cli import vllm as vllm_cli
 from aria.config import DEBUG
 
@@ -66,6 +70,7 @@ app.add_typer(models.app, name="models")
 app.add_typer(config.app, name="config")
 app.add_typer(server.app, name="server")
 app.add_typer(system.app, name="system")
+app.add_typer(tools_cli.app, name="tools")
 
 console = Console()
 

@@ -6,7 +6,7 @@ reasoning sessions and conversations.
 
 from typing import Any
 
-from aria.tools import Reason, utc_timestamp
+from aria.tools import Reason, safe_json, utc_timestamp
 from aria.tools.decorators import log_tool_call
 
 from .database import get_database
@@ -21,7 +21,7 @@ def scratchpad(
     value: str | None = None,
     operation: str = "get",
     agent_id: str = _DEFAULT_AGENT_ID,
-) -> dict[str, Any]:
+) -> str:
     """Small persistent key-value working memory.
 
     Use this to store or retrieve short intermediate data across steps.
@@ -34,21 +34,21 @@ def scratchpad(
         agent_id: Auto-set, do not provide.
 
     Returns:
-        Operation result with stored or retrieved value.
+        JSON string with operation result and stored or retrieved value.
     """
     operation = operation.lower().strip()
     now = utc_timestamp()
 
     if operation == "set":
-        return _op_set(reason, agent_id, key, value, now)
+        result = _op_set(reason, agent_id, key, value, now)
     elif operation == "get":
-        return _op_get(reason, agent_id, key, now)
+        result = _op_get(reason, agent_id, key, now)
     elif operation == "delete":
-        return _op_delete(reason, agent_id, key, now)
+        result = _op_delete(reason, agent_id, key, now)
     elif operation == "list":
-        return _op_list(reason, agent_id, now)
+        result = _op_list(reason, agent_id, now)
     else:
-        return _err(
+        result = _err(
             reason=reason,
             agent_id=agent_id,
             code="UNSUPPORTED_OPERATION",
@@ -57,6 +57,8 @@ def scratchpad(
             ),
             how_to_fix="Use one of: get, set, delete, list",
         )
+
+    return safe_json(result)
 
 
 # ── helpers ──────────────────────────────────────────────────────────

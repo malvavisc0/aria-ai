@@ -17,7 +17,7 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from aria.tools import Reason
+from aria.tools import Reason, safe_json, tool_response, utc_timestamp
 from aria.tools.decorators import tool_function
 from aria.tools.files._internals import (
     _secure_resolve_dir,
@@ -310,43 +310,28 @@ def _format_permissions_symbolic(mode: int) -> str:
 
 
 def _ok(tool: str, reason: str, result: dict[str, Any], **metadata) -> str:
-    """Build a success response."""
-    import json
-
-    response = {
-        "tool": tool,
-        "reason": reason,
-        "data": {
-            "result": result,
-            "error": "",
-            "metadata": {
-                "timestamp": datetime.now(UTC).isoformat(),
-                "success": True,
-                **metadata,
-            },
-        },
-    }
-    return json.dumps(response)
+    """Build a standard success response."""
+    return tool_response(tool=tool, reason=reason, data=result, **metadata)
 
 
 def _err(tool: str, reason: str, message: str, **metadata) -> str:
-    """Build an error response."""
-    import json
-
-    response = {
+    """Build a standard error response from a message string."""
+    error_block: dict[str, Any] = {
+        "code": "FILE_ERROR",
+        "message": message,
+        "type": "FileError",
+        "recoverable": True,
+    }
+    response: dict[str, Any] = {
+        "status": "error",
         "tool": tool,
         "reason": reason,
-        "data": {
-            "result": {},
-            "error": message,
-            "metadata": {
-                "timestamp": datetime.now(UTC).isoformat(),
-                "success": False,
-                **metadata,
-            },
-        },
+        "timestamp": utc_timestamp(),
+        "error": error_block,
     }
-    return json.dumps(response)
+    if metadata:
+        response["context"] = metadata
+    return safe_json(response)
 
 
 @tool_function(

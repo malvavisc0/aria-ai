@@ -50,10 +50,10 @@ class TestReadFile:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["mode"] == "chunked"
-        assert data["data"]["result"]["total_lines"] == 5
-        assert "Line 1" in data["data"]["result"]["lines"][0]
+        assert data["status"] == "success"
+        assert data["data"]["mode"] == "chunked"
+        assert data["data"]["total_lines"] == 5
+        assert "Line 1" in data["data"]["lines"][0]
 
     def test_read_file_chunk(self, sample_files):
         """Test reading file chunk."""
@@ -65,12 +65,12 @@ class TestReadFile:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["mode"] == "chunked"
-        assert data["data"]["result"]["offset"] == 1
-        assert data["data"]["result"]["lines_returned"] == 2
-        assert data["data"]["result"]["has_more"] is True
-        assert data["data"]["result"]["lines"] == ["Line 2", "Line 3"]
+        assert data["status"] == "success"
+        assert data["data"]["mode"] == "chunked"
+        assert data["data"]["offset"] == 1
+        assert data["data"]["lines_returned"] == 2
+        assert data["data"]["has_more"] is True
+        assert data["data"]["lines"] == ["Line 2", "Line 3"]
 
     def test_read_file_caps_at_max_lines(self, sample_files):
         """Test that read_file caps lines instead of erroring."""
@@ -81,9 +81,9 @@ class TestReadFile:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["lines_returned"] <= 3
-        assert data["data"]["result"]["has_more"] is True
+        assert data["status"] == "success"
+        assert data["data"]["lines_returned"] <= 3
+        assert data["data"]["has_more"] is True
 
     def test_read_nonexistent_file(self, temp_dir):
         """Test error for nonexistent file."""
@@ -93,7 +93,7 @@ class TestReadFile:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is False
+        assert data["status"] == "error"
 
 
 class TestFileInfo:
@@ -107,13 +107,13 @@ class TestFileInfo:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["exists"] is True
-        assert data["data"]["result"]["is_file"] is True
-        assert data["data"]["result"]["is_directory"] is False
-        assert data["data"]["result"]["total_lines"] == 5
-        assert "size_bytes" in data["data"]["result"]
-        assert "permissions" in data["data"]["result"]
+        assert data["status"] == "success"
+        assert data["data"]["exists"] is True
+        assert data["data"]["is_file"] is True
+        assert data["data"]["is_directory"] is False
+        assert data["data"]["total_lines"] == 5
+        assert "size_bytes" in data["data"]
+        assert "permissions" in data["data"]
 
     def test_file_info_directory(self, sample_files):
         """Test getting info for directory."""
@@ -123,10 +123,10 @@ class TestFileInfo:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["exists"] is True
-        assert data["data"]["result"]["is_file"] is False
-        assert data["data"]["result"]["is_directory"] is True
+        assert data["status"] == "success"
+        assert data["data"]["exists"] is True
+        assert data["data"]["is_file"] is False
+        assert data["data"]["is_directory"] is True
 
     def test_file_info_nonexistent(self, temp_dir):
         """Test getting info for nonexistent file."""
@@ -136,8 +136,8 @@ class TestFileInfo:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["exists"] is False
+        assert data["status"] == "success"
+        assert data["data"]["exists"] is False
 
 
 class TestListFiles:
@@ -153,9 +153,9 @@ class TestListFiles:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["mode"] == "flat"
-        assert data["data"]["result"]["count"] >= 1
+        assert data["status"] == "success"
+        assert data["data"]["mode"] == "flat"
+        assert data["data"]["count"] >= 1
 
     def test_list_files_recursive(self, sample_files):
         """Test recursive file listing."""
@@ -167,9 +167,9 @@ class TestListFiles:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
+        assert data["status"] == "success"
         # Should find both test1.txt and nested.txt
-        assert data["data"]["result"]["count"] >= 2
+        assert data["data"]["count"] >= 2
 
     def test_list_files_tree(self, sample_files):
         """Test tree view."""
@@ -181,10 +181,10 @@ class TestListFiles:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["mode"] == "tree"
-        assert "tree" in data["data"]["result"]
-        assert data["data"]["result"]["total_files"] >= 2
+        assert data["status"] == "success"
+        assert data["data"]["mode"] == "tree"
+        assert "tree" in data["data"]
+        assert data["data"]["total_files"] >= 2
 
 
 class TestSearchFiles:
@@ -200,9 +200,9 @@ class TestSearchFiles:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["mode"] == "name"
-        assert data["data"]["result"]["count"] >= 1
+        assert data["status"] == "success"
+        assert data["data"]["mode"] == "name"
+        assert data["data"]["count"] >= 1
 
     def test_search_by_content(self, sample_files):
         """Test searching by content."""
@@ -214,10 +214,10 @@ class TestSearchFiles:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is True
-        assert data["data"]["result"]["mode"] == "content"
-        assert data["data"]["result"]["total_matches"] >= 1
-        assert len(data["data"]["result"]["matches"]) >= 1
+        assert data["status"] == "success"
+        assert data["data"]["mode"] == "content"
+        assert data["data"]["total_matches"] >= 1
+        assert len(data["data"]["matches"]) >= 1
 
     def test_search_invalid_mode(self, sample_files):
         """Test error for invalid mode."""
@@ -229,8 +229,8 @@ class TestSearchFiles:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is False
-        assert "Invalid mode" in data["data"]["error"]
+        assert data["status"] == "error"
+        assert "Invalid mode" in data["error"]["message"]
 
     def test_search_invalid_regex(self, sample_files):
         """Test error for invalid regex."""
@@ -242,5 +242,5 @@ class TestSearchFiles:
         )
         data = json.loads(result)
 
-        assert data["data"]["metadata"]["success"] is False
-        assert "Invalid regex" in data["data"]["error"]
+        assert data["status"] == "error"
+        assert "Invalid regex" in data["error"]["message"]

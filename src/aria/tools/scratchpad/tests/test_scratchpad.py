@@ -1,5 +1,7 @@
 """Tests for standalone scratchpad tool."""
 
+import json
+
 import pytest
 
 from aria.tools.scratchpad import scratchpad
@@ -16,28 +18,37 @@ def test_db(test_tools_db):
     yield
 
 
+def _result(call_result: str) -> dict:
+    """Parse tool JSON-string response into a dict for assertions."""
+    return json.loads(call_result)
+
+
 class TestScratchpadStandalone:
     """Test that scratchpad works without any reasoning session."""
 
     def test_set_and_get(self):
         """Test basic set and get operations."""
-        result = scratchpad(
-            "Store a value",
-            key="test_key",
-            value="test_value",
-            operation="set",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Store a value",
+                key="test_key",
+                value="test_value",
+                operation="set",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "success"
         assert result["data"]["tool"] == "set"
         assert result["data"]["key"] == "test_key"
         assert result["data"]["value"] == "test_value"
 
-        result = scratchpad(
-            "Retrieve a value",
-            key="test_key",
-            operation="get",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Retrieve a value",
+                key="test_key",
+                operation="get",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "success"
         assert result["data"]["tool"] == "get"
@@ -45,22 +56,26 @@ class TestScratchpadStandalone:
 
     def test_get_nonexistent_key(self):
         """Test getting a key that doesn't exist."""
-        result = scratchpad(
-            "Get missing",
-            key="nonexistent",
-            operation="get",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Get missing",
+                key="nonexistent",
+                operation="get",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "error"
         assert result["error"]["code"] == "KEY_NOT_FOUND"
 
     def test_set_requires_value(self):
         """Test that set operation requires a value."""
-        result = scratchpad(
-            "Set without value",
-            key="test_key",
-            operation="set",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Set without value",
+                key="test_key",
+                operation="set",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "error"
         assert result["error"]["code"] == "VALUE_REQUIRED"
@@ -81,11 +96,13 @@ class TestScratchpadStandalone:
             operation="set",
             agent_id="test_agent",
         )
-        result = scratchpad(
-            "Get overwritten",
-            key="overwrite_key",
-            operation="get",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Get overwritten",
+                key="overwrite_key",
+                operation="get",
+                agent_id="test_agent",
+            )
         )
         assert result["data"]["value"] == "second"
 
@@ -98,32 +115,38 @@ class TestScratchpadStandalone:
             operation="set",
             agent_id="test_agent",
         )
-        result = scratchpad(
-            "Delete",
-            key="delete_me",
-            operation="delete",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Delete",
+                key="delete_me",
+                operation="delete",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "success"
         assert result["data"]["tool"] == "delete"
 
         # Verify it's gone
-        result = scratchpad(
-            "Get deleted",
-            key="delete_me",
-            operation="get",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Get deleted",
+                key="delete_me",
+                operation="get",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "error"
         assert result["error"]["code"] == "KEY_NOT_FOUND"
 
     def test_delete_nonexistent_key(self):
         """Test deleting a key that doesn't exist."""
-        result = scratchpad(
-            "Delete missing",
-            key="ghost",
-            operation="delete",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Delete missing",
+                key="ghost",
+                operation="delete",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "error"
         assert result["error"]["code"] == "KEY_NOT_FOUND"
@@ -144,21 +167,25 @@ class TestScratchpadStandalone:
             operation="set",
             agent_id="test_agent",
         )
-        result = scratchpad(
-            "Clear all",
-            key="all",
-            operation="delete",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Clear all",
+                key="all",
+                operation="delete",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "success"
         assert result["data"]["deleted_count"] == 2
 
         # Verify all gone
-        result = scratchpad(
-            "List after clear",
-            key="",
-            operation="list",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "List after clear",
+                key="",
+                operation="list",
+                agent_id="test_agent",
+            )
         )
         assert result["data"]["items"] == []
 
@@ -178,11 +205,13 @@ class TestScratchpadStandalone:
             operation="set",
             agent_id="test_agent",
         )
-        result = scratchpad(
-            "List all",
-            key="",
-            operation="list",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "List all",
+                key="",
+                operation="list",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "success"
         assert result["data"]["tool"] == "list"
@@ -193,22 +222,26 @@ class TestScratchpadStandalone:
 
     def test_list_empty(self):
         """Test listing when no items exist."""
-        result = scratchpad(
-            "List empty",
-            key="",
-            operation="list",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "List empty",
+                key="",
+                operation="list",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "success"
         assert result["data"]["items"] == []
 
     def test_unsupported_operation(self):
         """Test unsupported operation returns error."""
-        result = scratchpad(
-            "Bad op",
-            key="k",
-            operation="explode",
-            agent_id="test_agent",
+        result = _result(
+            scratchpad(
+                "Bad op",
+                key="k",
+                operation="explode",
+                agent_id="test_agent",
+            )
         )
         assert result["status"] == "error"
         assert result["error"]["code"] == "UNSUPPORTED_OPERATION"
@@ -230,17 +263,21 @@ class TestScratchpadStandalone:
             agent_id="agent_2",
         )
 
-        result1 = scratchpad(
-            "Agent 1 get",
-            key="shared_key",
-            operation="get",
-            agent_id="agent_1",
+        result1 = _result(
+            scratchpad(
+                "Agent 1 get",
+                key="shared_key",
+                operation="get",
+                agent_id="agent_1",
+            )
         )
-        result2 = scratchpad(
-            "Agent 2 get",
-            key="shared_key",
-            operation="get",
-            agent_id="agent_2",
+        result2 = _result(
+            scratchpad(
+                "Agent 2 get",
+                key="shared_key",
+                operation="get",
+                agent_id="agent_2",
+            )
         )
 
         assert result1["data"]["value"] == "agent1_value"
@@ -270,10 +307,12 @@ class TestScratchpadStandalone:
         assert registry.get_active_session_id("decoupled_agent") is None
 
         # But the value is still retrievable
-        result = scratchpad(
-            "Get without reasoning",
-            key="decoupled_key",
-            operation="get",
-            agent_id="decoupled_agent",
+        result = _result(
+            scratchpad(
+                "Get without reasoning",
+                key="decoupled_key",
+                operation="get",
+                agent_id="decoupled_agent",
+            )
         )
         assert result["data"]["value"] == "decoupled_value"

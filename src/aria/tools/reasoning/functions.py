@@ -15,7 +15,7 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from aria.tools import Reason, utc_timestamp
+from aria.tools import Reason, safe_json, utc_timestamp
 from aria.tools.decorators import log_tool_call
 
 from . import registry
@@ -156,7 +156,7 @@ def reasoning(
     confidence: float | None = None,
     on_step: int | None = None,
     agent_id: str = _DEFAULT_AGENT_ID,
-) -> dict[str, Any]:
+) -> str:
     """Structured reasoning: start → step → reflect → evaluate → end.
 
     Actions: start, step, reflect, evaluate, summary, end.
@@ -173,14 +173,29 @@ def reasoning(
         agent_id: Auto-set, do not provide.
 
     Returns:
-        Action result with session status.
+        JSON string with action result and session status.
     """
+    if action is None:
+        return _err(
+            tool="reasoning",
+            reason=reason,
+            agent_id=agent_id,
+            session_id=None,
+            code="MISSING_ACTION",
+            message="The 'action' parameter is required.",
+            how_to_fix=(
+                "Provide the 'action' parameter: "
+                "start, step, reflect, evaluate, summary, end"
+            ),
+            recoverable=True,
+        )
+
     action = action.lower().strip()
 
     if action == "start":
-        return _action_start(reason, agent_id)
+        result = _action_start(reason, agent_id)
     elif action == "step":
-        return _action_step(
+        result = _action_step(
             reason,
             agent_id,
             content,
@@ -190,15 +205,15 @@ def reasoning(
             confidence,
         )
     elif action == "reflect":
-        return _action_reflect(reason, agent_id, content, on_step)
+        result = _action_reflect(reason, agent_id, content, on_step)
     elif action == "evaluate":
-        return _action_evaluate(reason, agent_id)
+        result = _action_evaluate(reason, agent_id)
     elif action == "summary":
-        return _action_summary(reason, agent_id)
+        result = _action_summary(reason, agent_id)
     elif action == "end":
-        return _action_end(reason, agent_id)
+        result = _action_end(reason, agent_id)
     else:
-        return _err(
+        result = _err(
             tool="reasoning",
             reason=reason,
             agent_id=agent_id,
@@ -214,6 +229,8 @@ def reasoning(
             ),
             recoverable=True,
         )
+
+    return safe_json(result)
 
 
 def _action_start(reason: str, agent_id: str) -> dict[str, Any]:

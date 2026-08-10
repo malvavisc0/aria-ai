@@ -70,10 +70,10 @@ class TestFilesReturnJsonContract:
             str(self.base_dir / "read_test.txt"),
         )
         data = json.loads(result)
-        # unified_read uses _ok() format: {tool, reason, data}
+        # Standard envelope: {status, tool, reason, timestamp, data}
         assert "tool" in data
         assert "data" in data
-        assert data["data"]["metadata"]["success"] is True
+        assert data["status"] == "success"
 
     def test_edit_file_returns_json(self):
         """edit_file should return valid JSON response."""
@@ -125,8 +125,9 @@ class TestFilesErrorResponseContract:
             str(self.base_dir / "nonexistent.txt"),
         )
         data = json.loads(result)
-        # unified_read uses _err() format: {tool, reason, data: {error}}
-        assert data["data"]["error"] != ""
+        # Standard error envelope: {status, tool, reason, timestamp, error}
+        assert data["status"] == "error"
+        assert data["error"]["message"] != ""
 
 
 class TestListFilesParameterNaming:
