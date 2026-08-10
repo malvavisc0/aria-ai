@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import re
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -137,7 +137,7 @@ class UserHandlersMixin:
                         identifier=identifier,
                         metadata_=json.dumps({"role": role, "created_by": "cli"}),
                         password=hash_password(password),
-                        createdAt=datetime.now().isoformat() + "Z",
+                        createdAt=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     )
                 )
             # Session committed — now refresh UI

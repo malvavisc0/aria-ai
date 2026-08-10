@@ -165,6 +165,17 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
         element["props"] = _json_loads_or(element.get("props"), default={})
         return element
 
+    async def get_current_timestamp(self) -> str:
+        """Return the current time in UTC tagged as ``Z``.
+
+        Chainlit's default (:meth:`SQLAlchemyDataLayer.get_current_timestamp`)
+        writes naive local time and appends ``Z``, mislabeling it as UTC.
+        `_to_local_timestamp_string` then re-interprets it and shifts the value
+        into the wrong calendar day. Real UTC keeps the stored wall-clock day
+        aligned with the local grouping logic.
+        """
+        return datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
     def _deserialize_thread(self, thread: dict[str, Any]) -> dict[str, Any]:
         """Deserialize JSON fields in a thread dict.
 

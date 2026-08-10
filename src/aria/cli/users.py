@@ -31,7 +31,7 @@ Example:
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Annotated
 
 import typer
@@ -153,7 +153,7 @@ def add_user(
                 }
             ),
             password=hash_password(password),
-            createdAt=datetime.now().isoformat() + "Z",
+            createdAt=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         )
 
         session.add(user)

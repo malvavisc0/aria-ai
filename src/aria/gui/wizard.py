@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QObject, QThread, Signal
@@ -573,7 +573,7 @@ class _UserPage(QWizardPage):
                         identifier=self._email_edit.text().strip(),
                         metadata_=json.dumps({"role": "admin", "created_by": "wizard"}),
                         password=hash_password(self._password_edit.text()),
-                        createdAt=datetime.now().isoformat() + "Z",
+                        createdAt=datetime.now(UTC).isoformat().replace("+00:00", "Z"),
                     )
                 )
             return True
