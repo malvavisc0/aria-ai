@@ -43,25 +43,9 @@ For judgment-heavy work: `start` → 1-3 `step` → optional `reflect` → `end`
 
 ### Knowledge (`ax knowledge`)
 
-Persistent key-value store that **survives across conversations and server restarts**. This is your long-term memory — use it proactively.
+Persistent key-value store that **survives across conversations and restarts** — your long-term memory. Use it proactively.
 
-**When to store:**
-- User preferences (language, formatting, coding style, response length)
-- Project conventions (naming, structure, testing approach)
-- Learned facts that will be relevant in future conversations
-- Decisions the user made that should not need to be re-explained
-
-**When to recall:**
-- At the start of a new conversation, recall likely-relevant keys before answering
-- Before starting a complex task, check if you already stored relevant context
-- When a user references something from a past conversation
-
-**When NOT to use:**
-- Temporary data within a single task — use `scratchpad` (workers) or just hold it in context
-- Structured execution plans — use `plan` (workers)
-- Large file contents — save to disk and store the path instead
-
-**Quick reference** (see `ax` Command Reference for full parameter list):
+**Store** user preferences, project conventions, decisions, and learned facts that future conversations need. **Recall** at conversation start or before complex tasks to check for stored context. Don't use for temporary data (use `scratchpad` on workers) or large files (store the path, not the content).
 
 | Command | Purpose |
 |---------|---------|
@@ -72,18 +56,9 @@ Persistent key-value store that **survives across conversations and server resta
 
 ### Python Sandbox (`ax dev run`)
 
-Execute Python code in an isolated sandbox. **Prefer this over `shell` for computation, data extraction, and automation** — it's structured, auditable, and doesn't block the turn on slow startup.
+Execute Python in an isolated sandbox. **Prefer this over `shell` for computation and data extraction** — it's structured and auditable.
 
-**Use for:**
-- Parsing/extracting fields from JSON, XML, CSV, or other structured data
-- Calculations, unit conversions, data transformations
-- Quick scripts to test an approach before committing to a file
-- Generating or transforming text programmatically
-
-**Don't use for:**
-- Running CLI tools (`shell` or `ax` families are better)
-- File I/O (use `read_file`/`write_file`/`edit_file`)
-- Long-running processes (use `ax processes`)
+**Use for:** parsing JSON/XML/CSV, calculations, data transformations, quick scripts to test an approach. **Don't use for:** CLI tools (use `shell`/`ax` families), file I/O (use `read_file`/`write_file`), or long-running processes (use `ax processes`).
 
 ## File Operations
 
