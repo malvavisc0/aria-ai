@@ -20,6 +20,7 @@ from ._state import (
 )
 from ._utils import generate_agent_id, get_instructions_extras
 from .memory import BackgroundFlushMemory, IdempotentVectorMemoryBlock, wrap_memory
+from .utility import utility_completion
 
 __all__ = [
     # _sanitize
@@ -41,4 +42,6 @@ __all__ = [
     "get_chat_llm",
     "get_default_memory",
     "get_embeddings_model",
+    # utility
+    "utility_completion",
 ]

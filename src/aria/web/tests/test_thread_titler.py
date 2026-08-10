@@ -5,31 +5,8 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
+from aria.llm.tests.helpers import mock_httpx_client, patch_llm_config
 from aria.web import thread_titler
-
-
-def _patch_config(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Set ChatConfig/VllmConfig attributes for tests.
-
-    Bypasses the _Lazy descriptors the same way the message-pipeline
-    tests do — by patching the cached ``_value`` directly.
-    """
-    from aria.config.models import Chat as ChatConfigCls
-
-    monkeypatch.setattr(
-        ChatConfigCls.__dict__["api_url"], "_value", "http://test:9090/v1"
-    )
-    monkeypatch.setattr(ChatConfigCls.__dict__["model"], "_value", "test-model")
-    monkeypatch.setattr(thread_titler.VllmConfig, "api_key", "sk-test")
-
-
-def _mock_async_client(response: MagicMock) -> AsyncMock:
-    """Create a fake httpx.AsyncClient whose ``post`` returns *response*."""
-    client = AsyncMock()
-    client.post = AsyncMock(return_value=response)
-    client.__aenter__ = AsyncMock(return_value=client)
-    client.__aexit__ = AsyncMock(return_value=None)
-    return client
 
 
 def _patch_emitter(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
@@ -53,7 +30,7 @@ class TestGenerateThreadTitle:
 
     @pytest.mark.asyncio
     async def test_returns_title_on_success(self, monkeypatch) -> None:
-        _patch_config(monkeypatch)
+        patch_llm_config(monkeypatch)
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -62,7 +39,7 @@ class TestGenerateThreadTitle:
         }
 
         monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **kw: _mock_async_client(mock_response)
+            httpx, "AsyncClient", lambda **kw: mock_httpx_client(mock_response)
         )
 
         result = await thread_titler.generate_thread_title(
@@ -72,14 +49,14 @@ class TestGenerateThreadTitle:
 
     @pytest.mark.asyncio
     async def test_returns_none_on_empty_content(self, monkeypatch) -> None:
-        _patch_config(monkeypatch)
+        patch_llm_config(monkeypatch)
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {"choices": [{"message": {"content": ""}}]}
 
         monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **kw: _mock_async_client(mock_response)
+            httpx, "AsyncClient", lambda **kw: mock_httpx_client(mock_response)
         )
 
         result = await thread_titler.generate_thread_title("hey", "hi there")
@@ -87,7 +64,7 @@ class TestGenerateThreadTitle:
 
     @pytest.mark.asyncio
     async def test_raises_on_http_error(self, monkeypatch) -> None:
-        _patch_config(monkeypatch)
+        patch_llm_config(monkeypatch)
 
         mock_response = MagicMock()
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -97,7 +74,7 @@ class TestGenerateThreadTitle:
         )
 
         monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **kw: _mock_async_client(mock_response)
+            httpx, "AsyncClient", lambda **kw: mock_httpx_client(mock_response)
         )
 
         with pytest.raises(httpx.HTTPStatusError):
@@ -105,7 +82,7 @@ class TestGenerateThreadTitle:
 
     @pytest.mark.asyncio
     async def test_truncates_long_title(self, monkeypatch) -> None:
-        _patch_config(monkeypatch)
+        patch_llm_config(monkeypatch)
 
         long_title = "A" * 200
         mock_response = MagicMock()
@@ -115,7 +92,7 @@ class TestGenerateThreadTitle:
         }
 
         monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **kw: _mock_async_client(mock_response)
+            httpx, "AsyncClient", lambda **kw: mock_httpx_client(mock_response)
         )
 
         result = await thread_titler.generate_thread_title("q", "a")
@@ -124,7 +101,7 @@ class TestGenerateThreadTitle:
 
     @pytest.mark.asyncio
     async def test_sends_correct_payload(self, monkeypatch) -> None:
-        _patch_config(monkeypatch)
+        patch_llm_config(monkeypatch)
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -132,7 +109,7 @@ class TestGenerateThreadTitle:
             "choices": [{"message": {"content": "Title"}}]
         }
 
-        client = _mock_async_client(mock_response)
+        client = mock_httpx_client(mock_response)
         monkeypatch.setattr(httpx, "AsyncClient", lambda **kw: client)
 
         await thread_titler.generate_thread_title("question", "answer")
@@ -156,7 +133,7 @@ class TestMaybeTitleThread:
 
     @pytest.mark.asyncio
     async def test_updates_data_layer_on_success(self, monkeypatch) -> None:
-        _patch_config(monkeypatch)
+        patch_llm_config(monkeypatch)
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
@@ -165,7 +142,7 @@ class TestMaybeTitleThread:
         }
 
         monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **kw: _mock_async_client(mock_response)
+            httpx, "AsyncClient", lambda **kw: mock_httpx_client(mock_response)
         )
 
         mock_data_layer = AsyncMock()
@@ -187,14 +164,14 @@ class TestMaybeTitleThread:
 
     @pytest.mark.asyncio
     async def test_skips_update_on_empty_title(self, monkeypatch) -> None:
-        _patch_config(monkeypatch)
+        patch_llm_config(monkeypatch)
 
         mock_response = MagicMock()
         mock_response.raise_for_status = MagicMock()
         mock_response.json.return_value = {"choices": [{"message": {"content": "  "}}]}
 
         monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **kw: _mock_async_client(mock_response)
+            httpx, "AsyncClient", lambda **kw: mock_httpx_client(mock_response)
         )
 
         mock_data_layer = AsyncMock()
@@ -210,7 +187,7 @@ class TestMaybeTitleThread:
 
     @pytest.mark.asyncio
     async def test_does_not_raise_on_failure(self, monkeypatch) -> None:
-        _patch_config(monkeypatch)
+        patch_llm_config(monkeypatch)
 
         mock_response = MagicMock()
         mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
@@ -220,7 +197,7 @@ class TestMaybeTitleThread:
         )
 
         monkeypatch.setattr(
-            httpx, "AsyncClient", lambda **kw: _mock_async_client(mock_response)
+            httpx, "AsyncClient", lambda **kw: mock_httpx_client(mock_response)
         )
 
         mock_data_layer = AsyncMock()

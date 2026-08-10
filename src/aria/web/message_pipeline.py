@@ -28,6 +28,7 @@ from aria.config.api import Vllm as VllmConfig
 from aria.config.models import Chat as ChatConfig
 from aria.helpers.ui import maybe_remove_step, send_tool_step
 from aria.llm.memory import BackgroundFlushMemory
+from aria.llm.utility import utility_completion
 from aria.web.hooks import get_data_layer_handler
 from aria.web.session import (
     _sanitize_chat_history,
@@ -216,36 +217,25 @@ async def _describe_image(
     base64_data: str,
     prompt: str = _IMAGE_DESCRIBE_PROMPT,
 ) -> str:
-    """Send an image to the vision endpoint and return a text description."""
+    """Send an image to the vision endpoint and return a text description.
+
+    Delegates to :func:`utility_completion` (thinking disabled) with the
+    shared *client* so multiple images reuse one connection pool.
+    """
     image_url = f"data:{mime_type};base64,{base64_data}"
-    response = await client.post(
-        f"{ChatConfig.api_url}/chat/completions",
-        headers={"Authorization": f"Bearer {VllmConfig.api_key}"},
-        json={
-            "model": ChatConfig.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": image_url},
-                        },
-                    ],
-                }
-            ],
-            # Disable thinking for vision description: the reasoning block
-            # otherwise consumes the entire token budget and `content` comes
-            # back null (finish_reason="length"). Image captioning is a
-            # short, deterministic task — chain-of-thought is pure waste.
-            "chat_template_kwargs": {"enable_thinking": False},
-            "max_tokens": 1024,
-        },
+    return await utility_completion(
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": image_url}},
+                ],
+            }
+        ],
+        max_tokens=1024,
+        client=client,
     )
-    response.raise_for_status()
-    data = response.json()
-    return data["choices"][0]["message"]["content"] or ""
 
 
 async def _enhance_prompt(message: cl.Message, prompt: str) -> tuple[str, dict]:
@@ -279,16 +269,17 @@ async def _enhance_prompt(message: cl.Message, prompt: str) -> tuple[str, dict]:
 
 
 async def _append_files_block(prompt: str, file_paths: list[str]) -> str:
-    """Append an ``[Uploaded files]`` block listing raw file paths."""
+    """Append an ``[Uploaded files]`` block listing raw file paths.
+
+    Routing guidance (which tool to use for which file type) lives in the
+    tool docstrings and system prompt, not here — the pipeline delivers
+    the file list; the agent decides how to read each file.
+    """
     if not file_paths:
         return prompt
     lines = [f"- {p}" for p in file_paths]
     logger.debug(f"Appended {len(file_paths)} file path(s) to prompt")
-    return (
-        f"{prompt}\n\n[Uploaded files] (raw paths — "
-        f"use `read_file` directly for text/code files, "
-        f"`ax documents convert` for office/HTML/PDF):\n" + "\n".join(lines)
-    )
+    return f"{prompt}\n\n[Uploaded files]:\n" + "\n".join(lines)
 
 
 async def _append_images_block(prompt: str, image_data: list[dict]) -> str:
@@ -348,12 +339,6 @@ async def _handle_message(
 
     prompt = await _append_files_block(prompt, file_paths)
     prompt = await _append_images_block(prompt, image_data)
-
-    # Inject thread context so Aria can pass --thread-id when spawning workers
-    thread_id = message.thread_id
-    if thread_id:
-        prompt = f"{prompt}\n\n[Thread ID: {thread_id}]"
-        logger.debug(f"Injected thread_id={thread_id} into prompt")
 
     return prompt, meta
 
@@ -584,6 +569,7 @@ async def _workflow_init(
     """
     prompt, pipeline_meta = await _handle_message(message)
     is_edit = bool(message.metadata and message.metadata.get(_PROCESSED_KEY))
+    cl.user_session.set("thread_id", message.thread_id)
     memory = cl.user_session.get("memory")
     if memory is None or memory.session_id != message.thread_id:
         await drain_memory(memory)

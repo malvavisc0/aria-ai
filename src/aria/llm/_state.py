@@ -34,6 +34,42 @@ def _env_float(key: str, default: float) -> float:
 SCRATCHPAD_PRESSURE_THRESHOLD = _env_float("ARIA_SCRATCHPAD_PRESSURE_THRESHOLD", 0.40)
 
 
+def _inject_thread_id(ev: ToolCall) -> None:
+    """Populate ``thread_id`` on worker-spawn calls from the Chainlit session.
+
+    The agent's only registered tool is ``ax`` (a unified dispatcher).  Worker
+    spawns are dispatched as ``ax(family="worker", command="spawn",
+    args={...})``, so ``thread_id`` must be injected into the nested ``args``
+    dict — not the top-level ``tool_kwargs``.
+
+    Rather than injecting ``[Thread ID: ...]`` into the user prompt and relying
+    on the LLM to scrape it, we set it deterministically here from
+    ``cl.user_session`` — a per-request contextvar that the message pipeline
+    populates before each workflow run.
+
+    No-op outside a Chainlit request context (tests, CLI) or when the tool call
+    already provides ``thread_id`` (the agent explicitly set it).
+    """
+    if ev.tool_name != "ax":
+        return
+    if ev.tool_kwargs.get("family") != "worker":
+        return
+    args = ev.tool_kwargs.get("args")
+    if not isinstance(args, dict):
+        args = {}
+        ev.tool_kwargs["args"] = args
+    if args.get("thread_id"):
+        return
+    try:
+        import chainlit as cl
+
+        tid = cl.user_session.get("thread_id")
+    except Exception:
+        return
+    if tid:
+        args["thread_id"] = tid
+
+
 class WorkflowState(TypedDict):
     """Shared state threaded through the agent workflow.
 
@@ -228,6 +264,12 @@ class StatefulAgentWorkflow(AgentWorkflow):
     async def call_tool(self, ctx: Any, ev: ToolCall) -> ToolCallResult:
         """Run the parent tool call step and synchronize custom state.
 
+        Before dispatching, injects the current ``thread_id`` from the
+        Chainlit session into ``worker`` tool calls that omit it.  This
+        replaces the old ``[Thread ID: ...]`` prompt injection — the
+        agent no longer needs to scrape a magic string from the user
+        message.
+
         Applies deterministic tool-output compression before the result
         is injected into the agent context, keeping the full output in
         ``ToolOutput.raw_output`` for logging/diagnostics.
@@ -240,6 +282,7 @@ class StatefulAgentWorkflow(AgentWorkflow):
         caught and wrapped in an error :class:`ToolCallResult` so the
         agent can surface it instead of crashing the workflow.
         """
+        _inject_thread_id(ev)
         try:
             result = await super().call_tool(ctx, ev)
         except Exception as exc:

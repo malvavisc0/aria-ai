@@ -8,11 +8,9 @@ any failure.
 
 from __future__ import annotations
 
-import httpx
 from loguru import logger
 
-from aria.config.api import Vllm as VllmConfig
-from aria.config.models import Chat as ChatConfig
+from aria.llm.utility import utility_completion
 from aria.web.hooks import get_data_layer_handler
 
 _TITLE_SYSTEM_PROMPT = (
@@ -34,31 +32,22 @@ async def generate_thread_title(
     response, etc.).  The caller is expected to keep the existing name
     when ``None`` is returned.
     """
-    async with httpx.AsyncClient(timeout=15.0) as client:
-        response = await client.post(
-            f"{ChatConfig.api_url}/chat/completions",
-            headers={"Authorization": f"Bearer {VllmConfig.api_key}"},
-            json={
-                "model": ChatConfig.model,
-                "messages": [
-                    {"role": "system", "content": _TITLE_SYSTEM_PROMPT},
-                    {
-                        "role": "user",
-                        "content": (
-                            f"User: {user_message}\n\nAssistant: {assistant_reply}"
-                        ),
-                    },
-                ],
-                "chat_template_kwargs": {"enable_thinking": False},
-                "max_tokens": 50,
-                "temperature": 0.1,
+    title = await utility_completion(
+        messages=[
+            {"role": "system", "content": _TITLE_SYSTEM_PROMPT},
+            {
+                "role": "user",
+                "content": f"User: {user_message}\n\nAssistant: {assistant_reply}",
             },
-        )
-        response.raise_for_status()
-        title = (response.json()["choices"][0]["message"]["content"] or "").strip()
-        if not title:
-            return None
-        return title[:_MAX_TITLE_CHARS]
+        ],
+        max_tokens=50,
+        temperature=0.1,
+        timeout=15.0,
+    )
+    title = title.strip()
+    if not title:
+        return None
+    return title[:_MAX_TITLE_CHARS]
 
 
 async def maybe_title_thread(

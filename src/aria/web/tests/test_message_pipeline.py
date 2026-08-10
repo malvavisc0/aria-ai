@@ -650,7 +650,7 @@ class TestHandleMessageVision:
         prompt, meta = await pipeline._handle_message(message)
 
         assert "[Attached images]:" not in prompt
-        assert prompt.endswith("[Thread ID: t1]")
+        assert "Thread ID" not in prompt
         assert meta == {}
 
     @pytest.mark.asyncio
@@ -1056,3 +1056,57 @@ class TestEditDetection:
             await pipeline._reset_memory_for_edit("ghost-thread")
 
         mock_vector_db.delete_collection.assert_called_once_with("ghost-thread")
+
+
+class TestRoutePipelineError:
+    """Tests for _route_pipeline_error — error-to-user-message routing."""
+
+    def test_context_overflow_message(self) -> None:
+        """Substring 'maximum context length' maps to overflow message."""
+        msg = pipeline._route_pipeline_error(
+            "This model's maximum context length is 32768 tokens."
+        )
+        assert "context window" in msg
+        assert "new conversation" in msg
+
+    def test_generic_message_for_unknown_error(self) -> None:
+        """Anything else maps to the generic retry message."""
+        msg = pipeline._route_pipeline_error("Connection refused")
+        assert msg == "An error occurred. Please try again."
+
+    def test_case_insensitive_match(self) -> None:
+        """Matching is case-insensitive."""
+        msg = pipeline._route_pipeline_error("MAXIMUM CONTEXT LENGTH exceeded")
+        assert "context window" in msg
+
+    def test_empty_string_returns_generic(self) -> None:
+        """Empty error string falls through to generic."""
+        assert (
+            pipeline._route_pipeline_error("") == "An error occurred. Please try again."
+        )
+
+
+class TestAppendFilesBlock:
+    """Tests for _append_files_block — [Uploaded files] prompt block."""
+
+    @pytest.mark.asyncio
+    async def test_no_block_when_no_files(self) -> None:
+        """Empty file list leaves the prompt unchanged."""
+        assert await pipeline._append_files_block("hello", []) == "hello"
+
+    @pytest.mark.asyncio
+    async def test_lists_file_paths(self) -> None:
+        """Block contains each file path on its own line."""
+        result = await pipeline._append_files_block(
+            "prompt", ["/tmp/a.txt", "/tmp/b.pdf"]
+        )
+        assert "[Uploaded files]:" in result
+        assert "/tmp/a.txt" in result
+        assert "/tmp/b.pdf" in result
+
+    @pytest.mark.asyncio
+    async def test_no_routing_guidance(self) -> None:
+        """Block does not contain agent-facing tool routing instructions."""
+        result = await pipeline._append_files_block("p", ["/tmp/a.txt"])
+        assert "read_file" not in result
+        assert "ax documents" not in result
