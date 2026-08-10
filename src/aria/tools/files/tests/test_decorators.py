@@ -112,5 +112,3 @@ class TestWithInputValidation:
         assert "File: test.txt" in result
         assert "Size: 100" in result
         assert "Offset: 0" in result
-
-

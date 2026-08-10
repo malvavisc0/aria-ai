@@ -602,5 +602,3 @@ print(z)
         """Test validation with None values (should be allowed)"""
         _validate_inputs(code=None, timeout=None, filename=None, file_path=None)
         # Should not raise
-
-
