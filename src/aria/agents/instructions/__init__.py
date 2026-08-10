@@ -4,6 +4,7 @@ This module provides shared utility functions used across multiple agents
 to reduce code duplication and ensure consistent behavior.
 """
 
+import re
 from pathlib import Path
 
 INSTRUCTIONS_DIR = Path(__file__).parent
@@ -15,6 +16,9 @@ ALL_BASE_SECTIONS: list[str] = [
     "tools",
     "failure",
 ]
+
+# Matches any remaining ``{{KEY}}`` placeholder after substitution.
+_PLACEHOLDER_RE = re.compile(r"\{\{[^}]+\}\}")
 
 
 def load_agent_instructions(
@@ -71,13 +75,23 @@ def load_agent_instructions(
                     with open(section_path, encoding="utf-8") as file:
                         parts.append(file.read())
 
-    if extras:
-        parts.append(f"## Runtime Context\n\n{extras}")
-
-    content = "\n\n".join(parts)
-
+    # Substitute {{KEY}} on identity + base sections only (before extras are
+    # appended) so runtime-context text is never subject to variable
+    # replacement.
+    resident = "\n\n".join(parts)
     if variables:
         for key, value in variables.items():
-            content = content.replace(f"{{{{{key}}}}}", value)
+            resident = resident.replace(f"{{{{{key}}}}}", value)
 
-    return content
+    # Fail loudly on unresolved placeholders rather than shipping a literal
+    # ``{{TYPO}}`` into a live prompt.
+    unresolved = _PLACEHOLDER_RE.findall(resident)
+    if unresolved:
+        raise ValueError(
+            f"Unresolved instruction placeholders: {unresolved}. "
+            f"Provide them via the 'variables' argument."
+        )
+
+    if extras:
+        return resident + f"\n\n## Runtime Context\n\n{extras}"
+    return resident

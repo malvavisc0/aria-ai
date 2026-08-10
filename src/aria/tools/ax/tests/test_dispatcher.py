@@ -1,11 +1,41 @@
 """Tests for the ax dispatcher tool."""
 
 import json
+import re
 from unittest.mock import patch
 
 import pytest
 
-from aria.tools.ax.dispatcher import _DISPATCH, _build_help, ax
+from aria.tools.ax.dispatcher import _DISPATCH, _build_help, _help_lookup, ax
+
+
+def _parse_commands(section: str) -> set[str]:
+    """Parse the command column (first backtick-wrapped cell) of a section."""
+    cmds: set[str] = set()
+    for line in section.splitlines():
+        m = re.match(r"\|\s*`([a-z_]+)`\s*\|", line)
+        if m:
+            cmds.add(m.group(1))
+    return cmds
+
+
+def _parse_required_args(section: str) -> dict[str, set[str]]:
+    """Parse each command row's Required column args.
+
+    Returns ``{command: {arg, ...}}``. ``-`` / empty cells yield an empty set.
+    Only backtick-wrapped tokens count as arg names (e.g. `` `code` (or
+    `file`) `` → ``{"code", "file"}``).
+    """
+    out: dict[str, set[str]] = {}
+    for line in section.splitlines():
+        m = re.match(r"\|\s*`([a-z_]+)`\s*\|\s*([^|]*)\|", line)
+        if not m:
+            continue
+        cmd, req = m.group(1), m.group(2)
+        args = set(re.findall(r"`([a-z_]+)`", req))
+        args.discard("—")
+        out[cmd] = args
+    return out
 
 
 class TestHelp:
@@ -30,6 +60,82 @@ class TestHelp:
         data = json.loads(result)
         # Falls through to all-families help
         assert "families" in data["data"]
+
+
+class TestHelpLookup:
+    """Test the on-demand help lookup command."""
+
+    def test_known_topic_returns_section(self):
+        result = _help_lookup("worker")
+        data = json.loads(result)
+        assert data["data"]["topic"] == "worker"
+        section = data["data"]["section"]
+        assert section.startswith("## worker")
+        assert "spawn" in section
+        assert "prompt" in section
+
+    @pytest.mark.asyncio
+    async def test_lookup_via_ax(self):
+        result = await ax(
+            reason="need worker spawn args",
+            family="help",
+            command="lookup",
+            args={"topic": "worker"},
+        )
+        data = json.loads(result)
+        assert data["data"]["topic"] == "worker"
+        assert data["data"]["section"].startswith("## worker")
+
+    def test_unknown_topic_returns_did_you_mean(self):
+        result = _help_lookup("notarealfamily")
+        data = json.loads(result)
+        assert data["data"]["error"]["code"] == "unknown_topic"
+        available = data["data"]["error"]["available_topics"]
+        assert "worker" in available
+        assert set(available) == set(_DISPATCH.keys())
+
+    @pytest.mark.asyncio
+    async def test_unknown_topic_via_ax(self):
+        result = await ax(
+            reason="test",
+            family="help",
+            command="lookup",
+            args={"topic": "notarealfamily"},
+        )
+        data = json.loads(result)
+        assert data["data"]["error"]["code"] == "unknown_topic"
+
+    def test_empty_topic_returns_index(self):
+        result = _help_lookup("")
+        data = json.loads(result)
+        assert "topics" in data["data"]
+        assert set(data["data"]["topics"]) == set(_DISPATCH.keys())
+
+    @pytest.mark.asyncio
+    async def test_empty_topic_via_ax(self):
+        result = await ax(
+            reason="list topics",
+            family="help",
+            command="lookup",
+            args={},
+        )
+        data = json.loads(result)
+        assert "topics" in data["data"]
+
+    @pytest.mark.asyncio
+    async def test_help_family_without_command_falls_back_to_index(self):
+        """Backward compat: family='help' with no command returns all-families."""
+        result = await ax(reason="test", family="help", command="anything")
+        data = json.loads(result)
+        assert "families" in data["data"]
+
+    @pytest.mark.asyncio
+    async def test_help_command_within_family_still_lists_commands(self):
+        """Regression guard: command='help' in a family returns command names."""
+        result = await ax(reason="test", family="finance", command="help")
+        data = json.loads(result)
+        assert data["data"]["family"] == "finance"
+        assert "stock" in data["data"]["commands"]
 
 
 class TestDispatchTable:
@@ -98,6 +204,72 @@ class TestDispatchTable:
 
     def test_check_commands(self):
         assert set(_DISPATCH["check"].keys()) == {"extras"}
+
+
+class TestReferenceParity:
+    """The ax command reference must stay in sync with the dispatch table."""
+
+    @staticmethod
+    def _reference_content() -> str:
+        from aria.tools.ax.dispatcher import _ax_reference_path
+
+        return _ax_reference_path().read_text(encoding="utf-8")
+
+    def test_reference_families_match_dispatch(self):
+        from aria.tools.ax.dispatcher import _reference_topics
+
+        topics = set(_reference_topics(self._reference_content()))
+        assert topics == set(_DISPATCH.keys())
+
+    def test_reference_commands_match_dispatch_per_family(self):
+        from aria.tools.ax.dispatcher import _extract_section
+
+        content = self._reference_content()
+        for family, cmds in _DISPATCH.items():
+            section = _extract_section(content, family)
+            assert section is not None, f"family {family!r} missing from reference"
+            ref_cmds = _parse_commands(section)
+            assert ref_cmds == set(cmds.keys()), (
+                f"{family}: reference {sorted(ref_cmds)} "
+                f"!= dispatch {sorted(cmds.keys())}"
+            )
+
+    def test_reference_required_args_survive_dispatch(self):
+        """Each documented Required arg must be accepted by its target.
+
+        Guards arg-name drift: if a target function's signature drops/renames
+        a Required arg the reference still documents, ``_strip_unknown_kwargs``
+        would silently drop it at call time — a behavior bug. Dry-running
+        the stripper per documented arg catches this without false-positiving
+        on action-dispatching families (process/worker/etc.) that share one
+        union signature across commands.
+        """
+        from aria.tools.ax.dispatcher import (
+            _DISPATCH,
+            _extract_section,
+            _load_target,
+            _strip_unknown_kwargs,
+        )
+
+        content = self._reference_content()
+        failures: list[str] = []
+        for family, cmds in _DISPATCH.items():
+            section = _extract_section(content, family)
+            assert section is not None
+            required = _parse_required_args(section)
+            for cmd, (loader, _inject) in cmds.items():
+                fn = _load_target(loader, "parity", family, cmd)
+                if isinstance(fn, str):
+                    failures.append(f"{family}.{cmd}: target load failed")
+                    continue
+                for arg in required.get(cmd, set()):
+                    kept = _strip_unknown_kwargs(fn, {arg: None}, family, cmd)
+                    if arg not in kept:
+                        failures.append(
+                            f"{family}.{cmd}: documented Required arg "
+                            f"'{arg}' is dropped by the target signature"
+                        )
+        assert not failures, "\n".join(failures)
 
 
 class TestDispatch:

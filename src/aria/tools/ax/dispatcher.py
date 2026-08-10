@@ -5,7 +5,9 @@ dispatch. Same structured JSON responses, zero subprocess overhead.
 """
 
 import inspect
+import re
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
@@ -36,7 +38,9 @@ class AxSchema(BaseModel):
     command: str = Field(
         description=(
             "Subcommand within the family. "
-            "Use command='help' within a family to list its commands."
+            "Use command='help' within a family to list its commands; "
+            "use family='help', command='lookup' with args={'topic': '<name>'} "
+            "to fetch a family's detailed reference."
         )
     )
     args: dict[str, Any] | None = Field(
@@ -287,6 +291,93 @@ def _build_help(family: str | None) -> str:
     return tool_response(tool="ax", reason="help", data={"families": data})
 
 
+def _ax_reference_path() -> Path:
+    """Return the path to the on-demand ax command reference."""
+    from aria.agents.instructions import INSTRUCTIONS_DIR
+
+    return INSTRUCTIONS_DIR / "reference" / "ax_commands.md"
+
+
+_SECTION_RE = re.compile(r"(?m)^## (.+)$")
+
+
+def _reference_topics(content: str) -> list[str]:
+    """Return the family names (``##`` headings) available for lookup.
+
+    Anchored to line-start so ``###``/``####`` subheadings or ``## `` text
+    inside fenced code blocks is not mistaken for a family section.
+    """
+    return [m.group(1).strip() for m in _SECTION_RE.finditer(content)]
+
+
+def _extract_section(content: str, topic: str) -> str | None:
+    """Return the ``## <topic>`` section from the reference, or None.
+
+    Slices from the heading's start offset to the next ``##`` heading (or
+    end of content), so subsections/code blocks inside a family section are
+    preserved.
+    """
+    matches = list(_SECTION_RE.finditer(content))
+    for i, m in enumerate(matches):
+        if m.group(1).strip() == topic:
+            end = matches[i + 1].start() if i + 1 < len(matches) else len(content)
+            return content[m.start() : end].rstrip()
+    return None
+
+
+def _help_lookup(topic: str) -> str:
+    """Fetch a detailed reference section by topic, or a short index.
+
+    - Empty topic → the list of lookup-able families.
+    - Known topic → the matching ``## <topic>`` section.
+    - Unknown topic → an error listing valid topics (did-you-mean).
+    """
+    topic = (topic or "").strip()
+    try:
+        content = _ax_reference_path().read_text(encoding="utf-8")
+    except OSError as exc:
+        logger.warning(f"ax help lookup: cannot read reference: {exc}")
+        return _ax_error(
+            "help lookup",
+            "reference_unavailable",
+            f"Could not read ax command reference: {exc}",
+            recoverable=True,
+        )
+
+    if not topic:
+        return tool_response(
+            tool="ax",
+            reason="help lookup",
+            data={
+                "topics": _reference_topics(content),
+                "hint": "Pass one as args.topic to fetch its detailed reference.",
+            },
+        )
+
+    section = _extract_section(content, topic)
+    if section is not None:
+        return tool_response(
+            tool="ax",
+            reason="help lookup",
+            data={"topic": topic, "section": section},
+        )
+
+    return _ax_error(
+        "help lookup",
+        "unknown_topic",
+        f"Unknown topic: '{topic}'",
+        available_topics=_reference_topics(content),
+        hint="Pass a family name, e.g. topic='worker'. Empty topic returns the index.",
+    )
+
+
+def _resolve_help(command: str, call_args: dict[str, Any]) -> str:
+    """Handle the ``help`` family: lookup fetches a section, else return the index."""
+    if command == "lookup":
+        return _help_lookup(str(call_args.get("topic") or ""))
+    return _build_help(None)
+
+
 # ---------------------------------------------------------------------------
 # Main dispatcher
 # ---------------------------------------------------------------------------
@@ -463,7 +554,7 @@ async def ax(
     if command == "help":
         return _build_help(family)
     if family == "help":
-        return _build_help(None)
+        return _resolve_help(command, call_args)
 
     resolved = _resolve_entry(reason, family, command)
     if isinstance(resolved, str):

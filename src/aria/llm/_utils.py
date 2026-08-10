@@ -8,6 +8,11 @@ from pathlib import Path
 
 from loguru import logger
 
+from aria.config.api import Lightpanda
+from aria.config.api import Vllm as VllmConfig
+from aria.config.folders import Workspace
+from aria.config.models import Chat as ChatConfig
+
 
 def generate_agent_id(agent_name: str) -> str:
     """Generate a unique, human-readable identifier for an agent.
@@ -72,26 +77,18 @@ def get_instructions_extras(agent_name: str, add_agent_id: bool = True) -> str:
     shell_name = Path(shell_path).name if shell_path != "unknown" else "unknown"
 
     # Include generation token budget so the model is aware of its limit.
-    from aria.config.api import Vllm as VllmConfig
-
     max_tok = VllmConfig.max_tokens
 
     # Include iteration budget so the agent can self-regulate tool usage.
-    from aria.config.models import Chat as ChatConfig
-
     max_iter = ChatConfig.max_iteration
 
     # Vision support — so the agent knows if it can analyze images.
     vision = VllmConfig.vision_enabled
 
     # Browser availability — so the agent knows if browser tools work.
-    from aria.config.api import Lightpanda
-
     browser = Lightpanda.is_available()
 
     # Workspace path so agents know their default operating directory
-    from aria.config.folders import Workspace
-
     workspace_path = str(Workspace.path)
 
     lines: list[str] = [

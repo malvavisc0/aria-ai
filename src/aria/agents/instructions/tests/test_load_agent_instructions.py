@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import pytest
+
 from aria.agents.instructions import (
     ALL_BASE_SECTIONS,
     load_agent_instructions,
@@ -73,15 +75,61 @@ class TestLoadAgentInstructions:
         assert "Prompt Enhancer" in result
         assert "AI Agent Capabilities" in result
 
-    def test_variables_substituted(self):
-        """Template variables should be replaced when present."""
+    def test_variables_substituted_in_resident_only(self):
+        """Placeholders in resident content are replaced; extras are not templated.
+
+        Substitution is scoped to identity + base sections only (per the
+        hardening pass): runtime-context ``extras`` is never subject to
+        variable replacement, so a placeholder there is left verbatim.
+        """
         result = load_agent_instructions(
             "aria",
             extras="Value: {{TEST_KEY}}",
             variables={"TEST_KEY": "replaced_value"},
         )
-        assert "replaced_value" in result
-        assert "{{TEST_KEY}}" not in result
+        # extras placeholder is runtime context — left untouched
+        assert "{{TEST_KEY}}" in result
+        assert "replaced_value" not in result
+
+    def test_unresolved_placeholder_raises(self, tmp_path, monkeypatch):
+        """An unresolved resident placeholder must raise, not ship a literal."""
+        import aria.agents.instructions as mod
+
+        monkeypatch.setattr(mod, "INSTRUCTIONS_DIR", tmp_path)
+        (tmp_path / "unresolved_agent.md").write_text(
+            "Hello {{MISSING_KEY}} world", encoding="utf-8"
+        )
+        with pytest.raises(ValueError, match="Unresolved instruction placeholders"):
+            load_agent_instructions("unresolved_agent", base_sections=[])
+
+    def test_resident_placeholder_substituted(self, tmp_path, monkeypatch):
+        """A resident placeholder with a matching variable is replaced."""
+        import aria.agents.instructions as mod
+
+        monkeypatch.setattr(mod, "INSTRUCTIONS_DIR", tmp_path)
+        (tmp_path / "templated_agent.md").write_text(
+            "Hello {{NAME}} world", encoding="utf-8"
+        )
+        result = load_agent_instructions(
+            "templated_agent",
+            variables={"NAME": "Aria"},
+            base_sections=[],
+        )
+        assert "Hello Aria world" in result
+        assert "{{NAME}}" not in result
+
+    def test_unused_variable_key_is_ok(self, tmp_path, monkeypatch):
+        """An unused variable key must not trigger the unresolved check."""
+        import aria.agents.instructions as mod
+
+        monkeypatch.setattr(mod, "INSTRUCTIONS_DIR", tmp_path)
+        (tmp_path / "ok_agent.md").write_text("No placeholders here", encoding="utf-8")
+        result = load_agent_instructions(
+            "ok_agent",
+            variables={"UNUSED": "value"},
+            base_sections=[],
+        )
+        assert "No placeholders here" in result
 
     def test_base_sections_selective_loading(self):
         """Only requested base sections should be included."""
@@ -108,5 +156,7 @@ class TestLoadAgentInstructions:
     def test_base_sections_empty_list(self):
         """Empty list should load no base sections."""
         result = load_agent_instructions("aria", base_sections=[])
-        assert "Core Rules" not in result
+        # The base ``## Core Rules`` heading must be absent. (Aria's own
+        # prose mentions "Core Rules", so assert the heading, not the substring.)
+        assert "## Core Rules" not in result
         assert "Delegation" in result  # agent-specific still loads
