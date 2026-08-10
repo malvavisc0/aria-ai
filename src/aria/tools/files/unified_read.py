@@ -17,7 +17,7 @@ from typing import Any
 from loguru import logger
 from pydantic import BaseModel, Field
 
-from aria.tools import Reason, safe_json, tool_response, utc_timestamp
+from aria.tools import Reason, tool_response
 from aria.tools.decorators import tool_function
 from aria.tools.files._internals import (
     _secure_resolve_dir,
@@ -316,22 +316,14 @@ def _ok(tool: str, reason: str, result: dict[str, Any], **metadata) -> str:
 
 def _err(tool: str, reason: str, message: str, **metadata) -> str:
     """Build a standard error response from a message string."""
-    error_block: dict[str, Any] = {
-        "code": "FILE_ERROR",
-        "message": message,
-        "type": "FileError",
-        "recoverable": True,
-    }
-    response: dict[str, Any] = {
-        "status": "error",
-        "tool": tool,
-        "reason": reason,
-        "timestamp": utc_timestamp(),
-        "error": error_block,
-    }
-    if metadata:
-        response["context"] = metadata
-    return safe_json(response)
+    from aria.tools import tool_error_response
+
+    return tool_error_response(
+        tool=tool,
+        reason=reason,
+        exc=RuntimeError(message),
+        **metadata,
+    )
 
 
 @tool_function(

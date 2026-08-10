@@ -176,18 +176,20 @@ def reasoning(
         JSON string with action result and session status.
     """
     if action is None:
-        return _err(
-            tool="reasoning",
-            reason=reason,
-            agent_id=agent_id,
-            session_id=None,
-            code="MISSING_ACTION",
-            message="The 'action' parameter is required.",
-            how_to_fix=(
-                "Provide the 'action' parameter: "
-                "start, step, reflect, evaluate, summary, end"
-            ),
-            recoverable=True,
+        return safe_json(
+            _err(
+                tool="reasoning",
+                reason=reason,
+                agent_id=agent_id,
+                session_id=None,
+                code="MISSING_ACTION",
+                message="The 'action' parameter is required.",
+                how_to_fix=(
+                    "Provide the 'action' parameter: "
+                    "start, step, reflect, evaluate, summary, end"
+                ),
+                recoverable=True,
+            )
         )
 
     action = action.lower().strip()
