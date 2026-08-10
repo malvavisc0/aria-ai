@@ -674,21 +674,14 @@ class TestYouTubeTranscription:
     """Test YouTube video transcription."""
 
     @patch("aria.tools.search.youtube._save_content_to_file")
-    @patch("aria.tools.search.youtube.TextFormatter")
     @patch("aria.tools.search.youtube.YouTubeTranscriptApi")
-    def test_youtube_transcription_success(
-        self, mock_api_class, mock_formatter_class, mock_save
-    ):
+    def test_youtube_transcription_success(self, mock_api_class, mock_save):
         """Test successful YouTube transcription."""
         mock_api = Mock()
-        mock_snippets = [Mock(duration=1.0) for _ in range(5)]
+        mock_snippets = [Mock(duration=1.0, text=f"Snippet {i}.") for i in range(5)]
         mock_transcript = Mock(snippets=mock_snippets)
         mock_api.fetch.return_value = mock_transcript
         mock_api_class.return_value = mock_api
-
-        mock_formatter = Mock()
-        mock_formatter.format_transcript.return_value = "Mocked transcript text"
-        mock_formatter_class.return_value = mock_formatter
 
         mock_save.return_value = ("/tmp/mock_file.txt", {"file_size": 20})
 
@@ -707,9 +700,12 @@ class TestYouTubeTranscription:
         mock_api.fetch.assert_called_once_with(
             "dQw4w9WgXcQ", languages=["en"]
         )  # Should match video ID with default language
-        mock_formatter_class.assert_called_once()
-        mock_formatter.format_transcript.assert_called_once_with(mock_transcript)
         mock_save.assert_called_once()
+        # The persisted text is paragraphed prose built from snippets, not
+        # the library's one-line-per-fragment TextFormatter output.
+        saved_text = mock_save.call_args.args[0]
+        assert "Snippet 0. Snippet 1. Snippet 2." in saved_text
+        assert "\n\n" in saved_text
 
     def test_youtube_transcription_invalid_url(self):
         """Test YouTube transcription with invalid URL."""

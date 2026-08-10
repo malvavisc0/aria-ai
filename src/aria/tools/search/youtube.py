@@ -11,7 +11,6 @@ from youtube_transcript_api import (
     TranscriptsDisabled,
     YouTubeTranscriptApi,
 )
-from youtube_transcript_api.formatters import TextFormatter
 
 from aria.tools import (
     Reason,
@@ -25,6 +24,28 @@ from aria.tools.search._download_internals import (
     _validate_url,
 )
 from aria.tools.search.constants import DOWNLOADS_DIR
+
+# Split the joined transcript into paragraphs roughly every N sentences so
+# the output is readable prose, not 500+ caption-fragment lines.
+_SENTENCE_END_RE = re.compile(r"(?<=[.!?])\s+")
+_PARAGRAPH_SENTENCES = 3
+
+
+def _format_transcript_text(snippets: list) -> str:
+    """Join caption snippets into readable paragraphed prose.
+
+    YouTube splits captions into ~3-second fragments, so the library's
+    ``TextFormatter`` (one newline per snippet) yields hundreds of
+    mid-sentence line breaks. Instead, join snippet text with spaces,
+    collapse whitespace, and break into paragraphs at sentence boundaries.
+    """
+    joined = " ".join(s.text for s in snippets)
+    joined = re.sub(r"\s+", " ", joined).strip()
+    sentences = _SENTENCE_END_RE.split(joined)
+    paragraphs: list[str] = []
+    for i in range(0, len(sentences), _PARAGRAPH_SENTENCES):
+        paragraphs.append(" ".join(sentences[i : i + _PARAGRAPH_SENTENCES]).strip())
+    return "\n\n".join(paragraphs)
 
 
 def _extract_video_id(url: str) -> str | None:
@@ -62,8 +83,7 @@ def _get_youtube_transcript(
     api = YouTubeTranscriptApi()
     transcript = api.fetch(video_id, languages=languages or ["en"])
 
-    formatter = TextFormatter()
-    transcript_text = formatter.format_transcript(transcript)
+    transcript_text = _format_transcript_text(transcript.snippets)
 
     return (
         transcript_text,
