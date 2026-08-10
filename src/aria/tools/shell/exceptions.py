@@ -28,11 +28,3 @@ class WorkingDirectoryError(ShellExecutionError):
     code = "INVALID_WORKING_DIR"
     recoverable = True
     how_to_fix = "Verify the directory exists and is accessible."
-
-
-class CommandTimeoutError(ShellExecutionError):
-    """Raised when command execution times out."""
-
-    code = "TIMEOUT"
-    recoverable = True
-    how_to_fix = "Increase timeout or optimize the command."

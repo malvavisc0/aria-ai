@@ -17,12 +17,6 @@ def _make_remote_config():
     return mock_config
 
 
-def _make_local_config():
-    """Return a mock VllmConfig with remote=False."""
-    mock_config = type("VllmConfig", (), {"remote": False})()
-    return mock_config
-
-
 class TestCheckBinariesRemoteMode:
     """_check_binaries should skip vLLM install check in remote mode."""
 

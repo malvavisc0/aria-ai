@@ -7,7 +7,8 @@ processing. For shared constants, imports from aria.tools.constants.
 
 from aria.tools.constants import DOWNLOADS_DIR, MAX_FILE_SIZE
 from aria.tools.constants import NETWORK_TIMEOUT as TIMEOUT
-from aria.tools.retry import DEFAULT_MAX_RETRIES as MAX_RETRIES
+
+MAX_RETRIES = 3
 
 # Re-export for backward compatibility
 __all__ = [
@@ -76,6 +77,3 @@ USER_AGENTS = [
         "Chrome/120.0.0.0 Safari/537.36"
     ),
 ]
-
-# Maximum allowed results to prevent resource exhaustion
-MAX_RESULTS_LIMIT = 50

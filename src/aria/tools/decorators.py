@@ -36,13 +36,6 @@ def _extract_args_summary(kwargs: dict) -> str:
     return _truncate(filtered, max_len=400)
 
 
-def _log_result_summary(result: Any) -> str:
-    """Build a truncated summary of the tool result for logging."""
-    if result is None:
-        return "None"
-    return _truncate(result, max_len=200)
-
-
 def log_tool_call(func: Callable) -> Callable:
     """Decorator that logs tool call entry and exit with structured data.
 

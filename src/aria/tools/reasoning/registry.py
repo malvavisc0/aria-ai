@@ -59,14 +59,6 @@ def get_session(session_id: str, agent_id: str) -> ReasoningSession:
     return session
 
 
-def remove_session(agent_id: str, session_id: str) -> None:
-    """No-op for backward compatibility.
-
-    Session state is DB-backed; no in-memory registry is maintained.
-    """
-    _ = (agent_id, session_id)
-
-
 def clear_all() -> None:
     """Reset in-memory state. Kept for test compatibility."""
     # DB-backed registry has no in-memory state to clear.

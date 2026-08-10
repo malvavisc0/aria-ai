@@ -25,14 +25,6 @@ class URLDownloadError(Exception):
     """
 
 
-class UnknownOutputError(Exception):
-    """Custom exception when the output is not supported.
-
-    Raised when an unsupported output format is specified for content
-    conversion.
-    """
-
-
 class ContentParsingError(Exception):
     """Custom exception for content parsing errors.
 

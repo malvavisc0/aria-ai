@@ -100,28 +100,6 @@ def download_lightpanda(bin_dir: Path, version: str | None = None) -> Path:
     return binary_path
 
 
-def get_lightpanda_binary(bin_dir: Path | None = None) -> Path | None:
-    """Find the Lightpanda binary in the given directory.
-
-    Args:
-        bin_dir: Directory to search. If None, uses default config.
-
-    Returns:
-        Path to the binary if found, None otherwise.
-    """
-    if bin_dir is None:
-        from aria.config.api import Lightpanda
-
-        bin_dir = Lightpanda.get_bin_path()
-
-    bin_dir = Path(bin_dir)
-    if not bin_dir.exists():
-        return None
-
-    binary = bin_dir / "lightpanda"
-    return binary if binary.exists() else None
-
-
 def _get_platform_asset_name() -> str | None:
     """Get the platform-specific asset name for Lightpanda.
 
