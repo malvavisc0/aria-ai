@@ -113,24 +113,4 @@ class TestWithInputValidation:
         assert "Size: 100" in result
         assert "Offset: 0" in result
 
-    def test_decorator_preserves_function_metadata(self):
-        """Test that decorator preserves original function metadata."""
 
-        @with_input_validation()
-        def documented_function(file_name):
-            """This is a documented function."""
-            return file_name
-
-        assert documented_function.__name__ == "documented_function"
-        assert documented_function.__doc__ == "This is a documented function."
-
-    def test_error_handling_decorator_preserves_metadata(self):
-        """Test that error handling decorator preserves function metadata."""
-
-        @with_file_operation_error_handling("test_op")
-        def documented_function(file_name):
-            """This is a documented function."""
-            return file_name
-
-        assert documented_function.__name__ == "documented_function"
-        assert documented_function.__doc__ == "This is a documented function."

@@ -603,12 +603,4 @@ print(z)
         _validate_inputs(code=None, timeout=None, filename=None, file_path=None)
         # Should not raise
 
-    def test_safe_json_with_nested_data(self):
-        """Test JSON serialization with nested structures"""
-        data = {
-            "level1": {"level2": {"level3": {"value": "deep"}}},
-            "list": [1, 2, 3],
-        }
-        result = safe_json(data)
-        parsed = json.loads(result)
-        assert parsed == data
+

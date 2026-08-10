@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 import pytest
 
-from aria.tools import safe_json, utc_timestamp
 from aria.tools.files._internals import (
     _create_backup,
     _error_response,
@@ -34,16 +33,6 @@ from aria.tools.files.write_operations import (
     _atomic_write,
     _modify_lines_streaming,
 )
-
-
-class TestTimestamp:
-    """Test suite for _timestamp function."""
-
-    def test_timestamp_format(self):
-        """Test that timestamp returns ISO format string."""
-        ts = utc_timestamp()
-        assert isinstance(ts, str)
-        assert "T" in ts  # ISO format contains T separator
 
 
 class TestErrorResponse:
@@ -167,37 +156,6 @@ class TestCountLinesEfficiently:
         """Test error handling when file cannot be read."""
         with pytest.raises(FileOperationError, match="Failed to read"):
             _count_lines_efficiently(Path("/nonexistent/file.txt"))
-
-
-class TestSafeJson:
-    """Test suite for _safe_json function."""
-
-    def test_safe_json_success(self):
-        """Test successful JSON serialization."""
-        data = {"key": "value", "number": 42}
-        result = safe_json(data)
-        assert json.loads(result) == data
-
-    def test_safe_json_with_unicode(self):
-        """Test JSON serialization with unicode characters."""
-        data = {"text": "Hello 世界"}
-        result = safe_json(data)
-        parsed = json.loads(result)
-        assert parsed["text"] == "Hello 世界"
-
-    def test_safe_json_serialization_error(self):
-        """Test error handling for non-serializable objects."""
-
-        class NonSerializable:
-            pass
-
-        data = {"obj": NonSerializable()}
-        result = safe_json(data)
-        parsed = json.loads(result)
-        # safe_json uses a default handler that converts non-serializable
-        # objects to strings rather than raising an error
-        assert "obj" in parsed
-        assert "NonSerializable" in parsed["obj"]
 
 
 class TestSecureResolvePath:

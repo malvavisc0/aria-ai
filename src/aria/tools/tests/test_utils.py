@@ -1,11 +1,14 @@
 """Tests for shared utility functions in utils.py."""
 
 import json
+from datetime import datetime
 
 from aria.tools import (
+    safe_json,
     tool_error_response,
     tool_response,
     tool_success_response,
+    utc_timestamp,
 )
 
 
@@ -122,3 +125,33 @@ class TestToolResponse:
 
         assert parsed["status"] == "success"
         assert parsed["data"] == {}
+
+
+class TestUtcTimestamp:
+    """Tests for utc_timestamp()."""
+
+    def test_iso_format(self) -> None:
+        ts = utc_timestamp()
+        assert isinstance(ts, str)
+        assert "T" in ts
+        datetime.fromisoformat(ts)
+
+
+class TestSafeJson:
+    """Tests for safe_json()."""
+
+    def test_round_trip(self) -> None:
+        data = {"key": "value", "number": 42}
+        assert json.loads(safe_json(data)) == data
+
+    def test_unicode(self) -> None:
+        data = {"text": "Hello 世界"}
+        parsed = json.loads(safe_json(data))
+        assert parsed["text"] == "Hello 世界"
+
+    def test_non_serializable_falls_back_to_str(self) -> None:
+        class NonSerializable:
+            pass
+
+        parsed = json.loads(safe_json({"obj": NonSerializable()}))
+        assert "NonSerializable" in parsed["obj"]
