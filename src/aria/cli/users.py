@@ -202,7 +202,7 @@ def reset_password(
         user.password = hash_password(password)
 
         metadata = json.loads(user.metadata_)
-        metadata["password_updated_at"] = datetime.now().isoformat()
+        metadata["password_updated_at"] = datetime.now(UTC).isoformat()
         user.metadata_ = json.dumps(metadata)
 
         console.print(
@@ -271,7 +271,7 @@ def update_user(
                 error_console.print(f"[red]✗[/red] Invalid JSON: {e}")
                 raise typer.Exit(1)
 
-        metadata["updated_at"] = datetime.now().isoformat()
+        metadata["updated_at"] = datetime.now(UTC).isoformat()
         user.metadata_ = json.dumps(metadata)
 
         console.print(f"[green]✓[/green] User '[cyan]{identifier}[/cyan]' updated")

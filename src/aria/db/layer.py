@@ -290,17 +290,18 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
                 },
             )
 
-        # Always update metadata (idempotent operation)
+        # Update metadata only for existing users. display_name is set at
+        # creation (INSERT) and intentionally not overwritten here: updating it
+        # on every login would clobber renames made via the GUI/CLI
+        # (see gui/dialogs/edit_user.py, cli/users.py).
         update_query = (
-            'UPDATE users SET "metadata" = :metadata, '
-            '"display_name" = :display_name '
+            'UPDATE users SET "metadata" = :metadata '
             'WHERE "identifier" = :identifier'
         )
         await self.execute_sql(
             query=update_query,
             parameters={
                 "metadata": metadata_str,
-                "display_name": display_name,
                 "identifier": user.identifier,
             },
         )
@@ -337,17 +338,36 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
         )
 
     async def _resolve_user_for_element(self, thread_id: str) -> str:
-        """Resolve user_id from Chainlit session; fall back to DB lookup."""
-        try:
-            from chainlit.context import context
+        """Resolve user_id from Chainlit session; fall back to DB lookup.
 
-            if context.session.user:
-                persisted = await self.get_user(context.session.user.identifier)
-                if persisted:
-                    return persisted.id
-        except Exception:
-            pass
-        return await self._get_user_id_by_thread(thread_id) or "unknown"
+        Only ``ChainlitContextException`` (no active session) is caught.
+        Database errors are swallowed by the base ``execute_sql`` (it returns
+        ``None``), so the ``"unknown"`` fallback still applies on DB failure.
+        Narrowing the except lets genuine non-DB exceptions (e.g.
+        ``AssertionError`` from a malformed user row in ``get_user``) propagate
+        instead of being silently swallowed.
+        """
+        from chainlit.context import ChainlitContextException, context
+
+        try:
+            session_user = context.session.user
+        except ChainlitContextException:
+            session_user = None
+
+        if session_user is not None:
+            persisted = await self.get_user(session_user.identifier)
+            if persisted:
+                return persisted.id
+
+        user_id = await self._get_user_id_by_thread(thread_id)
+        if user_id:
+            return user_id
+
+        logger.warning(
+            f"Could not resolve user for element in thread {thread_id}; "
+            "storing under 'unknown'"
+        )
+        return "unknown"
 
     async def _read_element_content(self, element) -> Optional[Union[bytes, str]]:
         from chainlit.logger import logger as chainlit_logger
@@ -446,30 +466,34 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
         return await super().create_step(cast(StepDict, patched))
 
     async def _resolve_user_id_from_context(self) -> str | None:
-        """Try to resolve the user_id from the active Chainlit session."""
-        try:
-            from chainlit.context import context
+        """Try to resolve the user_id from the active Chainlit session.
 
-            if not hasattr(context, "session") or not hasattr(context.session, "user"):
-                return None
+        Only ``ChainlitContextException`` (no active session) is swallowed.
+        Database errors are swallowed by the base ``execute_sql`` (it returns
+        ``None``), so a DB failure still yields ``None`` rather than raising.
+        Narrowing the except lets genuine non-DB exceptions propagate instead
+        of being silently swallowed.
+        """
+        from chainlit.context import ChainlitContextException, context
+
+        try:
             current_user = context.session.user
-            if not current_user or not hasattr(current_user, "identifier"):
-                return None
-            result = await self.execute_sql(
-                query="SELECT id FROM users WHERE identifier = :identifier LIMIT 1",
-                parameters={"identifier": current_user.identifier},
-            )
-        except Exception as e:
-            logger.debug(
-                f"Could not get user_id from session context: {e}. "
-                "This is expected when called from API endpoints."
-            )
+        except ChainlitContextException:
             return None
+
+        identifier = getattr(current_user, "identifier", None)
+        if not current_user or not identifier:
+            return None
+
+        result = await self.execute_sql(
+            query="SELECT id FROM users WHERE identifier = :identifier LIMIT 1",
+            parameters={"identifier": identifier},
+        )
         if isinstance(result, list) and len(result) > 0:
             user_id = result[0].get("id")
             logger.debug(
                 f"Retrieved user_id '{user_id}' from session context "
-                f"for user '{current_user.identifier}'"
+                f"for user '{identifier}'"
             )
             return user_id
         return None
