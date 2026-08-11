@@ -24,6 +24,7 @@ from aria.tools import mcp_bridge
 from aria.tools.mcp_bridge import (
     _content_to_text,
     call_tool,
+    connected_server_names,
     list_servers,
     list_tools,
     resolve_session,
@@ -248,3 +249,45 @@ class TestResolveSession:
         session = object()
         _fake_user_session.get.return_value = {"github": session}
         assert resolve_session("github") is session
+
+    def test_no_chainlit_context_returns_none(self, monkeypatch):
+        """Outside a chainlit session (workers/CLI/tests) the lazy ``context``
+        proxy raises ``ChainlitContextException`` — degrade to None, not an
+        unhandled exception. This is the documented worker/CLI path (§11).
+        """
+        import chainlit as cl
+        from chainlit.context import ChainlitContextException
+
+        fake_session = MagicMock()
+        fake_session.get.side_effect = ChainlitContextException
+        monkeypatch.setattr(cl, "user_session", fake_session)
+        assert resolve_session("any") is None
+
+
+class TestConnectedServerNames:
+    """``connected_server_names`` — cheap sync index for the per-turn nudge."""
+
+    def test_no_sessions_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(mcp_bridge, "_connected_sessions", lambda: None)
+        assert connected_server_names() == []
+
+    def test_empty_sessions_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(mcp_bridge, "_connected_sessions", lambda: {})
+        assert connected_server_names() == []
+
+    def test_returns_server_keys(self, monkeypatch):
+        monkeypatch.setattr(
+            mcp_bridge,
+            "_connected_sessions",
+            lambda: {"github": object(), "db": object()},
+        )
+        assert sorted(connected_server_names()) == ["db", "github"]
+
+    def test_no_chainlit_context_returns_empty(self, monkeypatch):
+        import chainlit as cl
+        from chainlit.context import ChainlitContextException
+
+        fake_session = MagicMock()
+        fake_session.get.side_effect = ChainlitContextException
+        monkeypatch.setattr(cl, "user_session", fake_session)
+        assert connected_server_names() == []

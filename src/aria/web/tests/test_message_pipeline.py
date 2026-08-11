@@ -683,6 +683,43 @@ class TestHandleMessageVision:
         assert "<description unavailable>" in prompt
 
 
+class TestAppendMcpBlock:
+    """Tests for the per-turn connected-MCP-servers prompt injection."""
+
+    def test_no_servers_leaves_prompt_unchanged(self, monkeypatch) -> None:
+        from aria.tools import mcp_bridge
+
+        monkeypatch.setattr(mcp_bridge, "connected_server_names", lambda: [])
+        assert pipeline._append_mcp_block("hello") == "hello"
+
+    def test_appends_server_names(self, monkeypatch) -> None:
+        from aria.tools import mcp_bridge
+
+        monkeypatch.setattr(
+            mcp_bridge, "connected_server_names", lambda: ["github", "db"]
+        )
+        out = pipeline._append_mcp_block("hello")
+        assert "[Connected MCP servers]: github, db" in out
+        assert 'ax(family="mcp", command="list")' in out
+
+    @pytest.mark.asyncio
+    async def test_handle_message_appends_mcp_block(self, monkeypatch) -> None:
+        from aria.tools import mcp_bridge
+
+        monkeypatch.setattr(pipeline, "extract_image_data", lambda msg: [])
+        monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
+        monkeypatch.setattr(mcp_bridge, "connected_server_names", lambda: ["github"])
+        message = _mock_message(
+            content="do something",
+            command=None,
+            thread_id="t1",
+            elements=[],
+        )
+        prompt, meta = await pipeline._handle_message(message)
+        assert "[Connected MCP servers]: github" in prompt
+        assert meta == {}
+
+
 class TestEditDetection:
     """Tests for metadata-based edit detection."""
 

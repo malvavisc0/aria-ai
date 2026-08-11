@@ -26,8 +26,12 @@ def resolve_session(server: str) -> ClientSession | None:
     module-level global) -- see AGENTS.md "No mutable module-level globals".
     """
     import chainlit as cl
+    from chainlit.context import ChainlitContextException
 
-    sessions: dict[str, ClientSession] | None = cl.user_session.get("_mcp_sessions")
+    try:
+        sessions: dict[str, ClientSession] | None = cl.user_session.get("_mcp_sessions")
+    except ChainlitContextException:
+        return None
     if sessions is None:
         return None
     return sessions.get(server)
@@ -46,10 +50,20 @@ def _content_to_text(result: CallToolResult) -> str:
 
 
 def _connected_sessions() -> dict[str, ClientSession] | None:
-    """Return the per-session map of connected MCP servers, or None."""
-    import chainlit as cl
+    """Return the per-session map of connected MCP servers, or None.
 
-    return cl.user_session.get("_mcp_sessions")
+    Returns None outside a chainlit session (workers, CLI, tests) —
+    ``cl.user_session`` raises ``ChainlitContextException`` there because
+    the lazy ``context`` proxy can't resolve a session. That's the
+    documented degradation path for non-web contexts, not an error.
+    """
+    import chainlit as cl
+    from chainlit.context import ChainlitContextException
+
+    try:
+        return cl.user_session.get("_mcp_sessions")
+    except ChainlitContextException:
+        return None
 
 
 def connected_server_names() -> list[str]:
