@@ -73,14 +73,11 @@ def _authenticated_request(url: str, timeout: float = 5):
 def _print_startup_banner(host: str, port: int, background: bool = False) -> None:
     mode = "Background" if background else "Foreground"
     action = "Starting Aria Web UI"
-    from aria.helpers.network import resolve_display_host
-
-    display_host = resolve_display_host(host)
     console.print()
     console.print(
         Panel(
             f"[bold cyan]{action}[/bold cyan]\n"
-            f"[white]{display_host}:{port}[/white]"
+            f"[white]{host}:{port}[/white]"
             f" • [dim]{mode} mode[/dim]",
             border_style="cyan",
             expand=False,

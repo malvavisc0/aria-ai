@@ -15,8 +15,6 @@ from shutil import copy2, copyfile
 
 from rich.console import Console
 
-from aria.helpers.network import get_network_ip
-
 console = Console()
 
 
@@ -121,19 +119,11 @@ def setup_env_file() -> bool:
         "CHAINLIT_AUTH_SECRET =", f"CHAINLIT_AUTH_SECRET = {secret}"
     )
 
-    # Detect and set network IP for SERVER_HOST
-    network_ip = get_network_ip()
-    content = content.replace(
-        "SERVER_HOST = 0.0.0.0",
-        f"SERVER_HOST = {network_ip}",
-    )
-
     env_file.write_text(content)
     env_file.chmod(0o600)
 
     console.print("   [green]✓[/green] Created .env configuration")
     console.print("   [green]✓[/green] Generated CHAINLIT_AUTH_SECRET")
-    console.print(f"   [green]✓[/green] Detected network IP: {network_ip}")
     return True
 
 

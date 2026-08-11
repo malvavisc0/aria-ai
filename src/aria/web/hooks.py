@@ -13,6 +13,7 @@ from __future__ import annotations
 import audioop  # stdlib on 3.12; audioop-lts covers 3.13+
 import io
 import json
+import re
 import wave
 from typing import Any
 
@@ -222,8 +223,40 @@ async def on_mcp_disconnect_handler(name: str, client_session: Any) -> None:
 
 MIN_AUDIO_DURATION_S = 0.5
 
+# Markdown → plain-text reductions for TTS narration. Kokoro reads every
+# character literally, so ``**bold**`` would be spoken as "asterisk asterisk
+# bold asterisk asterisk". Order matters: strip fenced code before inline,
+# images before links, lists before emphasis.
+_MD_REDUCTIONS: list[tuple[re.Pattern[str], str]] = [
+    (re.compile(r"```.*?```", re.DOTALL), " "),  # fenced code blocks
+    (re.compile(r"`([^`]*)`"), r"\1"),  # inline code
+    (re.compile(r"!\[([^\]]*)\]\([^)]*\)"), r"\1"),  # images -> alt text
+    (re.compile(r"\[([^\]]*)\]\([^)]*\)"), r"\1"),  # links -> text
+    (re.compile(r"^#{1,6}\s+", re.MULTILINE), ""),  # headers
+    (re.compile(r"^\s{0,3}>\s?", re.MULTILINE), ""),  # blockquotes
+    (re.compile(r"^\s{0,3}[-*+]\s+", re.MULTILINE), ""),  # bullet lists
+    (re.compile(r"^\s{0,3}\d+\.\s+", re.MULTILINE), ""),  # numbered lists
+    (re.compile(r"^\s{0,3}[-*_]{3,}\s*$", re.MULTILINE), ""),  # horizontal rules
+    (re.compile(r"\*{1,3}([^*]+)\*{1,3}"), r"\1"),  # *emphasis*
+    (re.compile(r"_{1,3}([^_]+)_{1,3}"), r"\1"),  # _emphasis_
+    (re.compile(r"\|"), " "),  # table pipes
+]
 
-@cl.step(type="tool")
+
+def _strip_markdown_for_tts(text: str) -> str:
+    """Reduce markdown to plain text so TTS narrates words, not syntax.
+
+    Args:
+        text: Markdown answer text from the agent.
+
+    Returns:
+        Whitespace-collapsed plain text with markdown syntax removed.
+    """
+    for pattern, repl in _MD_REDUCTIONS:
+        text = pattern.sub(repl, text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 async def _speech_to_text(wav_bytes: bytes) -> str:
     """Transcribe WAV bytes via the whisper.cpp server."""
     whisper = get_whisper_manager()
@@ -232,7 +265,6 @@ async def _speech_to_text(wav_bytes: bytes) -> str:
     return await whisper.transcribe(wav_bytes)
 
 
-@cl.step(type="tool")
 async def _text_to_speech(text: str) -> bytes:
     """Synthesize text to WAV bytes via the kokoro TTS server."""
     kokoro = get_kokoro_manager()
@@ -338,7 +370,7 @@ async def process_audio() -> None:
         logger.warning("No answer text from message pipeline")
         return
 
-    audio_bytes = await _text_to_speech(answer)
+    audio_bytes = await _text_to_speech(_strip_markdown_for_tts(answer))
     if audio_bytes:
         await cl.Message(
             content=answer,

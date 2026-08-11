@@ -286,3 +286,56 @@ async def test_process_audio_min_duration_skips_stt(
 
     await hooks_mod.process_audio()
     stt.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# _strip_markdown_for_tts
+# ---------------------------------------------------------------------------
+
+
+def test_strip_markdown_removes_emphasis() -> None:
+    assert hooks_mod._strip_markdown_for_tts("**bold** and _italic_") == (
+        "bold and italic"
+    )
+
+
+def test_strip_markdown_removes_headers_and_lists() -> None:
+    src = "# Title\n- item one\n- item two\n1. first"
+    assert hooks_mod._strip_markdown_for_tts(src) == "Title item one item two first"
+
+
+def test_strip_markdown_unwraps_links_and_code() -> None:
+    src = "See [docs](https://x.io) and `code` here"
+    assert hooks_mod._strip_markdown_for_tts(src) == "See docs and code here"
+
+
+def test_strip_markdown_drops_fenced_code() -> None:
+    src = "Before\n```python\nprint(1)\n```\nAfter"
+    assert hooks_mod._strip_markdown_for_tts(src) == "Before After"
+
+
+def test_strip_markdown_collapses_whitespace() -> None:
+    assert hooks_mod._strip_markdown_for_tts("a\n\n  b   c") == "a b c"
+
+
+@pytest.mark.asyncio
+async def test_process_audio_strips_markdown_before_tts(
+    user_session: _UserSession, monkeypatch: pytest.MonkeyPatch, patch_cl: None
+) -> None:
+    """TTS must receive markdown-stripped text, not raw syntax."""
+    await hooks_mod.on_audio_start_handler()
+    for _ in range(10):
+        await hooks_mod.on_audio_chunk_handler(_chunk(100.0))
+
+    monkeypatch.setattr(hooks_mod, "_speech_to_text", AsyncMock(return_value="hi"))
+    tts = AsyncMock(return_value=b"RIFFaudio")
+    monkeypatch.setattr(hooks_mod, "_text_to_speech", tts)
+
+    output = MagicMock()
+    output.answer_text = "**Hello** there"
+    monkeypatch.setattr(
+        "aria.web.message_pipeline.on_message_handler", AsyncMock(return_value=output)
+    )
+
+    await hooks_mod.process_audio()
+    tts.assert_awaited_once_with("Hello there")
