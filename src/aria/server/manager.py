@@ -36,19 +36,23 @@ def sync_chainlit_audio_feature(host: str, aria_home: Path) -> None:
 
     The mic button is gated by ``[features.audio] enabled`` in the
     config.toml that the Chainlit subprocess reads at startup. Audio
-    only works in a secure context (loopback or HTTPS); for any non-
-    loopback bind the feature is disabled so the broken mic button is
-    not shown. Run before launching the subprocess so it responds to
-    ``SERVER_HOST`` changes on every boot.
+    is enabled only when both conditions hold: voice is enabled via
+    ``ARIA_VOICE_ENABLED`` (default true) and the bind is a loopback
+    address (``getUserMedia`` requires a secure context). For any non-
+    loopback bind, or when voice is disabled, the feature is turned off
+    so the broken mic button is not shown. Run before launching the
+    subprocess so it responds to ``SERVER_HOST`` changes on every boot.
 
     Args:
         host: The bind address to evaluate.
         aria_home: ARIA_HOME, where ``.chainlit/config.toml`` lives.
     """
+    from aria.config.api import Voice
+
     config_path = aria_home / ".chainlit" / "config.toml"
     if not config_path.is_file():
         return
-    enabled = is_loopback_host(host)
+    enabled = Voice.enabled and is_loopback_host(host)
     value = "true" if enabled else "false"
     content = config_path.read_text()
     updated = _AUDIO_ENABLED_RE.sub(

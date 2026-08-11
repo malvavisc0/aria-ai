@@ -95,6 +95,24 @@ def test_sync_audio_enables_for_localhost(tmp_path: Path) -> None:
     assert _audio_enabled(config.read_text()) is True
 
 
+def test_sync_audio_disables_when_voice_disabled(tmp_path: Path) -> None:
+    """ARIA_VOICE_ENABLED=false forces audio off even on loopback."""
+    from aria.config.api import Voice
+
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(_AUDIO_CONFIG.replace("enabled = true", "enabled = false"))
+
+    original = Voice.enabled
+    try:
+        Voice.enabled = False
+        sync_chainlit_audio_feature("localhost", tmp_path)
+    finally:
+        Voice.enabled = original
+
+    assert _audio_enabled(config.read_text()) is False
+
+
 def test_sync_audio_noop_when_already_correct(tmp_path: Path) -> None:
     config = tmp_path / ".chainlit" / "config.toml"
     config.parent.mkdir(parents=True)
