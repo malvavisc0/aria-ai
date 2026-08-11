@@ -294,11 +294,27 @@ async def on_audio_start_handler() -> bool:
     cl.user_session.set("is_speaking", False)
     cl.user_session.set("silent_ms", 0.0)
     cl.user_session.set("last_elapsed_time", None)
+    cl.user_session.set("voice_processing", False)
     return True
 
 
 async def on_audio_chunk_handler(chunk: cl.InputAudioChunk) -> None:
-    """Accumulate PCM chunks; on silence timeout, run process_audio."""
+    """Accumulate PCM chunks; on silence timeout, run process_audio.
+
+    Each chunk is dispatched by Chainlit as its own ``asyncio.create_task``
+    (fire-and-forget), so chunk handlers for the *same* audio stream can
+    overlap with an in-flight ``process_audio()`` call. While a turn is
+    being processed (STT -> agent -> TTS), incoming chunks are dropped
+    rather than appended: appending into a list that ``process_audio()``
+    is concurrently swapping out would either lose audio (appended to the
+    stale list reference) or bleed the tail of the assistant's own
+    playback into the next turn. The ``voice_processing`` guard also
+    prevents a second concurrent ``process_audio()`` call from being
+    triggered while one is already running.
+    """
+    if cl.user_session.get("voice_processing"):
+        return
+
     chunks = cl.user_session.get("audio_chunks")
     if chunks is not None:
         chunks.append(np.frombuffer(chunk.data, dtype=np.int16))
@@ -323,7 +339,11 @@ async def on_audio_chunk_handler(chunk: cl.InputAudioChunk) -> None:
             "is_speaking"
         ):
             cl.user_session.set("is_speaking", False)
-            await process_audio()
+            cl.user_session.set("voice_processing", True)
+            try:
+                await process_audio()
+            finally:
+                cl.user_session.set("voice_processing", False)
     else:
         cl.user_session.set("silent_ms", 0.0)
         if not cl.user_session.get("is_speaking"):
@@ -333,14 +353,25 @@ async def on_audio_chunk_handler(chunk: cl.InputAudioChunk) -> None:
 async def on_audio_end_handler() -> None:
     """Flush any remaining audio when the mic stream ends."""
     logger.info("Audio stream ended")
+    if cl.user_session.get("voice_processing"):
+        return
     chunks = cl.user_session.get("audio_chunks") or []
     if chunks and cl.user_session.get("is_speaking"):
         cl.user_session.set("is_speaking", False)
-        await process_audio()
+        cl.user_session.set("voice_processing", True)
+        try:
+            await process_audio()
+        finally:
+            cl.user_session.set("voice_processing", False)
 
 
 async def process_audio() -> None:
-    """STT -> existing message pipeline -> TTS -> auto-play audio."""
+    """STT -> existing message pipeline -> TTS -> auto-play audio.
+
+    Callers must hold the ``voice_processing`` guard for the duration of
+    this call so no concurrently-scheduled chunk handler can hold a stale
+    reference to the ``audio_chunks`` list across the swap below.
+    """
     chunks = list(cl.user_session.get("audio_chunks", []) or [])
     cl.user_session.set("audio_chunks", [])
     if not chunks:

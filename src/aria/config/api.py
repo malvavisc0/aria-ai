@@ -254,9 +254,7 @@ class Voice:
     synthesis. All fields are env-driven with sensible defaults.
     """
 
-    whisper_model: str = get_optional_env(
-        "ARIA_VOICE_WHISPER_MODEL", "large-v3-turbo-q5_0ss"
-    )
+    whisper_model: str = get_optional_env("ARIA_VOICE_WHISPER_MODEL", "small.en")
     whisper_port: int = int(get_optional_env("ARIA_VOICE_WHISPER_PORT", "9091"))
     kokoro_voice: str = get_optional_env("ARIA_VOICE_KOKORO_VOICE", "af_heart")
     kokoro_lang: str = get_optional_env("ARIA_VOICE_KOKORO_LANG", "en-us")
