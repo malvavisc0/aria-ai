@@ -272,7 +272,7 @@ class Voice:
     silence_threshold_ms: float = float(
         get_optional_env("ARIA_VOICE_SILENCE_THRESHOLD_MS", "1300.0")
     )
-    rms_threshold: int = int(get_optional_env("ARIA_VOICE_RMS_THRESHOLD", "500"))
+    rms_threshold: int = int(get_optional_env("ARIA_VOICE_RMS_THRESHOLD", "800"))
 
     @classmethod
     def get_bin_path(cls) -> Path:

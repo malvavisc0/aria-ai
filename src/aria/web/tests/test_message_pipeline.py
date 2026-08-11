@@ -1230,20 +1230,34 @@ class TestOnMessageHandlerReturn:
 
 
 class TestExtractRenderableItems:
-    def test_extracts_bare_local_path(self, tmp_path: Path) -> None:
+    def test_extracts_backtick_path(self, tmp_path: Path) -> None:
         f = tmp_path / "report.md"
         f.write_text("# Report")
-        text = f"I saved it to {f}"
+        text = f"I saved it to `{f}` for you"
         paths, urls = pipeline._extract_renderable_items(text)
         assert paths == [str(f)]
         assert urls == []
 
-    def test_extracts_multiple_paths(self, tmp_path: Path) -> None:
+    def test_extracts_standalone_path_on_own_line(self, tmp_path: Path) -> None:
+        f = tmp_path / "report.md"
+        f.write_text("# Report")
+        text = f"Here's the summary.\n{f}"
+        paths, urls = pipeline._extract_renderable_items(text)
+        assert paths == [str(f)]
+
+    def test_extracts_standalone_path_with_label(self, tmp_path: Path) -> None:
+        f = tmp_path / "report.md"
+        f.write_text("# Report")
+        text = f"Done!\nFile: {f}"
+        paths, urls = pipeline._extract_renderable_items(text)
+        assert paths == [str(f)]
+
+    def test_extracts_multiple_backtick_paths(self, tmp_path: Path) -> None:
         f1 = tmp_path / "code.py"
         f1.write_text("print(1)")
         f2 = tmp_path / "data.json"
         f2.write_text("{}")
-        text = f"Files: {f1} and {f2}"
+        text = f"Files: `{f1}` and `{f2}`"
         paths, urls = pipeline._extract_renderable_items(text)
         assert str(f1) in paths
         assert str(f2) in paths
@@ -1255,40 +1269,39 @@ class TestExtractRenderableItems:
         paths, urls = pipeline._extract_renderable_items(text)
         assert paths == [str(f)]
 
-    def test_extracts_backtick_wrapped_path(self, tmp_path: Path) -> None:
-        f = tmp_path / "config.yaml"
-        f.write_text("key: value")
-        text = f"Config at `{f}`"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == [str(f)]
-
-    def test_extracts_remote_image_url(self) -> None:
-        text = "Image: https://example.com/cat.png"
+    def test_extracts_backtick_url(self) -> None:
+        text = "Image: `https://example.com/cat.png`"
         paths, urls = pipeline._extract_renderable_items(text)
         assert paths == []
         assert urls == ["https://example.com/cat.png"]
 
-    def test_extracts_pdf_url(self) -> None:
-        text = "Doc: https://example.com/paper.pdf"
+    def test_extracts_standalone_url(self) -> None:
+        text = "Here's the chart:\nhttps://example.com/chart.pdf"
         paths, urls = pipeline._extract_renderable_items(text)
-        assert urls == ["https://example.com/paper.pdf"]
+        assert urls == ["https://example.com/chart.pdf"]
+
+    def test_ignores_bare_path_in_prose(self, tmp_path: Path) -> None:
+        """Bare paths embedded in prose must not be rendered."""
+        f = tmp_path / "report.md"
+        f.write_text("# Report")
+        text = f"The config at {f} needs editing"
+        paths, urls = pipeline._extract_renderable_items(text)
+        assert paths == []
+
+    def test_ignores_bare_url_in_prose(self) -> None:
+        text = "Check https://example.com/cat.png for the image"
+        paths, urls = pipeline._extract_renderable_items(text)
+        assert urls == []
 
     def test_skips_nonexistent_paths(self) -> None:
-        text = "Missing: /nonexistent/file.md"
+        text = "Missing: `/nonexistent/file.md`"
         paths, urls = pipeline._extract_renderable_items(text)
         assert paths == []
 
     def test_deduplicates(self, tmp_path: Path) -> None:
         f = tmp_path / "dup.md"
         f.write_text("dup")
-        text = f"{f} and again {f}"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == [str(f)]
-
-    def test_strips_trailing_punctuation(self, tmp_path: Path) -> None:
-        f = tmp_path / "report.md"
-        f.write_text("# Report")
-        text = f"Saved to {f}."
+        text = f"`{f}` and again `{f}`"
         paths, urls = pipeline._extract_renderable_items(text)
         assert paths == [str(f)]
 

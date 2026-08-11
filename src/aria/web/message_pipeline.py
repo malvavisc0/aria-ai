@@ -64,22 +64,33 @@ _VOICE_MODE_INSTRUCTION = (
 
 # --- Auto-render file paths and URLs as Chainlit elements ---
 
-# Local file paths: ~/... or /...  with a known renderable extension.
-_PATH_RE = re.compile(
-    r"(?:~/|/)[^\s)`\]]+\."
+# Backtick-wrapped paths: `~/foo.md` or `/tmp/bar.py`
+_BACKTICK_PATH_RE = re.compile(
+    r"`((?:~/|/)[^`]+\."
     r"(?:md|txt|rst|py|js|ts|json|csv|html?|css|ya?ml|toml|xml|log|sh|tex"
-    r"|png|jpe?g|gif|webp|svg|pdf|wav|mp3|mp4)"
-    r"(?=\s|$|[.,;:!?)`\]'])"
+    r"|sql|go|rs|c|cpp|java|rb"
+    r"|png|jpe?g|gif|webp|svg|pdf|wav|mp3|mp4))`"
+)
+
+# Paths on their own line (optionally after a label like "File:" or "Path:").
+_STANDALONE_PATH_RE = re.compile(
+    r"^\s*(?:\w[\w\s]*:\s*)?((?:~/|/)\S+\."
+    r"(?:md|txt|rst|py|js|ts|json|csv|html?|css|ya?ml|toml|xml|log|sh|tex"
+    r"|sql|go|rs|c|cpp|java|rb"
+    r"|png|jpe?g|gif|webp|svg|pdf|wav|mp3|mp4))\s*$",
+    re.MULTILINE,
 )
 
 # Markdown link targets: [text](path-or-url)
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 
-# Remote URLs pointing to renderable content.
-_URL_RE = re.compile(
-    r"https?://[^\s)`\]]+\."
-    r"(?:png|jpe?g|gif|webp|svg|pdf|md|txt)"
-    r"(?=\s|$|[.,;:!?)`\]'])"
+# Backtick-wrapped or standalone URLs ending in a renderable extension.
+_BACKTICK_URL_RE = re.compile(
+    r"`(https?://[^`]+\.(?:png|jpe?g|gif|webp|svg|pdf|md|txt))`"
+)
+_STANDALONE_URL_RE = re.compile(
+    r"^\s*(https?://\S+\.(?:png|jpe?g|gif|webp|svg|pdf|md|txt))\s*$",
+    re.MULTILINE,
 )
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
@@ -141,8 +152,9 @@ _LANG_MAP: dict[str, str] = {
 def _extract_renderable_items(text: str) -> tuple[list[str], list[str]]:
     """Extract local paths and remote URLs from agent answer text.
 
-    Handles bare paths (``~/foo.md``, ``/tmp/bar.py``), backtick-wrapped
-    paths, and markdown link targets ``[label](path)``.
+    Only matches paths/URLs that are unambiguous — i.e. backtick-wrapped,
+    inside a markdown link, or on their own line. Bare paths embedded in
+    prose are ignored to avoid false positives.
 
     Returns:
         ``(paths, urls)`` — local file paths (expanded) and remote URLs.
@@ -150,16 +162,21 @@ def _extract_renderable_items(text: str) -> tuple[list[str], list[str]]:
     """
     raw_targets: list[str] = []
 
-    # 1. Extract from markdown links [text](target)
+    # 1. Markdown links [text](target)
     for m in _LINK_RE.finditer(text):
         raw_targets.append(m.group(1))
 
-    # 2. Strip markdown links so they don't double-match, then find bare paths/URLs
-    stripped = _LINK_RE.sub("", text)
-    for m in _PATH_RE.finditer(stripped):
-        raw_targets.append(m.group(0))
-    for m in _URL_RE.finditer(stripped):
-        raw_targets.append(m.group(0))
+    # 2. Backtick-wrapped paths/URLs
+    for m in _BACKTICK_PATH_RE.finditer(text):
+        raw_targets.append(m.group(1))
+    for m in _BACKTICK_URL_RE.finditer(text):
+        raw_targets.append(m.group(1))
+
+    # 3. Standalone paths/URLs on their own line
+    for m in _STANDALONE_PATH_RE.finditer(text):
+        raw_targets.append(m.group(1))
+    for m in _STANDALONE_URL_RE.finditer(text):
+        raw_targets.append(m.group(1))
 
     paths: list[str] = []
     urls: list[str] = []
