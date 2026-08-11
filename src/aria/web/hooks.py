@@ -274,7 +274,21 @@ async def _text_to_speech(text: str) -> bytes:
 
 
 async def on_audio_start_handler() -> bool:
-    """Return True to accept the microphone stream (start of a turn)."""
+    """Return True to accept the microphone stream (start of a turn).
+
+    Returns False (rejecting the stream) when the server is not bound to
+    a loopback address — ``getUserMedia`` requires a secure context, so
+    audio cannot work over a LAN HTTP origin. The Chainlit config flag
+    hides the mic button in that case; this guard is a safety net.
+    """
+    from aria.config.service import Server, is_loopback_host
+
+    if not is_loopback_host(Server.host):
+        logger.info(
+            f"Audio stream rejected: {Server.host} is not a loopback host "
+            "(voice requires a secure context)"
+        )
+        return False
     logger.info("Audio stream started")
     cl.user_session.set("audio_chunks", [])
     cl.user_session.set("is_speaking", False)

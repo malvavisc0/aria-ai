@@ -5,6 +5,7 @@ and monitoring the Aria Chainlit webserver process.
 """
 
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,7 +16,7 @@ from urllib.request import urlopen
 import aria
 from aria.config.folders import Data as DataConfig
 from aria.config.folders import Debug as DebugConfig
-from aria.config.service import Server
+from aria.config.service import Server, is_loopback_host
 from aria.server.process_utils import (
     clear_state,
     is_process_running,
@@ -23,6 +24,39 @@ from aria.server.process_utils import (
     save_state,
     stop_process,
 )
+
+_AUDIO_ENABLED_RE = re.compile(
+    r"\[features\.audio\]\n([^\[]*?)(enabled\s*=\s*)(true|false)",
+    re.IGNORECASE,
+)
+
+
+def sync_chainlit_audio_feature(host: str, aria_home: Path) -> None:
+    """Rewrite the deployed Chainlit config's ``[features.audio] enabled``.
+
+    The mic button is gated by ``[features.audio] enabled`` in the
+    config.toml that the Chainlit subprocess reads at startup. Audio
+    only works in a secure context (loopback or HTTPS); for any non-
+    loopback bind the feature is disabled so the broken mic button is
+    not shown. Run before launching the subprocess so it responds to
+    ``SERVER_HOST`` changes on every boot.
+
+    Args:
+        host: The bind address to evaluate.
+        aria_home: ARIA_HOME, where ``.chainlit/config.toml`` lives.
+    """
+    config_path = aria_home / ".chainlit" / "config.toml"
+    if not config_path.is_file():
+        return
+    enabled = is_loopback_host(host)
+    value = "true" if enabled else "false"
+    content = config_path.read_text()
+    updated = _AUDIO_ENABLED_RE.sub(
+        lambda m: f"[features.audio]\n{m.group(1)}{m.group(2)}{value}",
+        content,
+    )
+    if updated != content:
+        config_path.write_text(updated)
 
 
 @dataclass
@@ -293,6 +327,7 @@ class ServerManager:
 
         aria_home = self._resolve_cwd()
         os.chdir(aria_home)
+        sync_chainlit_audio_feature(self._host, Path(aria_home))
 
         cmd = self._build_command()
         log_file = open(log_path, "a")
@@ -324,6 +359,7 @@ class ServerManager:
 
         aria_home = self._resolve_cwd()
         os.chdir(aria_home)
+        sync_chainlit_audio_feature(self._host, Path(aria_home))
 
         cmd = self._build_command()
         log_path = DebugConfig.logs_path

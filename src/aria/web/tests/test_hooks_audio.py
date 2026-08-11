@@ -75,12 +75,27 @@ def _chunk(
 
 @pytest.mark.asyncio
 async def test_on_audio_start_initialises_session(
-    user_session: _UserSession,
+    user_session: _UserSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from aria.config.service import Server
+
+    monkeypatch.setattr(Server, "host", "localhost")
     assert await hooks_mod.on_audio_start_handler() is True
     assert user_session.get("audio_chunks") == []
     assert user_session.get("is_speaking") is False
     assert user_session.get("silent_ms") == 0.0
+
+
+@pytest.mark.asyncio
+async def test_on_audio_start_rejects_non_loopback(
+    user_session: _UserSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A non-loopback bind must reject the stream (no secure context)."""
+    from aria.config.service import Server
+
+    monkeypatch.setattr(Server, "host", "192.168.1.220")
+    assert await hooks_mod.on_audio_start_handler() is False
+    assert user_session.get("audio_chunks") is None
 
 
 # ---------------------------------------------------------------------------
