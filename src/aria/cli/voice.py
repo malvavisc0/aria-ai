@@ -73,27 +73,35 @@ def check_status():
 
     table.add_row("Bin Directory", str(Bin.path))
     table.add_row("Models Directory", str(Models.path))
+    table.add_row(
+        "Enabled", "[green]true[/green]" if Voice.enabled else "[yellow]false[/yellow]"
+    )
     table.add_row("Whisper Model", Voice.whisper_model)
     table.add_row("Whisper Port", str(Voice.whisper_port))
     table.add_row("Kokoro Voice", Voice.kokoro_voice)
     table.add_row("Kokoro Lang", Voice.kokoro_lang)
 
-    whisper = Voice.get_whisper_binary_path()
-    if whisper:
-        table.add_row("Whisper Binary", str(whisper))
-        table.add_row("Whisper Model File", str(Voice.get_whisper_model_path()))
+    if not Voice.enabled:
+        table.add_row(
+            "Voice Features", "[yellow]Disabled (ARIA_VOICE_ENABLED=false)[/yellow]"
+        )
     else:
-        table.add_row("Whisper", "[yellow]✗ Not installed[/yellow]")
+        whisper = Voice.get_whisper_binary_path()
+        if whisper:
+            table.add_row("Whisper Binary", str(whisper))
+            table.add_row("Whisper Model File", str(Voice.get_whisper_model_path()))
+        else:
+            table.add_row("Whisper", "[yellow]✗ Not installed[/yellow]")
 
-    if Voice.is_kokoro_available():
-        table.add_row("Kokoro Model", str(Voice.get_kokoro_model_path()))
-    else:
-        table.add_row("Kokoro Model", "[yellow]✗ Not installed[/yellow]")
+        if Voice.is_kokoro_available():
+            table.add_row("Kokoro Model", str(Voice.get_kokoro_model_path()))
+        else:
+            table.add_row("Kokoro Model", "[yellow]✗ Not installed[/yellow]")
 
-    if Voice.is_available():
-        table.add_row("Voice Features", "[green]Available[/green]")
-    else:
-        table.add_row("Voice Features", "[yellow]Disabled[/yellow]")
-        table.add_row("Install Command", "aria voice download")
+        if Voice.is_available():
+            table.add_row("Voice Features", "[green]Available[/green]")
+        else:
+            table.add_row("Voice Features", "[yellow]Disabled[/yellow]")
+            table.add_row("Install Command", "aria voice download")
 
     console.print(table)

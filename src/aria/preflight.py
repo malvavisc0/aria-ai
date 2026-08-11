@@ -272,8 +272,21 @@ def _check_voice(checks: list[CheckResult]) -> None:
     Both are required: the voice pipeline degrades to STT-only if TTS is
     missing, but STT alone still depends on the whisper binary. A missing
     whisper binary or kokoro tool/model is a hard preflight failure.
+
+    Skipped entirely when voice is disabled via ``ARIA_VOICE_ENABLED=false``.
     """
     from aria.config.api import Voice
+
+    if not Voice.enabled:
+        checks.append(
+            CheckResult(
+                name="voice",
+                passed=True,
+                category="binaries",
+                details="Disabled via ARIA_VOICE_ENABLED=false",
+            )
+        )
+        return
 
     whisper = Voice.get_whisper_binary_path()
     if whisper is not None:
@@ -525,6 +538,7 @@ def run_preflight_checks() -> PreflightResult:
         4. Lightpanda is installed
         5. Docling worker is installed
         6. Voice components (whisper.cpp STT + kokoro TTS) are installed
+           (skipped when ARIA_VOICE_ENABLED=false)
         7. Chat model is configured and downloaded
         8. Embeddings model is configured and downloaded
         9. Token limit is within context bounds

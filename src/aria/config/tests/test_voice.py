@@ -18,6 +18,21 @@ class TestVoice:
         with _patch_paths(folders_mod, tmp_path):
             assert Voice.is_available() is False
 
+    def test_disabled_overrides_installed_binary(self, tmp_path: Path) -> None:
+        """ARIA_VOICE_ENABLED=false disables voice even when the binary exists."""
+        import aria.config.folders as folders_mod
+
+        with _patch_paths(folders_mod, tmp_path):
+            exe = tmp_path / "bin" / "whisper-cpp" / "whisper-server"
+            exe.parent.mkdir(parents=True)
+            exe.touch()
+            original = Voice.enabled
+            try:
+                Voice.enabled = False
+                assert Voice.is_available() is False
+            finally:
+                Voice.enabled = original
+
     def test_available_with_binary(self, tmp_path: Path) -> None:
         import aria.config.folders as folders_mod
 

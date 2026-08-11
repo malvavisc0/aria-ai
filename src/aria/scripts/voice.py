@@ -28,7 +28,7 @@ _WHISPER_MODEL_BASE = "https://huggingface.co/ggerganov/whisper.cpp/resolve/main
 _KOKORO_RELEASES = "https://github.com/nazdridoy/kokoro-tts/releases/download/v1.0.0"
 
 
-def download_whisper_cpp(model: str = "small.en") -> Path:
+def download_whisper_cpp(model: str = "base.en") -> Path:
     """Fetch the whisper.cpp server binary plus the GGUF model.
 
     Downloads the prebuilt CPU binary from the whisper.cpp GitHub releases.
@@ -38,7 +38,7 @@ def download_whisper_cpp(model: str = "small.en") -> Path:
     Linux GPU prebuilts are published.
 
     Args:
-        model: HuggingFace GGUF model name (e.g. ``small.en``).
+        model: HuggingFace GGUF model name (e.g. ``base.en``).
 
     Returns:
         The whisper-server binary path.

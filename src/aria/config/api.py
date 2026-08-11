@@ -252,9 +252,16 @@ class Voice:
     whisper.cpp is a persistent HTTP server exposing a multipart
     ``/inference`` endpoint; kokoro-tts is a one-shot CLI invoked per
     synthesis. All fields are env-driven with sensible defaults.
+
+    Set ``ARIA_VOICE_ENABLED=false`` to disable voice entirely: no STT/TTS
+    servers are started, the microphone stream is refused, and preflight
+    skips voice checks. Useful when optimising for text-only throughput.
     """
 
-    whisper_model: str = get_optional_env("ARIA_VOICE_WHISPER_MODEL", "small.en")
+    enabled: bool = get_optional_env("ARIA_VOICE_ENABLED", "true").lower() == "true"
+    whisper_model: str = get_optional_env(
+        "ARIA_VOICE_WHISPER_MODEL", "large-v3-turbo-q5_0s"
+    )
     whisper_port: int = int(get_optional_env("ARIA_VOICE_WHISPER_PORT", "9091"))
     kokoro_voice: str = get_optional_env("ARIA_VOICE_KOKORO_VOICE", "af_heart")
     kokoro_lang: str = get_optional_env("ARIA_VOICE_KOKORO_LANG", "en-us")
@@ -332,9 +339,10 @@ class Voice:
 
     @classmethod
     def is_available(cls) -> bool:
-        """Check if voice STT is installed (TTS is best-effort).
+        """Check if voice STT is installed and enabled (TTS is best-effort).
 
         Returns:
-            True if the whisper.cpp binary exists, False otherwise.
+            True if voice is enabled and the whisper.cpp binary exists,
+            False otherwise.
         """
-        return cls.get_whisper_binary_path() is not None
+        return cls.enabled and cls.get_whisper_binary_path() is not None

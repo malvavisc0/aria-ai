@@ -98,6 +98,18 @@ async def test_on_audio_start_rejects_non_loopback(
     assert user_session.get("audio_chunks") is None
 
 
+@pytest.mark.asyncio
+async def test_on_audio_start_rejects_when_disabled(
+    user_session: _UserSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Voice disabled via env refuses the mic stream without touching session."""
+    from aria.config.api import Voice
+
+    monkeypatch.setattr(Voice, "enabled", False)
+    assert await hooks_mod.on_audio_start_handler() is False
+    assert user_session.get("audio_chunks") is None
+
+
 # ---------------------------------------------------------------------------
 # on_audio_chunk — silence detection
 # ---------------------------------------------------------------------------
