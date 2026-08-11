@@ -133,17 +133,17 @@ async def on_chat_start_handler() -> None:
     await cl.context.emitter.set_commands(
         [
             {
-                "id": "Enhance",
-                "icon": "wand-sparkles",
-                "description": "Enhance Prompt",
+                "id": "Knowledge",
+                "icon": "book",
+                "description": "Ground answer in your documents",
                 "button": None,
                 "persistent": True,
                 "selected": False,
             },
             {
-                "id": "Knowledge",
-                "icon": "book",
-                "description": "Ground answer in your documents",
+                "id": "Enhance",
+                "icon": "wand-sparkles",
+                "description": "Enhance Prompt",
                 "button": None,
                 "persistent": True,
                 "selected": False,
