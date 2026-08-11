@@ -11,6 +11,7 @@ These handlers are invoked by Chainlit at various points in the app lifecycle.
 from __future__ import annotations
 
 import json
+from typing import Any
 
 import chainlit as cl
 from chainlit.types import ThreadDict
@@ -187,3 +188,19 @@ async def on_chat_resume_handler(thread: ThreadDict) -> None:
         cl.user_session.set("memory", memory)
     except Exception as e:
         logger.exception(f"Failed to restore chat history: {e}")
+
+
+async def on_mcp_connect_handler(connection: Any, client_session: Any) -> None:
+    """Register a connected MCP server's ClientSession on the user session."""
+    sessions: dict = cl.user_session.get("_mcp_sessions") or {}
+    sessions[connection.name] = client_session
+    cl.user_session.set("_mcp_sessions", sessions)
+    logger.info(f"MCP server connected: {connection.name}")
+
+
+async def on_mcp_disconnect_handler(name: str, client_session: Any) -> None:
+    """Drop a disconnected MCP server from the user session."""
+    sessions: dict = cl.user_session.get("_mcp_sessions") or {}
+    sessions.pop(name, None)
+    cl.user_session.set("_mcp_sessions", sessions)
+    logger.info(f"MCP server disconnected: {name}")

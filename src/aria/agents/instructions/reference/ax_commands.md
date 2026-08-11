@@ -116,3 +116,12 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 | `logs` | `worker_id` | `tail` |
 | `cancel` | `worker_id` | — |
 | `clean` | — | `days` |
+
+## mcp
+
+| Command | Required | Optional |
+|---------|----------|----------|
+| `list` | — | `server` |
+| `call` | `server`, `tool` | `arguments` |
+
+> **External MCP servers.** `list` with no `server` returns the connected-server index (names + tool count). `list` with `server` returns that server's tools + input schemas (persisted to a file when large — read via `read_file`). `call` invokes a tool with raw-dict `arguments`. If `list` returns "No MCP servers connected", no external service is available — fall back to `web`/`http`/`shell`.

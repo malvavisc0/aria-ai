@@ -15,6 +15,8 @@ from aria.web.hooks import (
     on_chat_end_handler,
     on_chat_resume_handler,
     on_chat_start_handler,
+    on_mcp_connect_handler,
+    on_mcp_disconnect_handler,
 )
 from aria.web.lifecycle import on_app_shutdown_handler, on_app_startup_handler
 from aria.web.message_pipeline import on_message_handler
@@ -58,3 +60,13 @@ async def on_chat_resume(thread: ThreadDict) -> None:
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
     await on_message_handler(message)
+
+
+@cl.on_mcp_connect
+async def on_mcp_connect(connection, client_session) -> None:
+    await on_mcp_connect_handler(connection, client_session)
+
+
+@cl.on_mcp_disconnect
+async def on_mcp_disconnect(name: str, client_session) -> None:
+    await on_mcp_disconnect_handler(name, client_session)

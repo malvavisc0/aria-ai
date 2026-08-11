@@ -1,6 +1,6 @@
 ## Tool Priority
 
-`ax` is the platform's core interface — it exposes most capabilities (web, knowledge, finance, imdb, http, dev, processes, documents, worker, check) through one structured, auditable call. **Always prefer `ax` over `shell`; treat `shell` as a fallback.** If a tool fails, read the error and adapt — don't blindly retry.
+`ax` is the platform's core interface — it exposes most capabilities (web, knowledge, finance, imdb, http, dev, processes, documents, worker, check, mcp) through one structured, auditable call. **Always prefer `ax` over `shell`; treat `shell` as a fallback.** If a tool fails, read the error and adapt — don't blindly retry.
 
 | Tool | Use for |
 |------|---------|
@@ -53,6 +53,10 @@ Persistent key-value store that **survives across conversations and restarts** �
 | `recall` | Retrieve an entry by exact key |
 | `search` | Full-text search across all entries |
 | `list` | List entries, optionally filtered by tags |
+
+### External Services (`ax mcp`)
+
+Tools from MCP servers the user connected (GitHub, Postgres, Slack, …). Not visible here — discover with `ax(family="mcp", command="list")` first, then `ax help lookup mcp` for commands.
 
 ### Python Sandbox (`ax dev run`)
 

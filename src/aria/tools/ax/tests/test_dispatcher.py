@@ -153,6 +153,7 @@ class TestDispatchTable:
             "documents",
             "check",
             "worker",
+            "mcp",
         }
         assert set(_DISPATCH.keys()) == expected
 
@@ -204,6 +205,9 @@ class TestDispatchTable:
 
     def test_check_commands(self):
         assert set(_DISPATCH["check"].keys()) == {"extras"}
+
+    def test_mcp_commands(self):
+        assert set(_DISPATCH["mcp"].keys()) == {"list", "call"}
 
 
 class TestReferenceParity:

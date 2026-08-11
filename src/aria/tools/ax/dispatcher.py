@@ -32,7 +32,7 @@ class AxSchema(BaseModel):
         description=(
             "Tool family name. Use 'help' to list all families. "
             "Families: web, knowledge, finance, imdb, http, dev, processes, "
-            "documents, check, worker."
+            "documents, check, worker, mcp."
         )
     )
     command: str = Field(
@@ -207,6 +207,57 @@ def _documents_status():
     return status
 
 
+def _mcp_list():
+    from aria.tools.mcp_bridge import list_servers, list_tools, resolve_session
+    from aria.tools.utils import tool_response
+
+    async def _list(reason: Reason, server: str = "") -> str:
+        if not server:
+            return await list_servers()
+        client = resolve_session(server)
+        if client is None:
+            return tool_response(
+                tool="ax",
+                reason=reason,
+                data={
+                    "error": {
+                        "code": "no_mcp_session",
+                        "message": f"No connected MCP server '{server}'",
+                    }
+                },
+            )
+        return await list_tools(server, client)
+
+    return _list
+
+
+def _mcp_call():
+    from aria.tools.mcp_bridge import call_tool, resolve_session
+    from aria.tools.utils import tool_response
+
+    async def _call(
+        reason: Reason,
+        server: str = "",
+        tool: str = "",
+        arguments: dict[str, Any] | None = None,
+    ) -> str:
+        client = resolve_session(server)
+        if client is None:
+            return tool_response(
+                tool="ax",
+                reason=reason,
+                data={
+                    "error": {
+                        "code": "no_mcp_session",
+                        "message": f"No connected MCP server '{server}'",
+                    }
+                },
+            )
+        return await call_tool(server, client, tool, arguments or {})
+
+    return _call
+
+
 # ---------------------------------------------------------------------------
 # Dispatch table: family → command → (loader, inject_action?)
 # inject_action means the command name is passed as action= parameter
@@ -273,6 +324,10 @@ _DISPATCH: dict[str, dict[str, tuple[Callable, bool]]] = {
         "logs": (_worker, True),
         "cancel": (_worker, True),
         "clean": (_worker, True),
+    },
+    "mcp": {
+        "list": (_mcp_list, False),
+        "call": (_mcp_call, False),
     },
 }
 
@@ -410,7 +465,7 @@ def _validate_ax_inputs(reason: str, family: str, command: str) -> str | None:
                     "message": "ax() requires 'family' and 'command' arguments.",
                     "expected": {
                         "reason": "Brief explanation of why you are calling this.",
-                        "family": "Tool family: web, knowledge, finance, imdb, http, dev, processes, documents, check, worker",
+                        "family": "Tool family: web, knowledge, finance, imdb, http, dev, processes, documents, check, worker, mcp",
                         "command": "Subcommand within the family",
                         "args": "Optional arguments dict (exclude 'reason')",
                     },
