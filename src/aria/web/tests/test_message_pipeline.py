@@ -1147,3 +1147,71 @@ class TestAppendFilesBlock:
         result = await pipeline._append_files_block("p", ["/tmp/a.txt"])
         assert "read_file" not in result
         assert "ax documents" not in result
+
+
+class TestOnMessageHandlerReturn:
+    """Tests for the `on_message_handler` return value (voice TTS capture)."""
+
+    @pytest.mark.asyncio
+    async def test_success_path_returns_output_message(self, monkeypatch) -> None:
+        """The success path returns the assistant cl.Message with content."""
+        from aria.config.models import Chat as ChatConfigCls
+
+        monkeypatch.setattr(ChatConfigCls.__dict__["max_iteration"], "_value", 10)
+        monkeypatch.setattr(pipeline, "_mark_message_processed", AsyncMock())
+        monkeypatch.setattr(pipeline, "_maybe_rename_thread", MagicMock())
+        object.__setattr__(pipeline._state, "agents_workflow", MagicMock())
+        object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
+        monkeypatch.setattr(
+            pipeline,
+            "_handle_message",
+            AsyncMock(return_value=("prompt", {})),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "_stream_agent_response",
+            AsyncMock(return_value=(True, {})),
+        )
+
+        mock_memory = MagicMock()
+        mock_memory.session_id = "thread-1"
+        mock_memory.aget = AsyncMock(return_value=[])
+        mock_memory.aget_all = AsyncMock(return_value=[])
+        mock_session = {"memory": mock_memory}
+        monkeypatch.setattr(
+            pipeline.cl,
+            "user_session",
+            SimpleNamespace(
+                get=lambda k: mock_session.get(k),
+                set=lambda k, v: mock_session.__setitem__(k, v),
+            ),
+        )
+
+        mock_output = MagicMock()
+        mock_output.send = AsyncMock()
+        mock_output.update = AsyncMock()
+        mock_output.remove = AsyncMock()
+        mock_output.content = "Final answer"
+        monkeypatch.setattr(pipeline.cl, "Message", lambda **kw: mock_output)
+
+        message = _mock_message(
+            id="msg-1",
+            content="Hello",
+            command=None,
+            thread_id="thread-1",
+            elements=[],
+            metadata={},
+        )
+
+        result = await pipeline.on_message_handler(message)
+        assert result is mock_output
+        assert result is not None
+        assert result.content == "Final answer"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_not_initialized(self, monkeypatch) -> None:
+        """When the workflow is missing, the handler returns None."""
+        object.__setattr__(pipeline._state, "agents_workflow", None)
+        monkeypatch.setattr(pipeline, "_warn_not_initialized", AsyncMock())
+        result = await pipeline.on_message_handler(MagicMock())
+        assert result is None

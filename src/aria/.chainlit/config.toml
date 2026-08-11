@@ -126,7 +126,7 @@ language = "en-US"
 
 layout = "wide"
 
-default_sidebar_state = "open"
+default_sidebar_state = "hidden"
 
 # Chat settings display location: "message_composer" (default) or "sidebar" (header)
 # chat_settings_location = "message_composer"

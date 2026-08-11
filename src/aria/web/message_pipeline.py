@@ -732,7 +732,7 @@ def _maybe_rename_thread(message: cl.Message, output: cl.Message) -> None:
     cl.user_session.set("_pending_title_task", task)
 
 
-async def on_message_handler(message: cl.Message) -> None:
+async def on_message_handler(message: cl.Message) -> cl.Message | None:
     """Handle incoming user messages and execute the agent workflow.
 
     This is the main entry point for processing user messages. It:
@@ -742,12 +742,15 @@ async def on_message_handler(message: cl.Message) -> None:
     4. Runs the agent workflow with streaming response
     5. Handles errors and sends appropriate feedback to user
 
+    Returns the assistant ``cl.Message`` on the success path (used by the
+    voice pipeline to capture the final text for TTS), or ``None`` on error.
+
     Args:
         message: The incoming Chainlit message from the user.
     """
     if not _state.agents_workflow:
         await _warn_not_initialized()
-        return
+        return None
 
     memory: BackgroundFlushMemory | None = None
     pipeline_meta: dict = {}
@@ -759,6 +762,7 @@ async def on_message_handler(message: cl.Message) -> None:
         await _stream_and_finalize(message, output, pipeline_meta, prompt, memory)
 
         _maybe_rename_thread(message, output)
+        return output
 
     except AppStateNotInitializedError as e:
         await _fail_turn(

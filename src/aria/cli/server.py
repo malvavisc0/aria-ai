@@ -32,6 +32,7 @@ from urllib.error import URLError
 from urllib.request import Request, urlopen
 
 import typer
+from rich.box import ROUNDED
 from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
@@ -129,50 +130,73 @@ def _get_startup_failure_message(exc: Exception | None = None) -> str:
 
 
 def _print_preflight_result(result) -> bool:
-    """Print preflight results in grouped format and return True if all pass."""
+    """Print preflight results as a clean bordered panel and return True if all pass."""
     grouped = result.group_by_category()
 
-    # Category icons and labels — ordered for logical flow
-    # Hardware first (most impactful), then environment, then rest
     category_config = {
-        "hardware": {"icon": "🖥️ ", "label": "Hardware"},
-        "environment": {"icon": "📦", "label": "Environment"},
-        "models": {"icon": "🧠", "label": "Models"},
-        "binaries": {"icon": "⚙️ ", "label": "Binaries"},
-        "storage": {"icon": "📁", "label": "Storage"},
-        "connectivity": {"icon": "🌐", "label": "Connectivity"},
-        "tools": {"icon": "🔧", "label": "Tools"},
+        "hardware": "Hardware",
+        "environment": "Environment",
+        "models": "Models",
+        "binaries": "Binaries",
+        "storage": "Storage",
+        "connectivity": "Connectivity",
+        "tools": "Tools",
     }
 
-    for category in category_config.keys():
+    lines: list[str] = []
+
+    for category in category_config:
         if category not in grouped:
             continue
-
-        config = category_config[category]
         checks = grouped[category]
         passed = sum(1 for c in checks if c.passed)
+        total = len(checks)
+        label = category_config[category]
+        all_ok = passed == total
 
-        if passed == len(checks):
-            console.print(
-                f"{config['icon']} {config['label']} "
-                f"[green]{passed}/{len(checks)}[/green]"
-            )
-        else:
-            console.print(
-                f"{config['icon']} {config['label']} [red]{passed}/{len(checks)}[/red]"
-            )
+        badge = (
+            f"[green]{passed}/{total}[/green]"
+            if all_ok
+            else f"[red]{passed}/{total}[/red]"
+        )
+        lines.append(f"[bold]{label}[/bold]  {badge}")
 
         for check in checks:
             if check.passed:
-                details = f" [dim]({check.details})[/dim]" if check.details else ""
-                console.print(f"   [green]✓[/green] {check.name}{details}")
+                tag = "[green]✓[/green]"
+                text = check.name
+                if check.details:
+                    text += f"  [dim]{check.details}[/dim]"
             else:
-                console.print(
-                    f"   [red]✗[/red] {check.name} — [red]{check.error}[/red]"
-                )
+                tag = "[red]✗[/red]"
+                text = f"{check.name}  [red]{check.error}[/red]"
                 if check.hint:
-                    console.print(f"     [dim]→ {check.hint}[/dim]")
+                    text += f"  [dim]→ {check.hint}[/dim]"
+            lines.append(f"  {tag}  {text}")
+        lines.append("")
 
+    if result.passed:
+        title = "[bold green]✓ Preflight passed[/bold green]"
+        border = "green"
+    else:
+        title = "[bold red]✗ Preflight failed[/bold red]"
+        border = "red"
+
+    # Strip the trailing empty line so the panel doesn't have a gap at the bottom.
+    if lines and lines[-1] == "":
+        lines.pop()
+
+    console.print()
+    console.print(
+        Panel(
+            "\n".join(lines),
+            title=title,
+            border_style=border,
+            box=ROUNDED,
+            expand=False,
+            padding=(0, 2),
+        )
+    )
     console.print()
     return result.passed
 
@@ -230,9 +254,6 @@ def server_run():
     # Run preflight checks
     result = run_preflight_checks()
     if not _print_preflight_result(result):
-        error_console.print(
-            "\n[red]✗ Preflight checks failed. Fix the issues above.[/red]"
-        )
         raise typer.Exit(1)
 
     _ensure_endpoint_reachable()
@@ -283,7 +304,6 @@ def _ensure_lightpanda_installed() -> None:
     from aria.config.api import Lightpanda
 
     if Lightpanda.is_available():
-        console.print("[green]✓[/green] Lightpanda installed")
         return
 
     from aria.scripts.lightpanda import download_lightpanda
@@ -375,7 +395,6 @@ def _ensure_models_downloaded() -> None:
 
         path = Path(model_path)
         if path.exists() and path.is_dir():
-            console.print(f"[green]✓[/green] {alias} model ready")
             continue
 
         raw_value = getenv(env_var, "")
@@ -555,9 +574,6 @@ def server_start(
     # Run preflight checks
     result = run_preflight_checks()
     if not _print_preflight_result(result):
-        error_console.print(
-            "\n[red]✗ Preflight checks failed. Fix the issues above.[/red]"
-        )
         raise typer.Exit(1)
 
     # Stop vLLM first if requested (before endpoint validation)

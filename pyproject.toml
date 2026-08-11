@@ -21,7 +21,7 @@ dependencies = [
     "llama-index-llms-openrouter",
     "llama-index-vector-stores-chroma",
     "loguru",
-    "markitdown[pdf]",
+    "markitdown[pdf, docx, pptx, xlsx, xls]",
     "openinference-instrumentation-llama-index",
     "playwright",
     "pydantic",
@@ -105,6 +105,9 @@ typeCheckingMode = "standard"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 addopts = "-n logical --dist loadscope --cov=src/aria --cov-report=term-missing"
+markers = [
+    "voice: tests for whisper.cpp/kokoro-tts voice components (excluded from CI; too heavy for CI runners)",
+]
 
 [tool.coverage.run]
 source = ["src/aria"]

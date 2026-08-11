@@ -71,6 +71,7 @@ class AppState(BaseModel):
     prompt_enhancer: PromptEnhancerAgent | None = None
     vllm_manager: VllmServerManager | None = None
     browser_manager: Any = None
+    voice_manager: Any = None
     db_engine: Engine | None = None
     startup_complete: bool = False
     startup_event: asyncio.Event = asyncio.Event()

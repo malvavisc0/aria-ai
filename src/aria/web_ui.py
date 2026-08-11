@@ -12,6 +12,9 @@ from chainlit.types import ThreadDict
 from aria.web.hooks import (
     auth_callback_handler,
     get_data_layer_handler,
+    on_audio_chunk_handler,
+    on_audio_end_handler,
+    on_audio_start_handler,
     on_chat_end_handler,
     on_chat_resume_handler,
     on_chat_start_handler,
@@ -60,6 +63,21 @@ async def on_chat_resume(thread: ThreadDict) -> None:
 @cl.on_message
 async def on_message(message: cl.Message) -> None:
     await on_message_handler(message)
+
+
+@cl.on_audio_start
+async def on_audio_start() -> bool:
+    return await on_audio_start_handler()
+
+
+@cl.on_audio_chunk
+async def on_audio_chunk(chunk: cl.InputAudioChunk) -> None:
+    await on_audio_chunk_handler(chunk)
+
+
+@cl.on_audio_end
+async def on_audio_end() -> None:
+    await on_audio_end_handler()
 
 
 @cl.on_mcp_connect

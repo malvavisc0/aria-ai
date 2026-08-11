@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from pathlib import Path
+from typing import Protocol
 
 from chromadb import PersistentClient as ChromaDBPersistentClient
 from loguru import logger
@@ -365,6 +367,111 @@ async def _init_browser() -> None:
         logger.info("Lightpanda not installed — browser tools disabled")
 
 
+async def _init_voice() -> None:
+    """Start whisper.cpp (STT) and the kokoro TTS server if available."""
+    from aria.config.api import Voice
+
+    if not Voice.is_available():
+        logger.info("Voice STT not installed — voice features disabled")
+        return
+
+    from aria.server.voice import (
+        KokoroManager,
+        WhisperCppManager,
+        set_kokoro_manager,
+        set_whisper_manager,
+    )
+
+    binary = Voice.get_whisper_binary_path()
+    if binary is None:
+        return
+    whisper = WhisperCppManager(
+        binary, Voice.get_whisper_model_path(), Voice.whisper_port
+    )
+    if await whisper.start():
+        _state.voice_manager = whisper
+        set_whisper_manager(whisper)
+        logger.info("whisper.cpp STT started")
+    else:
+        logger.warning("whisper.cpp failed to start — voice disabled")
+        return
+
+    python_exe = Voice.get_kokoro_python()
+    if python_exe is None or not Voice.is_kokoro_available():
+        logger.info("kokoro-tts not installed — TTS disabled (STT-only mode)")
+        return
+
+    from aria import scripts as scripts_pkg
+
+    server_script = Path(scripts_pkg.__file__).parent / "kokoro_server.py"
+    kokoro = KokoroManager(
+        server_script=server_script,
+        model_path=Voice.get_kokoro_model_path(),
+        voices_path=Voice.get_kokoro_voices_path(),
+        python_exe=python_exe,
+        port=Voice.kokoro_port,
+        voice=Voice.kokoro_voice,
+        lang=Voice.kokoro_lang,
+    )
+    if await kokoro.start():
+        set_kokoro_manager(kokoro)
+        logger.info("kokoro TTS ready")
+    else:
+        logger.warning("kokoro TTS failed to start — TTS disabled (STT-only mode)")
+
+
+async def _stop_voice() -> None:
+    """Stop the kokoro TTS server and whisper.cpp (both are persistent)."""
+    from aria.server.voice import get_kokoro_manager, set_kokoro_manager
+
+    kokoro = get_kokoro_manager()
+    if kokoro is not None:
+        try:
+            await kokoro.stop()
+        except Exception as e:
+            logger.error(f"Error stopping kokoro server: {e}")
+        finally:
+            set_kokoro_manager(None)
+
+    if _state.voice_manager:
+        try:
+            await _state.voice_manager.stop()
+            logger.info("whisper.cpp stopped")
+        except Exception as e:
+            logger.error(f"Error stopping whisper.cpp: {e}")
+        finally:
+            from aria.server.voice import set_whisper_manager
+
+            set_whisper_manager(None)
+            _state.voice_manager = None
+
+
+class _Stoppable(Protocol):
+    """Minimal interface for managers with an async stop()."""
+
+    async def stop(self) -> None: ...
+
+
+async def _stop_safely(manager: _Stoppable) -> None:
+    """Stop a manager, swallowing errors (used by cleanup paths)."""
+    try:
+        await manager.stop()
+    except Exception:
+        pass
+
+
+async def _stop_voice_safely() -> None:
+    """Stop both kokoro and whisper managers, swallowing errors."""
+    from aria.server.voice import get_kokoro_manager, set_kokoro_manager
+
+    kokoro = get_kokoro_manager()
+    if kokoro is not None:
+        await _stop_safely(kokoro)
+        set_kokoro_manager(None)
+    if _state.voice_manager:
+        await _stop_safely(_state.voice_manager)
+
+
 async def _cleanup_on_failure() -> None:
     """Clean up partially initialized resources after startup failure.
 
@@ -374,11 +481,12 @@ async def _cleanup_on_failure() -> None:
     global _log_sink_id, _tool_call_sink_id
 
     if _state.browser_manager:
-        try:
-            await _state.browser_manager.stop()
-        except Exception:
-            pass
+        await _stop_safely(_state.browser_manager)
         _state.browser_manager = None
+
+    if _state.voice_manager:
+        await _stop_voice_safely()
+        _state.voice_manager = None
 
     if _state.vllm_manager:
         try:
@@ -400,6 +508,7 @@ async def _cleanup_on_failure() -> None:
         _sinks.log_sink_id = None
     if _sinks.tool_call_sink_id is not None:
         logger.remove(_sinks.tool_call_sink_id)
+        _sinks.tool_call_sink_id = None
         _sinks.tool_call_sink_id = None
 
 
@@ -512,6 +621,47 @@ def _log_reindex_result(task: asyncio.Task[dict[str, object]]) -> None:
         logger.info("Knowledge hub ready — no new files to index")
 
 
+async def _safe_init_chat_llm() -> bool:
+    """Initialize chat LLM client, returning True on success."""
+    try:
+        logger.info("Initializing chat LLM client...")
+        _init_chat_llm()
+        return True
+    except Exception as e:
+        logger.warning(f"Chat LLM client failed to initialize: {e}.")
+        return False
+
+
+async def _safe_init_vector_db() -> None:
+    try:
+        logger.info("Initializing vector database...")
+        _init_vector_db()
+    except Exception as e:
+        logger.warning(f"Vector database failed to initialize: {e}.")
+
+
+async def _safe_init_agent_workflows() -> None:
+    try:
+        logger.info("Initializing agent workflows...")
+        _init_agent_workflows()
+    except Exception as e:
+        logger.warning(f"Agent workflows failed to initialize: {e}.")
+
+
+async def _safe_init_browser() -> None:
+    try:
+        await _init_browser()
+    except Exception as e:
+        logger.warning(f"Browser failed to start: {e}.")
+
+
+async def _safe_init_voice() -> None:
+    try:
+        await _init_voice()
+    except Exception as e:
+        logger.warning(f"Voice failed to start: {e}.")
+
+
 async def on_app_startup_handler() -> None:
     """Initialize the application on startup.
 
@@ -543,32 +693,17 @@ async def on_app_startup_handler() -> None:
 
     _llm_ready = False
     if _vllm_ready:
-        try:
-            logger.info("Initializing chat LLM client...")
-            _init_chat_llm()
-            _llm_ready = True
-        except Exception as e:
-            logger.warning(f"Chat LLM client failed to initialize: {e}.")
+        _llm_ready = await _safe_init_chat_llm()
 
-    try:
-        logger.info("Initializing vector database...")
-        _init_vector_db()
-    except Exception as e:
-        logger.warning(f"Vector database failed to initialize: {e}.")
+    await _safe_init_vector_db()
 
     _cleanup_orphaned_collections()
 
     if _llm_ready and _state.llm is not None:
-        try:
-            logger.info("Initializing agent workflows...")
-            _init_agent_workflows()
-        except Exception as e:
-            logger.warning(f"Agent workflows failed to initialize: {e}.")
+        await _safe_init_agent_workflows()
 
-    try:
-        await _init_browser()
-    except Exception as e:
-        logger.warning(f"Browser failed to start: {e}.")
+    await _safe_init_browser()
+    await _safe_init_voice()
 
     if KnowledgeHub.enabled:
         from aria.server.knowledge_hub import KnowledgeHubIndexer
@@ -640,6 +775,7 @@ def _reset_app_state() -> None:
     _state.vector_db = None
     _state.agents_workflow = None
     _state.prompt_enhancer = None
+    _state.voice_manager = None
     _state.startup_complete = False
     _state.startup_event.clear()
     if _state.db_engine:
@@ -674,6 +810,7 @@ async def on_app_shutdown_handler() -> None:
     reset_data_layer_cache()
     _stop_vllm_servers(_consume_skip_vllm_sentinel())
     await _stop_browser()
+    await _stop_voice()
     _reset_app_state()
     logger.info("Aria web UI shutdown complete")
     _remove_log_sinks()

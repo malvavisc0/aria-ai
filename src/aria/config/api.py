@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from aria.config import get_optional_env
-from aria.config.folders import Bin, Knowledge, Venvs
+from aria.config.folders import Bin, Knowledge, Models, Venvs
 
 
 class Vllm:
@@ -240,3 +240,103 @@ class Lightpanda:
             True if the binary exists, False otherwise.
         """
         return cls.get_binary_path() is not None
+
+
+class Voice:
+    """Configuration for the local voice assistant (whisper.cpp + kokoro-tts).
+
+    Both components are optional and run on the host CPU. Voice features
+    are disabled if the whisper.cpp binary is not installed — TTS-only is
+    not useful. Run 'aria voice download' to install both.
+
+    whisper.cpp is a persistent HTTP server exposing a multipart
+    ``/inference`` endpoint; kokoro-tts is a one-shot CLI invoked per
+    synthesis. All fields are env-driven with sensible defaults.
+    """
+
+    whisper_model: str = get_optional_env(
+        "ARIA_VOICE_WHISPER_MODEL", "large-v3-turbo-q5_0ss"
+    )
+    whisper_port: int = int(get_optional_env("ARIA_VOICE_WHISPER_PORT", "9091"))
+    kokoro_voice: str = get_optional_env("ARIA_VOICE_KOKORO_VOICE", "af_heart")
+    kokoro_lang: str = get_optional_env("ARIA_VOICE_KOKORO_LANG", "en-us")
+    kokoro_port: int = int(get_optional_env("ARIA_VOICE_KOKORO_PORT", "9092"))
+    audio_sample_rate: int = int(
+        get_optional_env("ARIA_VOICE_AUDIO_SAMPLE_RATE", "16000")
+    )
+    silence_threshold_ms: float = float(
+        get_optional_env("ARIA_VOICE_SILENCE_THRESHOLD_MS", "1300.0")
+    )
+    rms_threshold: int = int(get_optional_env("ARIA_VOICE_RMS_THRESHOLD", "500"))
+
+    @classmethod
+    def get_bin_path(cls) -> Path:
+        """Get the resolved binary directory path."""
+        return Bin.path
+
+    @classmethod
+    def get_whisper_binary_path(cls) -> Path | None:
+        """Get the whisper.cpp server binary path, or None if not installed.
+
+        whisper.cpp ships as a tarball/zip of libraries plus the
+        ``whisper-server`` executable, extracted to ``~/.aria/bin/whisper-cpp``
+        (the binary sits in a per-release subdirectory next to its libraries).
+        """
+        for candidate in (Bin.path / "whisper-cpp").rglob("whisper-server"):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @classmethod
+    def get_whisper_model_path(cls) -> Path:
+        """Get the GGUF model path for the configured whisper model."""
+        return Models.path / f"ggml-{cls.whisper_model}.bin"
+
+    @classmethod
+    def get_kokoro_dir(cls) -> Path:
+        """Get the kokoro model directory (~/.aria/models/kokoro)."""
+        return Models.path / "kokoro"
+
+    @classmethod
+    def get_kokoro_model_path(cls) -> Path:
+        """Get the kokoro ONNX model path."""
+        return cls.get_kokoro_dir() / "kokoro-v1.0.onnx"
+
+    @classmethod
+    def get_kokoro_voices_path(cls) -> Path:
+        """Get the kokoro voices file path."""
+        return cls.get_kokoro_dir() / "voices-v1.0.bin"
+
+    @classmethod
+    def get_kokoro_python(cls) -> Path | None:
+        """Get the kokoro tool's Python interpreter, or None if not installed.
+
+        ``uv tool install kokoro-tts`` places the interpreter at the
+        conventional uv tool path. The persistent kokoro server runs under
+        this interpreter so the ONNX model loads once per session.
+        """
+        python = (
+            Path.home()
+            / ".local"
+            / "share"
+            / "uv"
+            / "tools"
+            / "kokoro-tts"
+            / "bin"
+            / "python"
+        )
+        return python if python.exists() else None
+
+    @classmethod
+    def is_kokoro_available(cls) -> bool:
+        """True when the kokoro ONNX model is present."""
+        return cls.get_kokoro_model_path().exists()
+
+    @classmethod
+    def is_available(cls) -> bool:
+        """Check if voice STT is installed (TTS is best-effort).
+
+        Returns:
+            True if the whisper.cpp binary exists, False otherwise.
+        """
+        return cls.get_whisper_binary_path() is not None

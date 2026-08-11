@@ -41,6 +41,7 @@ from aria.cli import (
     server,
     system,
     users,
+    voice,
 )
 from aria.cli import (
     docling as docling_cli,
@@ -66,6 +67,7 @@ app.add_typer(users.app, name="users")
 app.add_typer(vllm_cli.app, name="vllm")
 app.add_typer(docling_cli.app, name="docling")
 app.add_typer(lightpanda.app, name="lightpanda")
+app.add_typer(voice.app, name="voice")
 app.add_typer(models.app, name="models")
 app.add_typer(config.app, name="config")
 app.add_typer(server.app, name="server")
@@ -129,6 +131,7 @@ COMMAND_GROUPS = [
             ("vllm", "Install and manage vLLM"),
             ("docling", "Install and manage Granite-Docling worker"),
             ("lightpanda", "Download and manage Lightpanda browser"),
+            ("voice", "Download and manage voice assistant"),
             ("server", "Start or stop the web UI"),
             ("system", "Inspect hardware and GPU"),
         ],

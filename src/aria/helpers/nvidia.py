@@ -583,6 +583,77 @@ def _kv_bytes_per_elem(kv_cache_dtype: str) -> float:
     return 2.0  # default: fp16/bf16
 
 
+def _fallback_kv_estimate(
+    model_size_mb: int, context_size: int, kv_cache_dtype: str
+) -> int:
+    """Estimate KV cache from model weight size when config.json is unavailable.
+
+    Heuristic: kv_cache ≈ model_weights × (ctx / 32k) × dtype_factor
+    where dtype_factor is the KV dtype size relative to fp16.
+    """
+    dtype_factor = _kv_bytes_per_elem(kv_cache_dtype) / 2.0
+    return int(model_size_mb * (context_size / 32768) * dtype_factor)
+
+
+def _resolve_model_size_mb(model_path: str, default_size_mb: int) -> int:
+    """Read model weight size from disk, falling back to ``default_size_mb``.
+
+    Logs an info message when the path is missing or unreadable.
+    Returns ``default_size_mb`` in that case.
+    """
+    from pathlib import Path
+
+    from aria.helpers.memory import get_model_file_size
+
+    model_size_mb = 0
+    if model_path:
+        model_size_mb = get_model_file_size(Path(model_path))
+
+    if model_size_mb <= 0:
+        logger.info(
+            "Model path '{path}' not found on disk; using default "
+            "weight estimate of {default} MiB.",
+            path=model_path or "(empty)",
+            default=default_size_mb,
+        )
+        return default_size_mb
+    return model_size_mb
+
+
+def _clamp_to_free_vram(
+    utilization: float,
+    total_vram_mb: int,
+    free_vram_mb: int,
+    min_util: float,
+) -> float:
+    """Clamp utilization so vLLM does not OOM when other CUDA processes use VRAM.
+
+    ``--gpu-memory-utilization`` is applied to total VRAM, not free. If
+    utilization × total > free, vLLM OOMs. Returns a clamped value (or the
+    original if no other processes are detected).
+    """
+    if free_vram_mb <= 0:
+        return utilization
+
+    cuda_margin_mb = 256
+    max_safe_util = max(min_util, (free_vram_mb - cuda_margin_mb) / total_vram_mb)
+    if utilization <= max_safe_util:
+        return utilization
+
+    clamped = round(max_safe_util, 2)
+    logger.info(
+        "Clamping gpu_memory_utilization from {orig:.2f} to "
+        "{clamped:.2f} — other CUDA processes using "
+        "{used_mb} MiB VRAM (free: {free} MiB, total: {total} MiB)",
+        orig=utilization,
+        clamped=clamped,
+        used_mb=total_vram_mb - free_vram_mb,
+        free=free_vram_mb,
+        total=total_vram_mb,
+    )
+    return clamped
+
+
 def _estimate_kv_cache_mb(
     model_path: str,
     context_size: int,
@@ -750,26 +821,14 @@ def calculate_gpu_memory_utilization(
         >>> calculate_gpu_memory_utilization(33400, "/models/9b-int4", 131072, "fp8")
         0.62
     """
-    from pathlib import Path
-
-    from aria.helpers.memory import get_model_file_size
-
     MIN_UTILIZATION = 0.50
     MAX_UTILIZATION = 0.95
     FALLBACK = 0.85
     DEFAULT_MODEL_SIZE_MB = 4096  # Assume ~4 GiB if model path is unknown
 
-    # vLLM v0.21+ automatically profiles and reserves CUDA graph memory
-    # within the gpu_memory_utilization budget (see
-    # VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS).  Our overhead only needs
-    # to cover the *other* fixed costs: activation/scratch buffers, CUDA
-    # context, and similar non-profiled memory.  Eager mode
-    # (--enforce-eager) skips graph capture entirely, so its overhead is
-    # lower.  Callers may still override via ``vllm_overhead_mb``.
     if vllm_overhead_mb is None:
         vllm_overhead_mb = 768 if enforce_eager else 1536
 
-    # Guard: if VRAM detection failed, return a safe fallback
     if total_vram_mb <= 0:
         logger.warning(
             "Cannot auto-calculate gpu_memory_utilization: "
@@ -778,47 +837,13 @@ def calculate_gpu_memory_utilization(
         )
         return FALLBACK
 
-    # --- Step 1: Estimate model weight size from disk ---
-    model_size_mb = 0
-    if model_path:
-        model_size_mb = get_model_file_size(Path(model_path))
-
-    if model_size_mb <= 0:
-        logger.info(
-            "Model path '{path}' not found on disk; using default "
-            "weight estimate of {default} MiB.",
-            path=model_path or "(empty)",
-            default=DEFAULT_MODEL_SIZE_MB,
-        )
-        model_size_mb = DEFAULT_MODEL_SIZE_MB
-
-    # --- Step 2: Estimate KV cache size (architecture-aware) ---
+    model_size_mb = _resolve_model_size_mb(model_path, DEFAULT_MODEL_SIZE_MB)
     kv_cache_mb = _estimate_kv_cache_mb(model_path, context_size, kv_cache_dtype)
-
     kv_source = "config.json"
     if kv_cache_mb is None:
-        # Fallback: estimate when config.json is unavailable.
-        # Approximation: kv_cache ≈ model_weights × (ctx/32k) × dtype_factor
-        # This assumes KV cache at 32k baseline is roughly proportional to
-        # model weight size — conservative for GQA models, adequate for MHA.
+        kv_cache_mb = _fallback_kv_estimate(model_size_mb, context_size, kv_cache_dtype)
         kv_source = "heuristic (no config.json)"
-        if kv_cache_dtype in (
-            "nvfp4",
-            "int4_per_token_head",
-            "turboquant_k8v4",
-            "turboquant_4bit_nc",
-            "turboquant_k3v4_nc",
-            "turboquant_3bit_nc",
-        ):
-            kv_dtype_factor = 0.25
-        elif kv_cache_dtype.startswith("fp8"):
-            kv_dtype_factor = 0.5
-        else:
-            kv_dtype_factor = 1.0
-        context_factor = context_size / 32768
-        kv_cache_mb = int(model_size_mb * context_factor * kv_dtype_factor)
 
-    # --- Step 3: Compute per-GPU memory needed (shard by TP) ---
     per_gpu_weights_mb, per_gpu_kv_mb, raw_needed_mb = estimate_per_gpu_memory_mb(
         model_weights_mb=model_size_mb,
         kv_cache_mb=kv_cache_mb,
@@ -827,38 +852,15 @@ def calculate_gpu_memory_utilization(
     )
     tp = max(1, tensor_parallel_size)
     needed_mb = int(raw_needed_mb * safety_factor)
-
-    # --- Step 4: Calculate utilization ---
     utilization = needed_mb / total_vram_mb
+    utilization = max(
+        MIN_UTILIZATION,
+        min(MAX_UTILIZATION, round(utilization, 2)),
+    )
+    utilization = _clamp_to_free_vram(
+        utilization, total_vram_mb, free_vram_mb, MIN_UTILIZATION
+    )
 
-    # Clamp to safe bounds
-    utilization = max(MIN_UTILIZATION, min(MAX_UTILIZATION, round(utilization, 2)))
-
-    # --- Step 4b: Account for other CUDA processes ---
-    # When other processes consume VRAM, vLLM's --gpu-memory-utilization
-    # is applied to TOTAL VRAM, not free VRAM.  If utilization × total > free,
-    # vLLM will OOM during warmup.  Clamp to what's actually available.
-    if free_vram_mb > 0:
-        # Leave a small margin for CUDA context overhead
-        cuda_margin_mb = 256
-        max_safe_util = max(
-            MIN_UTILIZATION,
-            (free_vram_mb - cuda_margin_mb) / total_vram_mb,
-        )
-        if utilization > max_safe_util:
-            logger.info(
-                "Clamping gpu_memory_utilization from {orig:.2f} to "
-                "{clamped:.2f} — other CUDA processes using "
-                "{used_mb} MiB VRAM (free: {free} MiB, total: {total} MiB)",
-                orig=utilization,
-                clamped=round(max_safe_util, 2),
-                used_mb=total_vram_mb - free_vram_mb,
-                free=free_vram_mb,
-                total=total_vram_mb,
-            )
-            utilization = round(max_safe_util, 2)
-
-    # --- Step 5: Log the reasoning ---
     logger.info(
         "Auto-calculated gpu_memory_utilization={util:.2f}\n"
         "  VRAM per GPU:      {vram:>8,} MiB\n"

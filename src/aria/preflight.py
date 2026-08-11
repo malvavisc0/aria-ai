@@ -266,6 +266,77 @@ def _check_docling(checks: list[CheckResult]) -> None:
     )
 
 
+def _check_voice(checks: list[CheckResult]) -> None:
+    """Check that voice components (whisper.cpp STT + kokoro TTS) are installed.
+
+    Both are required: the voice pipeline degrades to STT-only if TTS is
+    missing, but STT alone still depends on the whisper binary. A missing
+    whisper binary or kokoro tool/model is a hard preflight failure.
+    """
+    from aria.config.api import Voice
+
+    whisper = Voice.get_whisper_binary_path()
+    if whisper is not None:
+        checks.append(
+            CheckResult(
+                name="whisper.cpp (STT)",
+                passed=True,
+                category="binaries",
+                details=f"Found at {whisper}",
+            )
+        )
+    else:
+        checks.append(
+            CheckResult(
+                name="whisper.cpp (STT)",
+                passed=False,
+                category="binaries",
+                error="whisper.cpp binary not installed",
+                hint="Run: aria voice download",
+            )
+        )
+
+    if Voice.is_kokoro_available():
+        checks.append(
+            CheckResult(
+                name="kokoro TTS",
+                passed=True,
+                category="binaries",
+                details=f"Model at {Voice.get_kokoro_model_path()}",
+            )
+        )
+    else:
+        checks.append(
+            CheckResult(
+                name="kokoro TTS",
+                passed=False,
+                category="binaries",
+                error="kokoro TTS model not installed",
+                hint="Run: aria voice download",
+            )
+        )
+
+    if Voice.get_kokoro_python() is None:
+        checks.append(
+            CheckResult(
+                name="kokoro-tts tool",
+                passed=False,
+                category="binaries",
+                error="kokoro-tts Python tool not installed",
+                hint="Run: aria voice download",
+            )
+        )
+    else:
+        checks.append(
+            CheckResult(
+                name="kokoro-tts tool",
+                passed=True,
+                category="binaries",
+                details="uv tool env ready",
+            )
+        )
+
+
 def _check_model_exists(model_path: str) -> bool:
     """Check if a model directory exists under ~/.aria/models/.
 
@@ -451,13 +522,16 @@ def run_preflight_checks() -> PreflightResult:
         1. All required environment variables are set
         2. Data folder exists
         3. vLLM is installed
-        4. Chat model is configured and downloaded
-        5. Embeddings model is configured and downloaded
-        6. Token limit is within context bounds
-        7. Memory requirements fit available hardware
-        8. LLM server connectivity (informational)
-        9. Knowledge database access
-       10. Tool loading
+        4. Lightpanda is installed
+        5. Docling worker is installed
+        6. Voice components (whisper.cpp STT + kokoro TTS) are installed
+        7. Chat model is configured and downloaded
+        8. Embeddings model is configured and downloaded
+        9. Token limit is within context bounds
+       10. Memory requirements fit available hardware
+       11. LLM server connectivity (informational)
+       12. Knowledge database access
+       13. Tool loading
 
     Returns:
         PreflightResult with pass/fail status and all check details.
@@ -469,6 +543,7 @@ def run_preflight_checks() -> PreflightResult:
     _check_binaries(checks)
     _check_lightpanda(checks)
     _check_docling(checks)
+    _check_voice(checks)
     _check_models(checks)
     _check_token_limit(checks)
     _check_memory_requirements(checks)
