@@ -372,6 +372,16 @@ def test_strip_markdown_collapses_whitespace() -> None:
     assert hooks_mod._strip_markdown_for_tts("a\n\n  b   c") == "a b c"
 
 
+def test_strip_markdown_removes_bare_urls() -> None:
+    src = "Check https://example.com/page for details"
+    assert hooks_mod._strip_markdown_for_tts(src) == "Check for details"
+
+
+def test_strip_markdown_removes_file_paths() -> None:
+    src = "I saved it to ~/.aria/output/report.md and /tmp/notes.txt"
+    assert hooks_mod._strip_markdown_for_tts(src) == "I saved it to and"
+
+
 @pytest.mark.asyncio
 async def test_process_audio_strips_markdown_before_tts(
     user_session: _UserSession, monkeypatch: pytest.MonkeyPatch, patch_cl: None

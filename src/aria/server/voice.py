@@ -50,8 +50,12 @@ class WhisperCppManager:
 
     Started during ``on_app_startup`` if ``Voice.is_available()``, stopped
     during ``on_app_shutdown``. The server is launched with
-    ``whisper-server --host --port --model`` (no subcommand) and exposes a
-    multipart ``/inference`` endpoint plus a ``/health`` probe.
+    ``whisper-server --host --port --model -fa`` (no subcommand) and exposes
+    a multipart ``/inference`` endpoint plus a ``/health`` probe. ``-fa``
+    enables flash attention (~13% faster, lower VRAM); GPU offload is
+    automatic when the binary was built with a GPU backend (CUDA/Metal) —
+    there is no runtime layer-offload flag (do not pass ``-ng``, which
+    *disables* the GPU).
     """
 
     HEALTH_TIMEOUT = 30.0
@@ -76,6 +80,7 @@ class WhisperCppManager:
                 str(self._port),
                 "--model",
                 str(self._model),
+                "-fa",
             ]
             logger.debug(f"Starting whisper.cpp: {' '.join(cmd)}")
             self._process = subprocess.Popen(

@@ -260,7 +260,7 @@ class Voice:
 
     enabled: bool = get_optional_env("ARIA_VOICE_ENABLED", "true").lower() == "true"
     whisper_model: str = get_optional_env(
-        "ARIA_VOICE_WHISPER_MODEL", "large-v3-turbo-q5_0s"
+        "ARIA_VOICE_WHISPER_MODEL", "large-v3-turbo-q5_0"
     )
     whisper_port: int = int(get_optional_env("ARIA_VOICE_WHISPER_PORT", "9091"))
     kokoro_voice: str = get_optional_env("ARIA_VOICE_KOKORO_VOICE", "af_heart")
@@ -283,10 +283,14 @@ class Voice:
     def get_whisper_binary_path(cls) -> Path | None:
         """Get the whisper.cpp server binary path, or None if not installed.
 
-        whisper.cpp ships as a tarball/zip of libraries plus the
-        ``whisper-server`` executable, extracted to ``~/.aria/bin/whisper-cpp``
-        (the binary sits in a per-release subdirectory next to its libraries).
+        The binary lives flat at ``~/.aria/bin/whisper-cpp/whisper-server``
+        (a static build is self-contained, no companion libraries). A
+        legacy nested prebuilt layout (``whisper-cpp/<release-dir>/
+        whisper-server``) is still found as a fallback.
         """
+        flat = Bin.path / "whisper-cpp" / "whisper-server"
+        if flat.is_file():
+            return flat
         for candidate in (Bin.path / "whisper-cpp").rglob("whisper-server"):
             if candidate.is_file():
                 return candidate

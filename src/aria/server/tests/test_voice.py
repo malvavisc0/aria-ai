@@ -91,6 +91,7 @@ class TestWhisperCppManager:
             "9091",
             "--model",
             "/models/ggml-small.en.bin",
+            "-fa",
         ]
 
     @pytest.mark.asyncio

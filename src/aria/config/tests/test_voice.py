@@ -60,6 +60,24 @@ class TestVoice:
             assert Voice.is_available() is True
             assert Voice.get_whisper_binary_path() == exe
 
+    def test_flat_path_preferred_over_nested(self, tmp_path: Path) -> None:
+        """A flat whisper-server wins over a legacy nested layout."""
+        import aria.config.folders as folders_mod
+
+        with _patch_paths(folders_mod, tmp_path):
+            nested = (
+                tmp_path
+                / "bin"
+                / "whisper-cpp"
+                / "whisper-bin-ubuntu-x64"
+                / "whisper-server"
+            )
+            nested.parent.mkdir(parents=True)
+            nested.touch()
+            flat = tmp_path / "bin" / "whisper-cpp" / "whisper-server"
+            flat.touch()
+            assert Voice.get_whisper_binary_path() == flat
+
     def test_kokoro_availability(self, tmp_path: Path) -> None:
         import aria.config.folders as folders_mod
 

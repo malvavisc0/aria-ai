@@ -232,6 +232,17 @@ _MD_REDUCTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"`([^`]*)`"), r"\1"),  # inline code
     (re.compile(r"!\[([^\]]*)\]\([^)]*\)"), r"\1"),  # images -> alt text
     (re.compile(r"\[([^\]]*)\]\([^)]*\)"), r"\1"),  # links -> text
+    (re.compile(r"https?://\S+"), " "),  # bare URLs
+    (
+        re.compile(
+            r"(?:~/|/)\S+\."
+            r"(?:md|txt|rst|py|js|ts|json|csv|html?|css|ya?ml|toml|xml|log|sh|tex"
+            r"|sql|go|rs|c|cpp|java|rb"
+            r"|png|jpe?g|gif|webp|svg|pdf|wav|mp3|mp4)"
+            r"(?:\b|(?=\s))"
+        ),
+        " ",
+    ),  # file paths
     (re.compile(r"^#{1,6}\s+", re.MULTILINE), ""),  # headers
     (re.compile(r"^\s{0,3}>\s?", re.MULTILINE), ""),  # blockquotes
     (re.compile(r"^\s{0,3}[-*+]\s+", re.MULTILINE), ""),  # bullet lists
@@ -430,7 +441,9 @@ async def process_audio() -> None:
 
     from aria.web.message_pipeline import on_message_handler
 
-    output = await on_message_handler(cl.Message(content=transcription))
+    output = await on_message_handler(
+        cl.Message(content=transcription, metadata={"voice": True})
+    )
     answer = getattr(output, "answer_text", "") if output else ""
     if not answer.strip():
         logger.warning("No answer text from message pipeline")
@@ -438,12 +451,13 @@ async def process_audio() -> None:
 
     audio_bytes = await _text_to_speech(_strip_markdown_for_tts(answer))
     if audio_bytes and output is not None:
-        output.elements = [  # type: ignore[attr-defined]
-            cl.Audio(
+        existing = list(output.elements or [])
+        existing.append(
+            cl.Audio(  # type: ignore[arg-type]
                 content=audio_bytes,
                 auto_play=True,
-                name="answer.wav",
                 mime="audio/wav",
             )
-        ]
+        )
+        output.elements = existing  # type: ignore[attr-defined]
         await output.update()
