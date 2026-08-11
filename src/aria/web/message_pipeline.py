@@ -459,6 +459,7 @@ async def _handle_agent_stream_event(
     current_step: cl.Step | None,
     thinking: _ThinkingBlock,
     output: cl.Message,
+    answer_parts: list[str],
 ) -> tuple[cl.Step | None, _ThinkingBlock, bool, bool]:
     """Returns (current_step, thinking, emitted, content_emitted)."""
     if event.thinking_delta:
@@ -473,6 +474,7 @@ async def _handle_agent_stream_event(
             current_step = None
         await thinking.close()
         await output.stream_token(event.delta)
+        answer_parts.append(event.delta)
         return current_step, thinking, True, True
     return current_step, thinking, False, False
 
@@ -483,6 +485,7 @@ async def _handle_agent_output_event(
     thinking: _ThinkingBlock,
     output: cl.Message,
     content_emitted: bool,
+    answer_parts: list[str],
 ) -> bool:
     if not event.tool_calls:
         if current_step is not None:
@@ -491,20 +494,12 @@ async def _handle_agent_output_event(
         await thinking.close()
     if content_emitted:
         return False
-    return await _emit_final(output, event.response.content or "", thinking)
-
-
-async def _emit_final(
-    output: cl.Message, content: str, thinking: _ThinkingBlock
-) -> bool:
-    """Stream the final answer once, skipping empty or thinking-duplicate text.
-
-    Returns True if content was streamed.
-    """
-    if not content.strip() or content.strip() == thinking.full_text():
-        return False
-    await output.stream_token(content)
-    return True
+    final = event.response.content or ""
+    if final.strip() and final.strip() != thinking.full_text():
+        await output.stream_token(final)
+        answer_parts.append(final)
+        return True
+    return False
 
 
 async def _process_stream_event(
@@ -514,6 +509,7 @@ async def _process_stream_event(
     tools_called: list[str],
     output: cl.Message,
     content_emitted: bool,
+    answer_parts: list[str],
 ) -> tuple[cl.Step | None, _ThinkingBlock, bool, bool, bool]:
     """Process a single event. Returns (step, thinking, emitted, content_emitted, has_thinking)."""
     if isinstance(event, ToolCall):
@@ -524,13 +520,13 @@ async def _process_stream_event(
 
     if isinstance(event, AgentStream):
         step, thinking, emitted, ce = await _handle_agent_stream_event(
-            event, current_step, thinking, output
+            event, current_step, thinking, output, answer_parts
         )
         return step, thinking, emitted, ce, bool(event.thinking_delta)
 
     if isinstance(event, AgentOutput):
         emitted = await _handle_agent_output_event(
-            event, current_step, thinking, output, content_emitted
+            event, current_step, thinking, output, content_emitted, answer_parts
         )
         return current_step, thinking, emitted, emitted, False
 
@@ -544,18 +540,23 @@ async def _finalize_stream(
     emitted: bool,
     content_emitted: bool,
     has_thinking: bool,
+    answer_parts: list[str],
 ) -> tuple[bool, bool, bool]:
     if not content_emitted:
         final = getattr(handler_result.response, "content", None) or ""
-        if await _emit_final(output, final, thinking):
+        if final.strip() and final.strip() != thinking.full_text():
+            await output.stream_token(final)
+            answer_parts.append(final)
             emitted = True
             content_emitted = True
     await thinking.close()
     if not emitted:
         logger.warning("No assistant output emitted for message.")
-        await output.stream_token(
+        fallback = (
             "I wasn't able to generate a response. Please try rephrasing your request."
         )
+        await output.stream_token(fallback)
+        answer_parts.append(fallback)
         emitted = True
     return emitted, content_emitted, has_thinking
 
@@ -563,18 +564,30 @@ async def _finalize_stream(
 async def _stream_agent_response(
     handler: WorkflowHandler,
     output: cl.Message,
-) -> tuple[bool, dict]:
-    """Stream agent events to the UI and return whether output was emitted."""
+) -> tuple[bool, dict, str]:
+    """Stream agent events to the UI and return (emitted, meta, answer_text).
+
+    ``answer_text`` is the clean answer only (thinking/reasoning tokens
+    excluded) — used by the voice pipeline for TTS so Aria never narrates
+    its own internal reasoning.
+    """
     thinking = _ThinkingBlock(output)
     tools_called: list[str] = []
     current_step: cl.Step | None = None
     emitted = False
     content_emitted = False
     has_thinking = False
+    answer_parts: list[str] = []
 
     async for event in handler.stream_events():
         current_step, thinking, e, ce, ht = await _process_stream_event(
-            event, current_step, thinking, tools_called, output, content_emitted
+            event,
+            current_step,
+            thinking,
+            tools_called,
+            output,
+            content_emitted,
+            answer_parts,
         )
         emitted |= e
         content_emitted |= ce
@@ -587,10 +600,21 @@ async def _stream_agent_response(
         raise
 
     emitted, _content_emitted, has_thinking = await _finalize_stream(
-        output, thinking, handler_result, emitted, content_emitted, has_thinking
+        output,
+        thinking,
+        handler_result,
+        emitted,
+        content_emitted,
+        has_thinking,
+        answer_parts,
     )
 
-    return emitted, {"tools_called": tools_called, "has_thinking": has_thinking}
+    answer_text = "".join(answer_parts).strip()
+    return (
+        emitted,
+        {"tools_called": tools_called, "has_thinking": has_thinking},
+        answer_text,
+    )
 
 
 async def _fail_turn(
@@ -679,11 +703,13 @@ async def _stream_and_finalize(
     )
     _run_succeeded = False
     stream_meta: dict = {}
+    answer_text = ""
     try:
-        _, stream_meta = await _stream_agent_response(handler, output)
+        _, stream_meta, answer_text = await _stream_agent_response(handler, output)
         _run_succeeded = True
     finally:
         if _run_succeeded:
+            output.answer_text = answer_text  # type: ignore[attr-defined]
             await output.update()
             await _mark_message_processed(
                 message, extra_metadata={**pipeline_meta, **stream_meta}

@@ -226,7 +226,7 @@ async def test_process_audio_full_flow(
     )
 
     output = MagicMock()
-    output.content = "And hello to you"
+    output.answer_text = "And hello to you"
     monkeypatch.setattr(
         "aria.web.message_pipeline.on_message_handler", AsyncMock(return_value=output)
     )
@@ -290,7 +290,7 @@ async def test_process_audio_text_answer_sent_when_tts_fails(
     monkeypatch.setattr(hooks_mod, "_text_to_speech", AsyncMock(return_value=b""))
 
     output = MagicMock()
-    output.content = "Hello to you"
+    output.answer_text = "Hello to you"
     monkeypatch.setattr(
         "aria.web.message_pipeline.on_message_handler", AsyncMock(return_value=output)
     )

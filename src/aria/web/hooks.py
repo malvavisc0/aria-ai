@@ -359,7 +359,7 @@ async def process_audio() -> None:
     from aria.web.message_pipeline import on_message_handler
 
     output = await on_message_handler(cl.Message(content=transcription))
-    answer = output.content if output else ""
+    answer = getattr(output, "answer_text", "") if output else ""
     if not answer.strip():
         return
 

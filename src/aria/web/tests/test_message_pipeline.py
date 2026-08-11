@@ -163,7 +163,7 @@ class TestStreamAgentResponse:
         handler = self._make_handler(event)
         output = self._make_output()
 
-        emitted, meta = await pipeline._stream_agent_response(handler, output)
+        emitted, meta, _answer = await pipeline._stream_agent_response(handler, output)
 
         assert emitted is True
         assert meta["tools_called"] == []
@@ -183,10 +183,12 @@ class TestStreamAgentResponse:
         handler = self._make_handler(event)
         output = self._make_output()
 
-        emitted, meta = await pipeline._stream_agent_response(handler, output)
+        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
+
         assert emitted is True
         assert meta["has_thinking"] is True
         assert meta["tools_called"] == []
+        assert answer == ""
 
         output.stream_token.assert_any_await(pipeline._BLOCKQUOTE_PREFIX)
         output.stream_token.assert_any_await("pondering")
@@ -209,10 +211,11 @@ class TestStreamAgentResponse:
         handler = self._make_handler(thinking, regular)
         output = self._make_output()
 
-        emitted, meta = await pipeline._stream_agent_response(handler, output)
+        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
 
         assert emitted is True
         assert meta["has_thinking"] is True
+        assert answer == "answer"
         calls = [c.args[0] for c in output.stream_token.call_args_list]
         assert calls == [
             pipeline._BLOCKQUOTE_PREFIX,
@@ -235,11 +238,12 @@ class TestStreamAgentResponse:
         handler = self._make_handler(event)
         output = self._make_output()
 
-        emitted, meta = await pipeline._stream_agent_response(handler, output)
+        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
 
         assert emitted is True
         assert meta["tools_called"] == []
         assert meta["has_thinking"] is False
+        assert answer == "fallback answer"
         output.stream_token.assert_any_await("fallback answer")
 
     @pytest.mark.asyncio
@@ -262,10 +266,11 @@ class TestStreamAgentResponse:
         handler = self._make_handler(thinking, final)
         output = self._make_output()
 
-        emitted, meta = await pipeline._stream_agent_response(handler, output)
+        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
 
         assert emitted is True
         assert meta["has_thinking"] is True
+        assert answer == "the actual answer"
         calls = [c.args[0] for c in output.stream_token.call_args_list]
         # blockquoted thinking + the distinct final answer must both appear
         assert "reasoning here" in calls
@@ -291,10 +296,11 @@ class TestStreamAgentResponse:
         handler = self._make_handler(thinking, final)
         output = self._make_output()
 
-        emitted, meta = await pipeline._stream_agent_response(handler, output)
+        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
 
         assert emitted is True
         assert meta["has_thinking"] is True
+        assert answer == ""
         calls = [c.args[0] for c in output.stream_token.call_args_list]
         # "same text" appears once (as the blockquoted thinking), not twice
         assert calls.count("same text") == 1
@@ -809,7 +815,7 @@ class TestEditDetection:
         monkeypatch.setattr(
             pipeline,
             "_stream_agent_response",
-            AsyncMock(return_value=(True, {})),
+            AsyncMock(return_value=(True, {}, "")),
         )
 
         mock_handler = MagicMock()
@@ -880,7 +886,7 @@ class TestEditDetection:
         monkeypatch.setattr(
             pipeline,
             "_stream_agent_response",
-            AsyncMock(return_value=(True, {})),
+            AsyncMock(return_value=(True, {}, "")),
         )
 
         mock_handler = MagicMock()
@@ -935,7 +941,7 @@ class TestEditDetection:
         monkeypatch.setattr(
             pipeline,
             "_stream_agent_response",
-            AsyncMock(return_value=(True, {})),
+            AsyncMock(return_value=(True, {}, "")),
         )
         monkeypatch.setattr(
             pipeline.cl,
@@ -1170,7 +1176,7 @@ class TestOnMessageHandlerReturn:
         monkeypatch.setattr(
             pipeline,
             "_stream_agent_response",
-            AsyncMock(return_value=(True, {})),
+            AsyncMock(return_value=(True, {}, "")),
         )
 
         mock_memory = MagicMock()
