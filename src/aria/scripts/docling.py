@@ -1,8 +1,8 @@
-"""Granite-Docling (pdf-vlm) installation and detection utilities.
+"""Granite-Docling worker installation and detection utilities.
 
-The pdf-vlm stack (docling + docling-ibm-models + torch + transformers)
+The docling stack (docling + docling-ibm-models + torch + transformers)
 is an external tool: installed into an isolated venv at
-``~/.aria/venvs/pdf_vlm`` and invoked as a subprocess. Aria's own
+``~/.aria/venvs/docling`` and invoked as a subprocess. Aria's own
 dependency tree never imports these packages.
 """
 
@@ -12,7 +12,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from aria.config.folders import Bin
-from aria.config.pdf import PdfVlm
+from aria.config.pdf import DoclingVenv
 from aria.helpers.nvidia import get_cuda_version
 from aria.scripts.vllm import _create_venv  # reuse the venv builder
 
@@ -41,10 +41,10 @@ def detect_device() -> str:
 
 
 def _find_worker_dist_info() -> Path | None:
-    sp = PdfVlm.get_site_packages()
+    sp = DoclingVenv.get_site_packages()
     if not sp or not sp.is_dir():
         return None
-    return next(iter(sp.glob("aria_pdf_vlm-*.dist-info")), None)
+    return next(iter(sp.glob("docling-*.dist-info")), None)
 
 
 def is_installed() -> bool:
@@ -53,7 +53,8 @@ def is_installed() -> bool:
     Mirrors ``is_vllm_installed`` (scripts/vllm.py).
     """
     return (
-        PdfVlm.get_python_executable().exists() and _find_worker_dist_info() is not None
+        DoclingVenv.get_python_executable().exists()
+        and _find_worker_dist_info() is not None
     )
 
 
@@ -63,14 +64,14 @@ def _torch_wheel_target() -> str:
 
 
 def _make_shim(venv: Path) -> Path:
-    """Create/refresh the ``~/.aria/bin/pdf-vlm`` shim.
+    """Create/refresh the ``~/.aria/bin/docling`` shim.
 
-    Prefers a symlink to ``<venv>/bin/pdf-vlm``; falls back to a shell
+    Prefers a symlink to ``<venv>/bin/docling``; falls back to a shell
     wrapper on filesystems without symlink support.
     """
     Bin.path.mkdir(parents=True, exist_ok=True)
-    shim = Bin.path / "pdf-vlm"
-    target = venv / "bin" / "pdf-vlm"
+    shim = Bin.path / "docling"
+    target = venv / "bin" / "docling"
     if shim.exists() or shim.is_symlink():
         shim.unlink()
     try:
@@ -81,28 +82,28 @@ def _make_shim(venv: Path) -> Path:
     return shim
 
 
-def install_pdf_vlm() -> None:
-    """Build the isolated pdf-vlm venv + install worker + create shim.
+def install_docling() -> None:
+    """Build the isolated docling venv + install worker + create shim.
 
     Uses ``detect_device()`` to pick the torch wheel: CPU torch from the
     pytorch-cpu index when no GPU, or the cu126 index when CUDA is
     detected. ``--no-config`` isolates the install from Aria's own
     [tool.uv] (mirrors scripts/vllm.py).
     """
-    if PdfVlm.is_externally_managed_venv():
+    if DoclingVenv.is_externally_managed_venv():
         raise RuntimeError(
-            "pdf-vlm venv is externally managed via ARIA_PDF_VLM_VENV "
-            f"({PdfVlm.get_venv_path()}). Aria will not create or overwrite it. "
-            "Unset ARIA_PDF_VLM_VENV to use Aria's managed install."
+            "docling venv is externally managed via ARIA_DOCLING_VENV "
+            f"({DoclingVenv.get_venv_path()}). Aria will not create or overwrite it. "
+            "Unset ARIA_DOCLING_VENV to use Aria's managed install."
         )
-    venv = PdfVlm.get_venv_path()
+    venv = DoclingVenv.get_venv_path()
     _create_venv(venv)
-    py = PdfVlm.get_python_executable()
+    py = DoclingVenv.get_python_executable()
 
     extra_index = _EXTRA_INDEX + _torch_wheel_target()
 
     # Editable install of the worker package + heavy runtime deps.
-    worker_src = Path(__file__).resolve().parents[2] / "aria_pdf_vlm"
+    worker_src = Path(__file__).resolve().parents[2] / "docling"
     cmd = [
         "uv",
         "--no-config",
@@ -120,12 +121,12 @@ def install_pdf_vlm() -> None:
     _make_shim(venv)
 
 
-def uninstall_pdf_vlm() -> None:
-    if PdfVlm.is_externally_managed_venv():
-        raise RuntimeError("pdf-vlm venv is externally managed; refusing to delete")
-    venv = PdfVlm.get_venv_path()
+def uninstall_docling() -> None:
+    if DoclingVenv.is_externally_managed_venv():
+        raise RuntimeError("docling venv is externally managed; refusing to delete")
+    venv = DoclingVenv.get_venv_path()
     if venv.is_dir():
         shutil.rmtree(venv)
-    shim = Bin.path / "pdf-vlm"
+    shim = Bin.path / "docling"
     if shim.exists() or shim.is_symlink():
         shim.unlink()

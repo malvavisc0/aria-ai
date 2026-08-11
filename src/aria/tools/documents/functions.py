@@ -103,10 +103,10 @@ def _convert_markitdown(fp: Path, reason: str, *, note: str | None = None) -> st
 def _worker_shim() -> Path:
     from aria.config.folders import Bin
 
-    return Bin.path / "pdf-vlm"
+    return Bin.path / "docling"
 
 
-def _convert_pdf_vlm(
+def _convert_docling(
     fp: Path, reason: str, *, explicit: bool, max_pages: int | None = None
 ) -> str:
     """Granite-Docling via isolated subprocess. See _subprocess.convert."""
@@ -118,18 +118,18 @@ def _convert_pdf_vlm(
             return _err(
                 reason,
                 "worker_not_installed",
-                "ARIA_PDF_BACKEND=granite-docling but pdf-vlm worker not "
-                "installed (run: uv run aria pdf-vlm install)",
-                how_to_fix="Run: uv run aria pdf-vlm install",
+                "ARIA_PDF_BACKEND=granite-docling but docling worker not "
+                "installed (run: uv run aria docling install)",
+                how_to_fix="Run: uv run aria docling install",
             )
         logger.info(
-            "aria.tools.documents: pdf-vlm worker not installed; falling back to "
-            "markitdown. Install with: uv run aria pdf-vlm install"
+            "aria.tools.documents: docling worker not installed; falling back to "
+            "markitdown. Install with: uv run aria docling install"
         )
         return _convert_markitdown(fp, reason)
     device = Pdf.vlm_device
     if device == "auto":
-        from aria.scripts.pdf_vlm import detect_device
+        from aria.scripts.docling import detect_device
 
         device = detect_device()
     # Warn when the model isn't cached — the conversion may trigger a
@@ -141,7 +141,7 @@ def _convert_pdf_vlm(
         logger.warning(
             "aria.tools.documents: model snapshot not found at "
             f"{model_path}; conversion may download it. "
-            "Run: uv run aria pdf-vlm download"
+            "Run: uv run aria docling download"
         )
     dest = _unique_path(fp.stem)
     pages = max_pages if max_pages is not None else Pdf.vlm_max_pages
@@ -179,8 +179,8 @@ def _status_data() -> dict[str, Any]:
     """Query worker state — runs in a thread from :func:`status`."""
     from aria.config.folders import Bin
     from aria.config.models import _resolve_model_path
-    from aria.config.pdf import PdfVlm
-    from aria.scripts.pdf_vlm import detect_device, is_installed
+    from aria.config.pdf import DoclingVenv
+    from aria.scripts.docling import detect_device, is_installed
 
     installed = is_installed()
     device = Pdf.vlm_device
@@ -193,8 +193,8 @@ def _status_data() -> dict[str, Any]:
         "model_cached": model_cached,
         "model_path": model_path or "(docling default HF cache)",
         "device": device,
-        "venv": str(PdfVlm.get_venv_path()),
-        "shim": str(Bin.path / "pdf-vlm"),
+        "venv": str(DoclingVenv.get_venv_path()),
+        "shim": str(Bin.path / "docling"),
     }
 
 
@@ -217,7 +217,7 @@ async def convert(
         action: Injected by the ax dispatcher ("convert").
         file_name: Absolute path to the document (same convention as read_file).
         backend: auto|granite-docling|markitdown. Defaults to ARIA_PDF_BACKEND.
-        max_pages: Override ARIA_PDF_VLM_MAX_PAGES for this PDF.
+        max_pages: Override ARIA_DOCLING_MAX_PAGES for this PDF.
 
     Returns:
         JSON with {file_path, metadata}. Content is persisted to disk —
@@ -247,7 +247,7 @@ async def convert(
         if be == "markitdown":
             return await asyncio.to_thread(_convert_markitdown, fp, reason)
         return await asyncio.to_thread(
-            _convert_pdf_vlm,
+            _convert_docling,
             fp,
             reason,
             explicit=(be == "granite-docling"),

@@ -46,7 +46,7 @@ class TestHelp:
         data = json.loads(result)
         assert "families" in data["data"]
         assert "web" in data["data"]["families"]
-        assert "knowledge" in data["data"]["families"]
+        assert "memory" in data["data"]["families"]
 
     def test_help_single_family(self):
         result = _build_help("web")
@@ -144,7 +144,7 @@ class TestDispatchTable:
     def test_all_families_exist(self):
         expected = {
             "web",
-            "knowledge",
+            "memory",
             "finance",
             "imdb",
             "http",
@@ -154,6 +154,7 @@ class TestDispatchTable:
             "check",
             "worker",
             "mcp",
+            "knowledge",
         }
         assert set(_DISPATCH.keys()) == expected
 
@@ -168,14 +169,20 @@ class TestDispatchTable:
             "youtube",
         }
 
-    def test_knowledge_commands(self):
-        assert set(_DISPATCH["knowledge"].keys()) == {
+    def test_memory_commands(self):
+        assert set(_DISPATCH["memory"].keys()) == {
             "store",
             "recall",
             "search",
             "list",
             "update",
             "delete",
+        }
+
+    def test_knowledge_commands(self):
+        assert set(_DISPATCH["knowledge"].keys()) == {
+            "status",
+            "reindex",
         }
 
     def test_finance_commands(self):
@@ -320,15 +327,15 @@ class TestDispatch:
             assert result == mock_response
 
     @pytest.mark.asyncio
-    async def test_dispatches_knowledge_with_action(self):
-        mock_response = '{"tool":"knowledge","data":{"entries":[]}}'
+    async def test_dispatches_memory_with_action(self):
+        mock_response = '{"tool":"memory","data":{"entries":[]}}'
         with patch(
-            "aria.tools.knowledge.functions.knowledge",
+            "aria.tools.memory.functions.memory",
             return_value=mock_response,
         ) as mock_fn:
             result = await ax(
                 reason="store pref",
-                family="knowledge",
+                family="memory",
                 command="store",
                 args={"key": "lang", "value": "Python"},
             )

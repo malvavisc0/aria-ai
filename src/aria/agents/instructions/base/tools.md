@@ -1,10 +1,10 @@
 ## Tool Priority
 
-`ax` is the platform's core interface — it exposes most capabilities (web, knowledge, finance, imdb, http, dev, processes, documents, worker, check, mcp) through one structured, auditable call. **Always prefer `ax` over `shell`; treat `shell` as a fallback.** If a tool fails, read the error and adapt — don't blindly retry.
+`ax` is the platform's core interface — it exposes most capabilities (web, memory, knowledge, finance, imdb, http, dev, processes, documents, worker, check, mcp) through one structured, auditable call. **Always prefer `ax` over `shell`; treat `shell` as a fallback.** If a tool fails, read the error and adapt — don't blindly retry.
 
 | Tool | Use for |
 |------|---------|
-| `ax` | Web search, knowledge, finance, HTTP, Python sandbox, background processes, document → markdown, worker delegation |
+| `ax` | Web search, memory, knowledge hub, finance, HTTP, Python sandbox, background processes, document → markdown, worker delegation |
 | `shell` | Extra venv binaries and common CLI tools not covered by `ax` |
 | `reasoning` | Diagnosis, tradeoffs, synthesis |
 
@@ -41,7 +41,7 @@ Do not skip step 1 just because a task feels "shell-like" (file listing, HTTP re
 
 For judgment-heavy work: `start` → 1-3 `step` → optional `reflect` → `end`. Use it when a decision has **>2 viable approaches** with tradeoffs, when diagnosing a **non-obvious failure**, or when **synthesizing** multiple sources. Skip it for straightforward tasks — don't reason about what you can just do.
 
-### Knowledge (`ax knowledge`)
+### Memory (`ax memory`)
 
 Persistent key-value store that **survives across conversations and restarts** — your long-term memory. Use it proactively.
 
@@ -53,6 +53,15 @@ Persistent key-value store that **survives across conversations and restarts** �
 | `recall` | Retrieve an entry by exact key |
 | `search` | Full-text search across all entries |
 | `list` | List entries, optionally filtered by tags |
+
+### Knowledge hub (`ax knowledge`)
+
+User documents indexed for semantic retrieval (mini-RAG). **Retrieval is via the `Knowledge` slash-action** (chunks injected into your prompt before you run), not an `ax` command. Use these only to manage the index.
+
+| Command | Purpose |
+|---------|---------|
+| `status` | Indexed file count, skipped files, last index time |
+| `reindex` | Re-index the documents directory (optionally `force` full rebuild) |
 
 ### External Services (`ax mcp`)
 

@@ -31,7 +31,7 @@ class AxSchema(BaseModel):
     family: str = Field(
         description=(
             "Tool family name. Use 'help' to list all families. "
-            "Families: web, knowledge, finance, imdb, http, dev, processes, "
+            "Families: web, memory, knowledge, finance, imdb, http, dev, processes, "
             "documents, check, worker, mcp."
         )
     )
@@ -99,10 +99,22 @@ def _browser_close():
     return browser_close
 
 
-def _knowledge():
-    from aria.tools.knowledge.functions import knowledge
+def _memory():
+    from aria.tools.memory.functions import memory
 
-    return knowledge
+    return memory
+
+
+def _knowledge_status():
+    from aria.tools.knowledge.functions import knowledge_status
+
+    return knowledge_status
+
+
+def _knowledge_reindex():
+    from aria.tools.knowledge.functions import knowledge_reindex
+
+    return knowledge_reindex
 
 
 def _finance_stock():
@@ -273,13 +285,17 @@ _DISPATCH: dict[str, dict[str, tuple[Callable, bool]]] = {
         "weather": (_weather, False),
         "youtube": (_youtube, False),
     },
+    "memory": {
+        "store": (_memory, True),
+        "recall": (_memory, True),
+        "search": (_memory, True),
+        "list": (_memory, True),
+        "update": (_memory, True),
+        "delete": (_memory, True),
+    },
     "knowledge": {
-        "store": (_knowledge, True),
-        "recall": (_knowledge, True),
-        "search": (_knowledge, True),
-        "list": (_knowledge, True),
-        "update": (_knowledge, True),
-        "delete": (_knowledge, True),
+        "status": (_knowledge_status, False),
+        "reindex": (_knowledge_reindex, False),
     },
     "finance": {
         "stock": (_finance_stock, False),
@@ -465,7 +481,7 @@ def _validate_ax_inputs(reason: str, family: str, command: str) -> str | None:
                     "message": "ax() requires 'family' and 'command' arguments.",
                     "expected": {
                         "reason": "Brief explanation of why you are calling this.",
-                        "family": "Tool family: web, knowledge, finance, imdb, http, dev, processes, documents, check, worker, mcp",
+                        "family": "Tool family: web, memory, knowledge, finance, imdb, http, dev, processes, documents, check, worker, mcp",
                         "command": "Subcommand within the family",
                         "args": "Optional arguments dict (exclude 'reason')",
                     },

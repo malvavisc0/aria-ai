@@ -6,8 +6,8 @@ is::
     ~/.aria/
     ├── workspace/   agent-facing workspace (file tool BASE_DIR)
     │   └── uploads/ user-uploaded files (raw + converted markdown)
-    ├── bin/         downloaded binaries (lightpanda, pdf-vlm shim, etc.)
-    ├── venvs/       isolated tool venvs (vllm, pdf_vlm)
+    ├── bin/         downloaded binaries (lightpanda, docling shim, etc.)
+    ├── venvs/       isolated tool venvs (vllm, docling)
     ├── logs/        all runtime logs (debug, tool-calls, vllm, processes, workers)
     ├── models/      downloaded model files
     ├── db/          sqlite, chromadb
@@ -55,7 +55,7 @@ class Venvs:
 
     path = _ARIA_HOME / "venvs"
     vllm = path / "vllm"
-    pdf_vlm = path / "pdf_vlm"
+    docling = path / "docling"
 
 
 class Debug:
@@ -82,6 +82,12 @@ class Models:
     """Downloaded model files and caches."""
 
     path = _ARIA_HOME / "models"
+
+
+class Knowledge:
+    """User-curated documents directory for the knowledge hub (mini-RAG)."""
+
+    path = _ARIA_HOME / "knowledge"
 
 
 def get_augmented_path() -> str:

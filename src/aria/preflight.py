@@ -220,8 +220,8 @@ def _check_lightpanda(checks: list[CheckResult]) -> None:
         )
 
 
-def _check_pdf_vlm(checks: list[CheckResult]) -> None:
-    """Report the pdf-vlm worker state (non-blocking, informational).
+def _check_docling(checks: list[CheckResult]) -> None:
+    """Report the docling worker state (non-blocking, informational).
 
     The Granite-Docling worker is optional — the documents tool falls
     back to MarkItDown when it is not installed. This check always
@@ -232,16 +232,16 @@ def _check_pdf_vlm(checks: list[CheckResult]) -> None:
 
     from aria.config.models import _resolve_model_path
     from aria.config.pdf import Pdf
-    from aria.scripts.pdf_vlm import detect_device, is_installed
+    from aria.scripts.docling import detect_device, is_installed
 
     if not is_installed():
         checks.append(
             CheckResult(
-                name="pdf-vlm worker",
+                name="docling worker",
                 passed=True,  # optional — never blocks
                 category="binaries",
                 details="not installed (optional; PDFs fall back to MarkItDown; "
-                "install with: aria pdf-vlm install)",
+                "install with: aria docling install)",
             )
         )
         return
@@ -257,7 +257,7 @@ def _check_pdf_vlm(checks: list[CheckResult]) -> None:
         state += " — model downloads on first PDF conversion"
     checks.append(
         CheckResult(
-            name="pdf-vlm worker",
+            name="docling worker",
             passed=True,
             category="binaries",
             details=state,
@@ -467,13 +467,13 @@ def run_preflight_checks() -> PreflightResult:
     _check_data_folder(checks)
     _check_binaries(checks)
     _check_lightpanda(checks)
-    _check_pdf_vlm(checks)
+    _check_docling(checks)
     _check_models(checks)
     _check_token_limit(checks)
     _check_memory_requirements(checks)
     _check_kv_cache_memory(checks)
     _check_llm_server(checks)
-    _check_knowledge_db(checks)
+    _check_memory_db(checks)
     _check_tool_loading(checks)
 
     return PreflightResult(
@@ -943,15 +943,15 @@ def _check_llm_server(checks: list[CheckResult]) -> None:
         )
 
 
-def _check_knowledge_db(checks: list[CheckResult]) -> None:
-    """Check that the knowledge database is accessible."""
+def _check_memory_db(checks: list[CheckResult]) -> None:
+    """Check that the memory database is accessible."""
     try:
-        from aria.tools.knowledge.database import KnowledgeDatabase
+        from aria.tools.memory.database import MemoryDatabase
 
-        KnowledgeDatabase()
+        MemoryDatabase()
         checks.append(
             CheckResult(
-                name="Knowledge DB",
+                name="Memory DB",
                 passed=True,
                 category="storage",
                 details="SQLite accessible",
@@ -960,7 +960,7 @@ def _check_knowledge_db(checks: list[CheckResult]) -> None:
     except Exception as e:
         checks.append(
             CheckResult(
-                name="Knowledge DB",
+                name="Memory DB",
                 passed=False,
                 category="storage",
                 error=str(e),

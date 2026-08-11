@@ -1,43 +1,32 @@
-"""SQLAlchemy models for knowledge store persistence."""
+"""SQLAlchemy model for knowledge hub index state."""
 
 from datetime import UTC, datetime
 
-from sqlalchemy import Boolean, DateTime, String, Text
+from sqlalchemy import DateTime, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from aria.tools.models import Base
 
 
-class KnowledgeEntryModel(Base):
-    """Model for knowledge store entries."""
+class KnowledgeIndexStateModel(Base):
+    """Per-file index state for idempotent re-indexing.
 
-    __tablename__ = "knowledge_entries"
+    ``state`` is ``"indexed"`` (chunks stored in Chroma) or ``"skipped"``
+    (no chunks; ``skip_reason`` explains why). ``_is_cached`` treats
+    both as "don't re-process if mtime/size unchanged" so deterministic
+    skips (too large, unsupported type) aren't retried every run; use
+    ``--force`` to retry. Transient errors (conversion/embedding
+    failures) are NOT persisted — they're retried on the next run.
+    """
 
-    # Primary key - UUID
-    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    __tablename__ = "knowledge_index_state"
 
-    # Agent identifier for multi-agent isolation
-    agent_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
-
-    # Content key for recall
-    key: Mapped[str] = mapped_column(String(500), nullable=False, index=True)
-
-    # The stored value
-    value: Mapped[str] = mapped_column(Text, nullable=False)
-
-    # Optional tags for categorization (JSON array string)
-    tags: Mapped[str | None] = mapped_column(Text, nullable=True)
-
-    # Timestamps
-    created_at: Mapped[datetime] = mapped_column(
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    path: Mapped[str] = mapped_column(String(1024), nullable=False, index=True)
+    mtime: Mapped[float] = mapped_column(nullable=False)
+    size: Mapped[int] = mapped_column(Integer, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    skip_reason: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    indexed_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=lambda: datetime.now(UTC)
     )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime,
-        nullable=False,
-        default=lambda: datetime.now(UTC),
-        onupdate=lambda: datetime.now(UTC),
-    )
-
-    # Soft delete
-    is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)

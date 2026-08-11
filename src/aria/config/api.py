@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from aria.config import get_optional_env
-from aria.config.folders import Bin, Venvs
+from aria.config.folders import Bin, Knowledge, Venvs
 
 
 class Vllm:
@@ -185,6 +185,21 @@ class Vllm:
     max_num_seqs: int | None = (
         int(v) if (v := get_optional_env("ARIA_VLLM_MAX_NUM_SEQS", "")) else None
     )
+
+
+class KnowledgeHub:
+    """Configuration for the user documents knowledge hub (mini-RAG).
+
+    Env-driven (see Lightpanda). The directory defaults to
+    ``~/.aria/knowledge`` (under ``ARIA_HOME``).
+    """
+
+    enabled: bool = get_optional_env("ARIA_KNOWLEDGE_ENABLED", "").lower() == "true"
+    dir: str = get_optional_env("ARIA_KNOWLEDGE_DIR", str(Knowledge.path))
+    chunk_size: int = int(get_optional_env("ARIA_KNOWLEDGE_CHUNK_SIZE", "512"))
+    chunk_overlap: int = int(get_optional_env("ARIA_KNOWLEDGE_CHUNK_OVERLAP", "64"))
+    top_k: int = int(get_optional_env("ARIA_KNOWLEDGE_TOP_K", "4"))
+    max_file_mb: int = int(get_optional_env("ARIA_KNOWLEDGE_MAX_FILE_MB", "50"))
 
 
 class Lightpanda:

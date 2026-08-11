@@ -214,7 +214,7 @@ def _isolate_data_dirs(tmp_path, monkeypatch):
 def _reset_all_db_singletons():
     """Reset all database singletons so the next call creates fresh ones."""
     from aria.tools.database import ToolsDatabase
-    from aria.tools.knowledge.database import KnowledgeDatabase
+    from aria.tools.memory.database import MemoryDatabase
     from aria.tools.planner.database import PlannerDatabase
     from aria.tools.reasoning.database import ReasoningDatabase
     from aria.tools.scratchpad.database import ScratchpadDatabase
@@ -223,7 +223,7 @@ def _reset_all_db_singletons():
     setattr(ReasoningDatabase, "_instance", None)
     setattr(PlannerDatabase, "_instance", None)
     setattr(ScratchpadDatabase, "_instance", None)
-    setattr(KnowledgeDatabase, "_instance", None)
+    setattr(MemoryDatabase, "_instance", None)
 
 
 @pytest.fixture()

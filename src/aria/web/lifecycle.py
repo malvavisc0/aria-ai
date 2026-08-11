@@ -19,6 +19,7 @@ from chromadb import PersistentClient as ChromaDBPersistentClient
 from loguru import logger
 from sqlalchemy import create_engine
 
+from aria.config.api import KnowledgeHub
 from aria.config.api import Vllm as VllmConfig
 from aria.config.database import ChromaDB as ChromaDBConfig
 from aria.config.database import SQLite as SQLiteConfig
@@ -490,6 +491,27 @@ async def _finalize_subsystems(embed_task) -> None:
         logger.warning(f"Embeddings model failed to load: {e}.")
 
 
+def _log_reindex_result(task: asyncio.Task[dict[str, object]]) -> None:
+    """Report the fire-and-forget startup reindex outcome."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc:
+        logger.error(f"Knowledge hub startup reindex failed: {exc}")
+        return
+    result = task.result()
+    indexed = result.get("indexed", 0)
+    skipped = result.get("skipped", [])
+    skipped_count = len(skipped) if isinstance(skipped, list) else 0
+    if indexed or skipped_count:
+        logger.info(
+            f"Knowledge hub ready — indexed {indexed} chunk(s)"
+            + (f", skipped {skipped_count} file(s)" if skipped_count else "")
+        )
+    else:
+        logger.info("Knowledge hub ready — no new files to index")
+
+
 async def on_app_startup_handler() -> None:
     """Initialize the application on startup.
 
@@ -547,6 +569,24 @@ async def on_app_startup_handler() -> None:
         await _init_browser()
     except Exception as e:
         logger.warning(f"Browser failed to start: {e}.")
+
+    if KnowledgeHub.enabled:
+        from aria.server.knowledge_hub import KnowledgeHubIndexer
+        from aria.tools.database import get_tools_database
+
+        get_tools_database().create_tables()
+        logger.info(
+            f"Knowledge hub enabled — indexing '{KnowledgeHub.dir}' "
+            f"in the background (use the 'Knowledge' slash-action to ground "
+            f"answers in your documents)"
+        )
+        task = asyncio.create_task(KnowledgeHubIndexer().reindex())
+        task.add_done_callback(_log_reindex_result)
+    else:
+        logger.info(
+            "Knowledge hub disabled — set ARIA_KNOWLEDGE_ENABLED=true to "
+            "index your documents for grounded answers"
+        )
 
     _state.startup_complete = True
     _state.startup_event.set()

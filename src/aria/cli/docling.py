@@ -1,16 +1,16 @@
-"""pdf-vlm worker management commands.
+"""Docling worker management commands.
 
 Commands:
-    install: Build the isolated pdf-vlm venv + shim.
+    install: Build the isolated docling venv + shim.
     download: Pre-fetch the Granite-Docling model snapshot.
     status: Show worker install state, model cached, resolved device.
-    uninstall: Remove the isolated pdf-vlm venv + shim.
+    uninstall: Remove the isolated docling venv + shim.
 
 Example:
     ```bash
-    aria pdf-vlm install
-    aria pdf-vlm download
-    aria pdf-vlm status
+    aria docling install
+    aria docling download
+    aria docling status
     ```
 """
 
@@ -26,19 +26,19 @@ from aria.config.huggingface import HuggingFace
 from aria.config.models import _resolve_model_path
 from aria.config.pdf import Pdf
 
-app = typer.Typer(name="pdf-vlm", help="Granite-Docling worker management.")
+app = typer.Typer(name="docling", help="Granite-Docling worker management.")
 console = Console()
 error_console = Console(stderr=True, style="bold red")
 
 
 @app.command("install")
 def install_command() -> None:
-    """Build the isolated pdf-vlm venv + ~/.aria/bin/pdf-vlm shim."""
-    from aria.scripts.pdf_vlm import install_pdf_vlm
+    """Build the isolated docling venv + ~/.aria/bin/docling shim."""
+    from aria.scripts.docling import install_docling
 
     try:
-        install_pdf_vlm()
-        console.print("[green]✓[/green] pdf-vlm worker installed")
+        install_docling()
+        console.print("[green]✓[/green] docling worker installed")
     except Exception as e:
         error_console.print(f"[red]✗[/red] {e}")
         raise typer.Exit(1)
@@ -64,15 +64,15 @@ def download_command(
 ) -> None:
     """Pre-fetch the Granite-Docling model snapshot.
 
-    Downloads ``ARIA_PDF_VLM_MODEL`` (default
+    Downloads ``ARIA_DOCLING_MODEL`` (default
     ``ibm-granite/granite-docling-258M``) to ``~/.aria/models/<name>/``
     so the first PDF conversion doesn't block on a multi-hundred-MB
-    download. Run after ``aria pdf-vlm install``.
+    download. Run after ``aria docling install``.
 
     Example:
         ```bash
-        aria pdf-vlm download
-        aria pdf-vlm download --force
+        aria docling download
+        aria docling download --force
         ```
     """
     repo_id = Pdf.vlm_model_id
@@ -119,12 +119,12 @@ def status_command() -> None:
 
     Example:
         ```bash
-        aria pdf-vlm status
+        aria docling status
         ```
     """
     from aria.config.folders import Bin
-    from aria.config.pdf import PdfVlm
-    from aria.scripts.pdf_vlm import detect_device, is_installed
+    from aria.config.pdf import DoclingVenv
+    from aria.scripts.docling import detect_device, is_installed
 
     table = Table(show_header=True, header_style="bold cyan")
     table.add_column("Property", style="cyan", width=20)
@@ -144,25 +144,25 @@ def status_command() -> None:
             "Model cached",
             "[green]✓ Yes[/green]"
             if model_cached
-            else "[dim]No (run: aria pdf-vlm download)[/dim]",
+            else "[dim]No (run: aria docling download)[/dim]",
         )
-        table.add_row("Venv", str(PdfVlm.get_venv_path()))
-        table.add_row("Shim", str(Bin.path / "pdf-vlm"))
+        table.add_row("Venv", str(DoclingVenv.get_venv_path()))
+        table.add_row("Shim", str(Bin.path / "docling"))
     else:
         table.add_row("Worker", "[red]✗ Not installed[/red]")
-        table.add_row("Install", "Run: aria pdf-vlm install")
+        table.add_row("Install", "Run: aria docling install")
 
     console.print(table)
 
 
 @app.command("uninstall")
 def uninstall_command() -> None:
-    """Remove the isolated pdf-vlm venv + shim."""
-    from aria.scripts.pdf_vlm import uninstall_pdf_vlm
+    """Remove the isolated docling venv + shim."""
+    from aria.scripts.docling import uninstall_docling
 
     try:
-        uninstall_pdf_vlm()
-        console.print("[green]✓[/green] pdf-vlm worker removed")
+        uninstall_docling()
+        console.print("[green]✓[/green] docling worker removed")
     except Exception as e:
         error_console.print(f"[red]✗[/red] {e}")
         raise typer.Exit(1)

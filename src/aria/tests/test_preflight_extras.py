@@ -41,32 +41,32 @@ class TestCheckLlmServer:
         assert "not running" in checks[0].details.lower()
 
 
-class TestCheckKnowledgeDb:
-    """Test knowledge database check."""
+class TestCheckMemoryDb:
+    """Test memory database check."""
 
-    @patch("aria.tools.knowledge.database.KnowledgeDatabase.__new__")
-    def test_knowledge_db_accessible(self, mock_new):
-        """Should pass when knowledge DB is accessible."""
+    @patch("aria.tools.memory.database.MemoryDatabase.__new__")
+    def test_memory_db_accessible(self, mock_new):
+        """Should pass when memory DB is accessible."""
         mock_new.return_value = MagicMock()
 
-        from aria.preflight import _check_knowledge_db
+        from aria.preflight import _check_memory_db
 
         checks = []
-        _check_knowledge_db(checks)
+        _check_memory_db(checks)
         assert len(checks) == 1
         assert checks[0].passed is True
         assert checks[0].category == "storage"
 
     @patch(
-        "aria.tools.knowledge.database.KnowledgeDatabase.__init__",
+        "aria.tools.memory.database.MemoryDatabase.__init__",
         side_effect=Exception("DB not found"),
     )
-    def test_knowledge_db_fails(self, mock_init):
-        """Should fail when knowledge DB raises an error."""
-        from aria.preflight import _check_knowledge_db
+    def test_memory_db_fails(self, mock_init):
+        """Should fail when memory DB raises an error."""
+        from aria.preflight import _check_memory_db
 
         checks = []
-        _check_knowledge_db(checks)
+        _check_memory_db(checks)
         assert len(checks) == 1
         assert checks[0].passed is False
         assert checks[0].category == "storage"

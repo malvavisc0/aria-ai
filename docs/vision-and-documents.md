@@ -159,20 +159,20 @@ prompt lists its path. Conversion happens only when the agent calls the
 Granite-Docling (`ibm-granite/granite-docling-258M`) runs **locally**
 (no external OCR API) and is **PDF-only**. Because it pulls in the same
 heavy stack as vLLM (`torch`, `transformers`, `docling`), it is installed
-into an **isolated venv** at `~/.aria/venvs/pdf_vlm/` and invoked as a
+into an **isolated venv** at `~/.aria/venvs/docling/` and invoked as a
 subprocess — Aria's own dependency tree never imports it.
 
 Install:
 
 ```bash
-uv run aria pdf-vlm install
+uv run aria docling install
 ```
 
 This auto-pulls CUDA torch when an NVIDIA GPU is detected, else CPU
 torch. Check the worker state with either of:
 
 ```bash
-uv run aria pdf-vlm status
+uv run aria docling status
 # or, agent-side:
 ax documents status
 ```
@@ -199,24 +199,24 @@ reads the error and adapts (e.g. falls back, or reports the failure).
 | Directory | Purpose |
 |---|---|
 | `~/.aria/workspace/uploads/` | Raw uploads and converted markdown (agent-accessible) |
-| `~/.aria/venvs/pdf_vlm/` | Isolated Granite-Docling worker venv |
-| `~/.aria/bin/pdf-vlm` | Worker shim (symlink to the venv console-script) |
+| `~/.aria/venvs/docling/` | Isolated Granite-Docling worker venv |
+| `~/.aria/bin/docling` | Worker shim (symlink to the venv console-script) |
 
 ## Configuration
 
 | Env var | Default | Purpose |
 |---|---|---|
 | `ARIA_PDF_BACKEND` | `auto` | `auto` / `granite-docling` / `markitdown` |
-| `ARIA_PDF_VLM_MODEL` | `ibm-granite/granite-docling-258M` | Model ID |
-| `ARIA_PDF_VLM_DEVICE` | `auto` | `auto` → `cuda` if NVIDIA else `cpu`; override with `cpu`/`cuda`/`mps` |
-| `ARIA_PDF_VLM_MAX_PAGES` | `200` | Max pages per PDF |
-| `ARIA_PDF_VLM_TIMEOUT_SECONDS` | `600` | Subprocess timeout |
+| `ARIA_DOCLING_MODEL` | `ibm-granite/granite-docling-258M` | Model ID |
+| `ARIA_DOCLING_DEVICE` | `auto` | `auto` → `cuda` if NVIDIA else `cpu`; override with `cpu`/`cuda`/`mps` |
+| `ARIA_DOCLING_MAX_PAGES` | `200` | Max pages per PDF |
+| `ARIA_DOCLING_TIMEOUT_SECONDS` | `600` | Subprocess timeout |
 | `ARIA_PDF_MAX_FILE_MB` | `100` | Max input file size |
-| `ARIA_PDF_VLM_VENV` | — | Override the isolated venv path |
-| `ARIA_PDF_VLM_MODEL_PATH` | — | Local model snapshot dir |
+| `ARIA_DOCLING_VENV` | — | Override the isolated venv path |
+| `ARIA_DOCLING_MODEL_PATH` | — | Local model snapshot dir |
 
 Model snapshot: `~/.aria/models/<model-name>/` when
-`ARIA_PDF_VLM_MODEL_PATH` is set or pre-downloaded via
+`ARIA_DOCLING_MODEL_PATH` is set or pre-downloaded via
 `aria models download`; otherwise docling downloads to the HF cache
 (`~/.cache/huggingface/`) on first PDF conversion.
 
@@ -226,9 +226,9 @@ Model snapshot: `~/.aria/models/<model-name>/` when
 |---|---|
 | `src/aria/web/session.py` | `extract_image_data()`, `extract_file_paths()` |
 | `src/aria/web/message_pipeline.py` | `_describe_image()`, `_handle_message()` prompt assembly |
-| `src/aria/config/pdf.py` | `Pdf`, `PdfVlm` configuration |
-| `src/aria/scripts/pdf_vlm.py` | Worker install/detect/uninstall |
-| `src/aria_pdf_vlm/` | Isolated Granite-Docling worker package |
+| `src/aria/config/pdf.py` | `Pdf`, `DoclingVenv` configuration |
+| `src/aria/scripts/docling.py` | Worker install/detect/uninstall |
+| `src/docling/` | Isolated Granite-Docling worker package |
 | `src/aria/tools/documents/` | `ax documents` tool family (`convert`, `status`) |
 | `src/aria/config/api.py` | `Vllm.vision_enabled` configuration |
 | `src/aria/.chainlit/config.toml` | File upload UI settings (`spontaneous_file_upload`) |

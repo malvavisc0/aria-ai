@@ -1,113 +1,36 @@
-"""Knowledge CLI commands.
+"""Knowledge hub CLI commands.
 
-Wraps the persistent key-value knowledge store as CLI sub-commands
-that output JSON.
+Wraps the documents knowledge hub (mini-RAG) as CLI sub-commands.
 """
 
 import typer
 
 app = typer.Typer(
-    help="Persistent key-value memory — store and recall facts across sessions.",
+    help="Knowledge hub — index and query user documents (mini-RAG).",
 )
 
 
-@app.command("store")
-def store_cmd(
-    key: str = typer.Argument(..., help="Unique key for the entry"),
-    value: str = typer.Argument(..., help="Value to store"),
-    tags: list[str] | None = typer.Option(
-        None, "--tags", "-t", help="Tags for categorization"
+@app.command("reindex")
+def reindex_cmd(
+    force: bool = typer.Option(
+        False, "--force", help="Full rebuild (drop collection + clear state)."
     ),
 ):
-    """Store a new knowledge entry."""
-    from aria.tools.knowledge.functions import knowledge
+    """Re-index the documents directory."""
+    import asyncio
 
-    result = knowledge(
-        reason="CLI knowledge store",
-        action="store",
-        key=key,
-        value=value,
-        tags=tags,
+    from aria.tools.knowledge.functions import knowledge_reindex
+
+    typer.echo(
+        asyncio.run(knowledge_reindex(reason="CLI knowledge reindex", force=force))
     )
-    typer.echo(result)
 
 
-@app.command("recall")
-def recall_cmd(
-    key: str = typer.Argument(..., help="Key to retrieve"),
-):
-    """Retrieve a stored fact by key."""
-    from aria.tools.knowledge.functions import knowledge
+@app.command("status")
+def status_cmd():
+    """Show knowledge hub index status."""
+    import asyncio
 
-    result = knowledge(
-        reason="CLI knowledge recall",
-        action="recall",
-        key=key,
-    )
-    typer.echo(result)
+    from aria.tools.knowledge.functions import knowledge_status
 
-
-@app.command("search")
-def search_cmd(
-    query: str = typer.Argument(..., help="Search query"),
-    max_results: int = typer.Option(10, "--max-results", "-n", help="Maximum results"),
-):
-    """Search stored knowledge entries."""
-    from aria.tools.knowledge.functions import knowledge
-
-    result = knowledge(
-        reason="CLI knowledge search",
-        action="search",
-        query=query,
-        max_results=max_results,
-    )
-    typer.echo(result)
-
-
-@app.command("list")
-def list_cmd(
-    tags: list[str] | None = typer.Option(None, "--tags", "-t", help="Filter by tags"),
-    max_results: int = typer.Option(10, "--max-results", "-n", help="Maximum results"),
-):
-    """List all stored knowledge entries."""
-    from aria.tools.knowledge.functions import knowledge
-
-    result = knowledge(
-        reason="CLI knowledge list",
-        action="list",
-        tags=tags,
-        max_results=max_results,
-    )
-    typer.echo(result)
-
-
-@app.command("update")
-def update_cmd(
-    entry_id: str = typer.Argument(..., help="UUID of entry to update"),
-    value: str = typer.Argument(..., help="New value"),
-):
-    """Update an existing knowledge entry."""
-    from aria.tools.knowledge.functions import knowledge
-
-    result = knowledge(
-        reason="CLI knowledge update",
-        action="update",
-        entry_id=entry_id,
-        value=value,
-    )
-    typer.echo(result)
-
-
-@app.command("delete")
-def delete_cmd(
-    entry_id: str = typer.Argument(..., help="UUID of entry to delete"),
-):
-    """Remove a knowledge entry."""
-    from aria.tools.knowledge.functions import knowledge
-
-    result = knowledge(
-        reason="CLI knowledge delete",
-        action="delete",
-        entry_id=entry_id,
-    )
-    typer.echo(result)
+    typer.echo(asyncio.run(knowledge_status(reason="CLI knowledge status")))

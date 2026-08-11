@@ -13,6 +13,7 @@ from rich.panel import Panel
 from aria.cli import check as check_cli
 from aria.cli import dev as dev_cli
 from aria.cli import knowledge as knowledge_cli
+from aria.cli import memory as memory_cli
 from aria.cli import processes as processes_cli
 from aria.cli import web as web_cli
 from aria.cli import worker as worker_cli
@@ -23,7 +24,7 @@ app = typer.Typer(
     help=(
         "AX — Agent Experience CLI\n\n"
         "Streamlined interface for agent-facing operations: web research, "
-        "knowledge management, code execution, worker agents, and "
+        "memory management, code execution, worker agents, and "
         "background processes. For full system management use ``aria``."
     ),
     rich_markup_mode="rich",
@@ -32,6 +33,7 @@ app = typer.Typer(
 
 app.add_typer(check_cli.app, name="check")
 app.add_typer(processes_cli.app, name="processes")
+app.add_typer(memory_cli.app, name="memory")
 app.add_typer(knowledge_cli.app, name="knowledge")
 app.add_typer(web_cli.app, name="web")
 app.add_typer(dev_cli.app, name="dev")
@@ -89,7 +91,8 @@ COMMAND_GROUPS = [
         "title": "Agents",
         "commands": [
             ("worker", "Spawn background agents"),
-            ("knowledge", "Store and recall facts"),
+            ("memory", "Store and recall facts"),
+            ("knowledge", "Document knowledge hub"),
             ("dev", "Run Python code"),
         ],
     },

@@ -1,11 +1,11 @@
 [project]
-name = "aria-pdf-vlm"
+name = "docling"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = ["torch", "transformers", "pypdfium2"]
 
 [project.scripts]
-pdf-vlm = "aria_pdf_vlm.__main__:main"
+docling = "docling.__main__:main"
 
 [build-system]
 requires = ["setuptools>=75.0"]

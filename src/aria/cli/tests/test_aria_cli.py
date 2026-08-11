@@ -37,6 +37,7 @@ class TestAriaCliRegistration:
         assert result.exit_code == 0
         for cmd in (
             "web",
+            "memory",
             "knowledge",
             "dev",
             "worker",

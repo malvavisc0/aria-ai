@@ -20,7 +20,15 @@ class TestAxCliRegistration:
         """Help output should list all agent-facing commands."""
         result = runner.invoke(app, [])
         assert result.exit_code == 0
-        for cmd in ("web", "knowledge", "dev", "worker", "processes", "check"):
+        for cmd in (
+            "web",
+            "memory",
+            "knowledge",
+            "dev",
+            "worker",
+            "processes",
+            "check",
+        ):
             assert cmd in result.output
 
     def test_help_excludes_human_commands(self):
@@ -44,6 +52,11 @@ class TestAxCliRegistration:
         result = runner.invoke(app, ["web", "--help"])
         assert result.exit_code == 0
         assert "search" in result.output.lower() or "web" in result.output.lower()
+
+    def test_memory_subcommand_registered(self):
+        """The memory subcommand should be registered."""
+        result = runner.invoke(app, ["memory", "--help"])
+        assert result.exit_code == 0
 
     def test_knowledge_subcommand_registered(self):
         """The knowledge subcommand should be registered."""

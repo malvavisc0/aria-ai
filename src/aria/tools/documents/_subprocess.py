@@ -1,4 +1,4 @@
-"""Subprocess bridge to the isolated pdf-vlm worker. Never imports docling."""
+"""Subprocess bridge to the isolated docling worker. Never imports docling."""
 
 import json
 import subprocess
@@ -16,15 +16,19 @@ def convert(
     device: str,
     max_pages: int,
     timeout: int,
+    chunks: bool = False,
 ) -> dict[str, Any]:
-    """Run the pdf-vlm worker to convert *pdf_path* to markdown.
+    """Run the docling worker to convert *pdf_path* to markdown.
+
+    When *chunks* is true, the worker emits a JSON chunk array to
+    *output_path* instead of markdown (§6.2).
 
     Returns the worker's JSON result (``{"ok": bool, ...}``) or an error
     dict. Never imports heavy deps.
     """
-    shim = Bin.path / "pdf-vlm"
+    shim = Bin.path / "docling"
     if not shim.exists():
-        return {"ok": False, "error": "pdf-vlm worker not installed"}
+        return {"ok": False, "error": "docling worker not installed"}
     cmd = [
         str(shim),
         "convert",
@@ -39,6 +43,8 @@ def convert(
         "--max-pages",
         str(max_pages),
     ]
+    if chunks:
+        cmd.append("--chunks")
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except subprocess.TimeoutExpired:

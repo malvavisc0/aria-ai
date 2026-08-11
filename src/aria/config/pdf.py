@@ -20,42 +20,42 @@ class Pdf:
 
     vlm_model_id = _Lazy(
         lambda: get_optional_env(
-            "ARIA_PDF_VLM_MODEL", "ibm-granite/granite-docling-258M"
+            "ARIA_DOCLING_MODEL", "ibm-granite/granite-docling-258M"
         )
     )
 
     vlm_device = _Lazy(
-        lambda: get_optional_env("ARIA_PDF_VLM_DEVICE", "auto").lower()
+        lambda: get_optional_env("ARIA_DOCLING_DEVICE", "auto").lower()
     )  # "auto" | "cpu" | "cuda" | "mps"
 
     vlm_max_pages = _Lazy(
-        lambda: int(get_optional_env("ARIA_PDF_VLM_MAX_PAGES", "200"))
+        lambda: int(get_optional_env("ARIA_DOCLING_MAX_PAGES", "200"))
     )
 
     vlm_timeout_seconds = _Lazy(
-        lambda: int(get_optional_env("ARIA_PDF_VLM_TIMEOUT_SECONDS", "600"))
+        lambda: int(get_optional_env("ARIA_DOCLING_TIMEOUT_SECONDS", "600"))
     )
 
     max_file_mb = _Lazy(lambda: int(get_optional_env("ARIA_PDF_MAX_FILE_MB", "100")))
 
     model_path = _Lazy(
-        lambda: _resolve_model_path(get_optional_env("ARIA_PDF_VLM_MODEL_PATH", ""))
+        lambda: _resolve_model_path(get_optional_env("ARIA_DOCLING_MODEL_PATH", ""))
     )
 
 
-class PdfVlm:
-    """Isolated pdf-vlm venv resolution (mirrors :class:`Vllm`)."""
+class DoclingVenv:
+    """Isolated docling worker venv resolution (mirrors :class:`Vllm`)."""
 
     @classmethod
     def get_venv_path(cls) -> Path:
-        override = get_optional_env("ARIA_PDF_VLM_VENV", "")
+        override = get_optional_env("ARIA_DOCLING_VENV", "")
         if override:
             return Path(override).expanduser().resolve()
-        return Venvs.pdf_vlm
+        return Venvs.docling
 
     @classmethod
     def is_externally_managed_venv(cls) -> bool:
-        return bool(get_optional_env("ARIA_PDF_VLM_VENV", ""))
+        return bool(get_optional_env("ARIA_DOCLING_VENV", ""))
 
     @classmethod
     def get_python_executable(cls) -> Path:

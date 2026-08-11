@@ -1,4 +1,4 @@
-"""Database operations for knowledge store persistence."""
+"""Database operations for memory store persistence."""
 
 import json
 from datetime import UTC, datetime
@@ -9,11 +9,11 @@ from sqlalchemy.engine import CursorResult
 
 from aria.tools.database import get_tools_database
 
-from .models import KnowledgeEntryModel
+from .models import MemoryEntryModel
 
 
-class KnowledgeDatabase:
-    """Database manager for knowledge store persistence."""
+class MemoryDatabase:
+    """Database manager for memory store persistence."""
 
     _initialized: bool
     _instance = None
@@ -32,7 +32,7 @@ class KnowledgeDatabase:
         self._tools_db = get_tools_database()
         self._tools_db.create_tables()
         self._initialized = True
-        logger.info("KnowledgeDatabase initialized")
+        logger.info("MemoryDatabase initialized")
 
     def get_session(self):
         return self._tools_db.get_session()
@@ -45,9 +45,9 @@ class KnowledgeDatabase:
         value: str,
         tags: list[str] | None = None,
     ) -> None:
-        """Store a new knowledge entry."""
+        """Store a new memory entry."""
         with self.get_session() as session:
-            entry = KnowledgeEntryModel(
+            entry = MemoryEntryModel(
                 id=entry_id,
                 agent_id=agent_id,
                 key=key,
@@ -59,19 +59,19 @@ class KnowledgeDatabase:
             )
             session.add(entry)
             session.commit()
-            logger.debug(f"Stored knowledge entry {entry_id} with key '{key}'")
+            logger.debug(f"Stored memory entry {entry_id} with key '{key}'")
 
     def recall(self, agent_id: str, key: str) -> dict | None:
-        """Recall a knowledge entry by key."""
+        """Recall a memory entry by key."""
         with self.get_session() as session:
             stmt = (
-                select(KnowledgeEntryModel)
+                select(MemoryEntryModel)
                 .where(
-                    KnowledgeEntryModel.agent_id == agent_id,
-                    KnowledgeEntryModel.key == key,
-                    KnowledgeEntryModel.is_active.is_(True),
+                    MemoryEntryModel.agent_id == agent_id,
+                    MemoryEntryModel.key == key,
+                    MemoryEntryModel.is_active.is_(True),
                 )
-                .order_by(KnowledgeEntryModel.updated_at.desc())
+                .order_by(MemoryEntryModel.updated_at.desc())
             )
             entry = session.execute(stmt).scalar_one_or_none()
 
@@ -93,20 +93,20 @@ class KnowledgeDatabase:
         query: str,
         max_results: int = 10,
     ) -> list[dict]:
-        """Search knowledge entries by key or value substring."""
+        """Search memory entries by key or value substring."""
         with self.get_session() as session:
             pattern = f"%{query}%"
             stmt = (
-                select(KnowledgeEntryModel)
+                select(MemoryEntryModel)
                 .where(
-                    KnowledgeEntryModel.agent_id == agent_id,
-                    KnowledgeEntryModel.is_active.is_(True),
+                    MemoryEntryModel.agent_id == agent_id,
+                    MemoryEntryModel.is_active.is_(True),
                 )
                 .where(
-                    KnowledgeEntryModel.key.ilike(pattern)
-                    | KnowledgeEntryModel.value.ilike(pattern)
+                    MemoryEntryModel.key.ilike(pattern)
+                    | MemoryEntryModel.value.ilike(pattern)
                 )
-                .order_by(KnowledgeEntryModel.updated_at.desc())
+                .order_by(MemoryEntryModel.updated_at.desc())
                 .limit(max_results)
             )
             entries = session.execute(stmt).scalars().all()
@@ -129,21 +129,19 @@ class KnowledgeDatabase:
         tag: str | None = None,
         max_results: int = 50,
     ) -> list[dict]:
-        """List all knowledge entries for an agent."""
+        """List all memory entries for an agent."""
         with self.get_session() as session:
-            stmt = select(KnowledgeEntryModel).where(
-                KnowledgeEntryModel.agent_id == agent_id,
-                KnowledgeEntryModel.is_active.is_(True),
+            stmt = select(MemoryEntryModel).where(
+                MemoryEntryModel.agent_id == agent_id,
+                MemoryEntryModel.is_active.is_(True),
             )
 
             if tag:
                 # Match tag within JSON array string: "tag" with quotes
                 # to avoid substring false positives
-                stmt = stmt.where(KnowledgeEntryModel.tags.contains(f'"{tag}"'))
+                stmt = stmt.where(MemoryEntryModel.tags.contains(f'"{tag}"'))
 
-            stmt = stmt.order_by(KnowledgeEntryModel.updated_at.desc()).limit(
-                max_results
-            )
+            stmt = stmt.order_by(MemoryEntryModel.updated_at.desc()).limit(max_results)
             entries = session.execute(stmt).scalars().all()
 
             return [
@@ -159,12 +157,12 @@ class KnowledgeDatabase:
             ]
 
     def update(self, entry_id: str, agent_id: str, value: str) -> bool:
-        """Update a knowledge entry's value."""
+        """Update a memory entry's value."""
         with self.get_session() as session:
-            stmt = select(KnowledgeEntryModel).where(
-                KnowledgeEntryModel.id == entry_id,
-                KnowledgeEntryModel.agent_id == agent_id,
-                KnowledgeEntryModel.is_active.is_(True),
+            stmt = select(MemoryEntryModel).where(
+                MemoryEntryModel.id == entry_id,
+                MemoryEntryModel.agent_id == agent_id,
+                MemoryEntryModel.is_active.is_(True),
             )
             entry = session.execute(stmt).scalar_one_or_none()
 
@@ -174,16 +172,16 @@ class KnowledgeDatabase:
             entry.value = value
             entry.updated_at = datetime.now(UTC)
             session.commit()
-            logger.debug(f"Updated knowledge entry {entry_id}")
+            logger.debug(f"Updated memory entry {entry_id}")
             return True
 
     def delete(self, entry_id: str, agent_id: str) -> bool:
-        """Soft-delete a knowledge entry."""
+        """Soft-delete a memory entry."""
         with self.get_session() as session:
-            stmt = select(KnowledgeEntryModel).where(
-                KnowledgeEntryModel.id == entry_id,
-                KnowledgeEntryModel.agent_id == agent_id,
-                KnowledgeEntryModel.is_active.is_(True),
+            stmt = select(MemoryEntryModel).where(
+                MemoryEntryModel.id == entry_id,
+                MemoryEntryModel.agent_id == agent_id,
+                MemoryEntryModel.is_active.is_(True),
             )
             entry = session.execute(stmt).scalar_one_or_none()
 
@@ -193,7 +191,7 @@ class KnowledgeDatabase:
             entry.is_active = False
             entry.updated_at = datetime.now(UTC)
             session.commit()
-            logger.debug(f"Deleted knowledge entry {entry_id}")
+            logger.debug(f"Deleted memory entry {entry_id}")
             return True
 
     def cleanup_old_entries(self, days: int = 30) -> int:
@@ -204,17 +202,17 @@ class KnowledgeDatabase:
 
         with self.get_session() as session:
             cutoff = datetime.now(UTC) - timedelta(days=days)
-            stmt = sa_delete(KnowledgeEntryModel).where(
-                KnowledgeEntryModel.is_active.is_(False),
-                KnowledgeEntryModel.updated_at < cutoff,
+            stmt = sa_delete(MemoryEntryModel).where(
+                MemoryEntryModel.is_active.is_(False),
+                MemoryEntryModel.updated_at < cutoff,
             )
             result: CursorResult = session.execute(stmt)  # type: ignore[assignment]
             count = result.rowcount
             session.commit()
-            logger.info(f"Cleaned up {count} old knowledge entries")
+            logger.info(f"Cleaned up {count} old memory entries")
             return count
 
 
-def get_database() -> KnowledgeDatabase:
-    """Get the knowledge database singleton."""
-    return KnowledgeDatabase()
+def get_database() -> MemoryDatabase:
+    """Get the memory database singleton."""
+    return MemoryDatabase()

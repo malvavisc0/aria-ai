@@ -139,7 +139,15 @@ async def on_chat_start_handler() -> None:
                 "button": None,
                 "persistent": True,
                 "selected": False,
-            }
+            },
+            {
+                "id": "Knowledge",
+                "icon": "book",
+                "description": "Ground answer in your documents",
+                "button": None,
+                "persistent": True,
+                "selected": False,
+            },
         ]
     )
 

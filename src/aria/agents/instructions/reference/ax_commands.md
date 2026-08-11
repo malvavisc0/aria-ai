@@ -34,7 +34,7 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 | `weather` | `location` | — |
 | `youtube` | `url` | `languages` |
 
-## knowledge
+## memory
 
 | Command | Required | Optional |
 |---------|----------|----------|
@@ -44,6 +44,13 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 | `list` | — | `tags`, `max_results` |
 | `update` | `entry_id`, `value` | — |
 | `delete` | `entry_id` | — |
+
+## knowledge
+
+| Command | Required | Optional |
+|---------|----------|----------|
+| `status` | — | — |
+| `reindex` | — | `force` |
 
 ## finance
 

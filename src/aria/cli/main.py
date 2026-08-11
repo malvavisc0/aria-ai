@@ -3,7 +3,7 @@
 This module defines the root CLI application and registers sub-commands
 for human-facing system management of the Aria AI assistant.
 
-Agent-facing commands (web, knowledge, dev, worker, processes, check)
+Agent-facing commands (web, memory, knowledge, dev, worker, processes, check)
 are available through the ``ax`` CLI instead.
 
 Sub-commands:
@@ -43,7 +43,7 @@ from aria.cli import (
     users,
 )
 from aria.cli import (
-    pdf_vlm as pdf_vlm_cli,
+    docling as docling_cli,
 )
 from aria.cli import (
     tools as tools_cli,
@@ -56,7 +56,7 @@ app = typer.Typer(
     help=(
         "Aria — local AI assistant management CLI\n\n"
         "Human-facing commands for server, user, model, and system management.\n"
-        "Agent-facing commands (web, knowledge, dev, worker, processes, check) "
+        "Agent-facing commands (web, memory, knowledge, dev, worker, processes, check) "
         "are available via the ``ax`` CLI."
     ),
     rich_markup_mode="rich",
@@ -64,7 +64,7 @@ app = typer.Typer(
 )
 app.add_typer(users.app, name="users")
 app.add_typer(vllm_cli.app, name="vllm")
-app.add_typer(pdf_vlm_cli.app, name="pdf-vlm")
+app.add_typer(docling_cli.app, name="docling")
 app.add_typer(lightpanda.app, name="lightpanda")
 app.add_typer(models.app, name="models")
 app.add_typer(config.app, name="config")
@@ -127,7 +127,7 @@ COMMAND_GROUPS = [
         "commands": [
             ("models", "Download and manage models"),
             ("vllm", "Install and manage vLLM"),
-            ("pdf-vlm", "Install and manage Granite-Docling worker"),
+            ("docling", "Install and manage Granite-Docling worker"),
             ("lightpanda", "Download and manage Lightpanda browser"),
             ("server", "Start or stop the web UI"),
             ("system", "Inspect hardware and GPU"),

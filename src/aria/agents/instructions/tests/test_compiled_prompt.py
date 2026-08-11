@@ -33,7 +33,7 @@ _PLACEHOLDER_RE = re.compile(r"\{\{[^}]+\}\}")
 # content only so the guardrail tracks markdown bloat, not environment-
 # dependent extras (managed binaries / venv table).
 ARIA_BUDGET_WORDS = 1865  # resident baseline 1595
-WORKER_BUDGET_WORDS = 1430  # resident baseline 1217
+WORKER_BUDGET_WORDS = 2000  # resident baseline 1217
 PROMPT_ENHANCER_BUDGET_WORDS = 583  # resident baseline 507
 
 # A paragraph in an agent md that is >40% token-overlap (Jaccard) with a

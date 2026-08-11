@@ -1,7 +1,7 @@
-"""aria-pdf-vlm worker CLI.
+"""Docling worker CLI.
 
-Invoked as ``pdf-vlm convert ...`` / ``pdf-vlm probe`` from the main Aria
-env via the ~/.aria/bin/pdf-vlm shim. Emits one JSON object on stdout.
+Invoked as ``docling convert ...`` / ``docling probe`` from the main Aria
+env via the ~/.aria/bin/docling shim. Emits one JSON object on stdout.
 """
 
 import argparse
@@ -82,8 +82,29 @@ def cmd_convert(args: argparse.Namespace) -> int:
             )
         conv = _build_converter(args.device)
         result = conv.convert(pdf)
-        md = result.document.export_to_markdown()
         dur_ms = int((time.time() - t0) * 1000)
+        if args.chunks:
+            from docling_core.transforms.chunker.hierarchical_chunker import (
+                HierarchicalChunker,
+            )
+
+            chunker = HierarchicalChunker()
+            items = [
+                {"text": c.text, "headings": c.meta.headings or []}
+                for c in chunker.chunk(result.document)
+            ]
+            out.write_text(json.dumps(items), encoding="utf-8")
+            return _emit(
+                {
+                    "ok": True,
+                    "chunks": len(items),
+                    "pages": n,
+                    "duration_ms": dur_ms,
+                    "model": args.model,
+                    "device": args.device,
+                }
+            )
+        md = result.document.export_to_markdown()
         provenance = (
             f"<!-- converted by Granite-Docling (model={args.model}, "
             f"device={args.device}, pages={n}, duration_ms={dur_ms}) -->\n"
@@ -113,7 +134,7 @@ def cmd_probe(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    p = argparse.ArgumentParser(prog="pdf-vlm")
+    p = argparse.ArgumentParser(prog="docling")
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("convert")
     c.add_argument("--input", required=True)
@@ -121,6 +142,11 @@ def main() -> int:
     c.add_argument("--model", required=True)
     c.add_argument("--device", default="cpu")
     c.add_argument("--max-pages", type=int, default=0)
+    c.add_argument(
+        "--chunks",
+        action="store_true",
+        help="emit JSON chunks via HierarchicalChunker instead of markdown",
+    )
     pr = sub.add_parser("probe")
     pr.add_argument("--device", default="cpu")
     args = p.parse_args()
