@@ -10,7 +10,6 @@ These handlers are invoked by Chainlit at various points in the app lifecycle.
 
 from __future__ import annotations
 
-import asyncio
 import audioop  # stdlib on 3.12; audioop-lts covers 3.13+
 import io
 import json
@@ -244,36 +243,32 @@ async def _text_to_speech(text: str) -> bytes:
 
 async def on_audio_start_handler() -> bool:
     """Return True to accept the microphone stream (start of a turn)."""
+    logger.info("Audio stream started")
     cl.user_session.set("audio_chunks", [])
     cl.user_session.set("is_speaking", False)
     cl.user_session.set("silent_ms", 0.0)
     cl.user_session.set("last_elapsed_time", None)
-    cl.user_session.set("voice_processing", False)
-    cl.user_session.set("voice_task", None)
     return True
 
 
 async def on_audio_chunk_handler(chunk: cl.InputAudioChunk) -> None:
-    """Accumulate PCM chunks; on silence timeout, spawn process_audio."""
-    if cl.user_session.get("voice_processing"):
-        return
-    chunks = list(cl.user_session.get("audio_chunks") or [])
-    chunks.append(np.frombuffer(chunk.data, dtype=np.int16))
-    cl.user_session.set("audio_chunks", chunks)
+    """Accumulate PCM chunks; on silence timeout, run process_audio."""
+    chunks = cl.user_session.get("audio_chunks")
+    if chunks is not None:
+        chunks.append(np.frombuffer(chunk.data, dtype=np.int16))
 
     if chunk.isStart:
-        cl.user_session.set("is_speaking", True)
         cl.user_session.set("last_elapsed_time", chunk.elapsedTime)
+        cl.user_session.set("is_speaking", True)
         return
 
-    # Silence timing via chunk timestamps (robust to arrival jitter).
     last_elapsed = cl.user_session.get("last_elapsed_time")
     if last_elapsed is None:
         last_elapsed = chunk.elapsedTime
     time_diff_ms = chunk.elapsedTime - last_elapsed
     cl.user_session.set("last_elapsed_time", chunk.elapsedTime)
 
-    rms = audioop.rms(chunk.data, 2)  # 16-bit = 2 bytes/sample
+    rms = audioop.rms(chunk.data, 2)
     if rms < Voice.rms_threshold:
         silent_ms = float(cl.user_session.get("silent_ms", 0.0) or 0.0)
         silent_ms += time_diff_ms
@@ -282,9 +277,7 @@ async def on_audio_chunk_handler(chunk: cl.InputAudioChunk) -> None:
             "is_speaking"
         ):
             cl.user_session.set("is_speaking", False)
-            cl.user_session.set("voice_processing", True)
-            task = asyncio.create_task(_run_process_audio())
-            cl.user_session.set("voice_task", task)
+            await process_audio()
     else:
         cl.user_session.set("silent_ms", 0.0)
         if not cl.user_session.get("is_speaking"):
@@ -292,31 +285,12 @@ async def on_audio_chunk_handler(chunk: cl.InputAudioChunk) -> None:
 
 
 async def on_audio_end_handler() -> None:
-    """Flush any remaining audio when the mic stream ends.
-
-    If a silence-timeout turn is already in flight, it completes on its own.
-    Otherwise, any buffered chunks are flushed through process_audio. This
-    hook also ensures ``init_thread("audio")`` has run before the first
-    message is constructed (see design report §6.4).
-    """
-    if cl.user_session.get("voice_processing"):
-        return
+    """Flush any remaining audio when the mic stream ends."""
+    logger.info("Audio stream ended")
     chunks = cl.user_session.get("audio_chunks") or []
-    if not chunks:
-        return
-    cl.user_session.set("voice_processing", True)
-    await _run_process_audio()
-
-
-async def _run_process_audio() -> None:
-    """Run process_audio and clear the processing flag + task reference."""
-    try:
+    if chunks and cl.user_session.get("is_speaking"):
+        cl.user_session.set("is_speaking", False)
         await process_audio()
-    except Exception as e:
-        logger.exception(f"process_audio failed: {e}")
-    finally:
-        cl.user_session.set("voice_processing", False)
-        cl.user_session.set("voice_task", None)
 
 
 async def process_audio() -> None:
@@ -328,12 +302,11 @@ async def process_audio() -> None:
     pcm = np.concatenate(chunks).tobytes()
 
     sample_rate = Voice.audio_sample_rate
-    duration_s = len(pcm) / (2 * sample_rate)  # 2 bytes/sample
+    duration_s = len(pcm) / (2 * sample_rate)
     if duration_s < MIN_AUDIO_DURATION_S:
         logger.debug(f"Audio too short ({duration_s:.2f}s), skipping STT")
         return
 
-    # Wrap raw PCM in a WAV (mono, 16-bit — sample rate from config).
     wav = io.BytesIO()
     with wave.open(wav, "wb") as f:
         f.setnchannels(1)
@@ -344,9 +317,11 @@ async def process_audio() -> None:
 
     transcription = await _speech_to_text(wav_bytes)
     if not transcription.strip():
+        logger.debug("STT returned empty transcription, skipping")
         return
 
-    # Show the transcription as the user's message (echo the captured audio).
+    logger.info(f"Transcription: {transcription}")
+
     input_audio = cl.Audio(content=wav_bytes, name="input.wav", mime="audio/wav")
     await cl.Message(
         content=transcription,
@@ -355,15 +330,14 @@ async def process_audio() -> None:
         elements=[input_audio],
     ).send()
 
-    # Reuse the full text pipeline (memory, tools, streaming, error handling).
     from aria.web.message_pipeline import on_message_handler
 
     output = await on_message_handler(cl.Message(content=transcription))
     answer = getattr(output, "answer_text", "") if output else ""
     if not answer.strip():
+        logger.warning("No answer text from message pipeline")
         return
 
-    # Always send the text answer; attach auto-play audio when TTS succeeds.
     audio_bytes = await _text_to_speech(answer)
     if audio_bytes:
         await cl.Message(
