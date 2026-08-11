@@ -1,789 +1,254 @@
 from __future__ import annotations
 
-from pathlib import Path
-from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
-from chainlit.types import ThreadDict
 
-from aria.web import session as session_module
-
-
-def _mock_message(**kwargs) -> Any:
-    """Create a mock cl.Message from keyword attributes."""
-    return SimpleNamespace(**kwargs)
+from aria.web import session as pipeline
 
 
-def _mock_element(**kwargs) -> Any:
-    """Create a mock cl.Element from keyword attributes."""
-    return SimpleNamespace(**kwargs)
+class _FakeMemory:
+    """In-memory fake Memory for sanitize/rollback tests.
 
-
-class _CaptureMemory:
-    """Fake memory for restore_chat_history tests.
-
-    Captures messages written via ``aset``/``aput_messages`` into a
-    shared list so tests can assert what was persisted, and records
-    messages handed to ``schedule_embed`` (the turns trimmed off the
-    restored tail, which must still reach vector storage).
+    Backed by a list; supports the ``aget``/``aget_all``/``aset``
+    contract that ``_sanitize_memory`` and ``_rollback_memory`` use.
     """
 
-    def __init__(self, captured: list) -> None:
-        self._captured = captured
-        self.embedded: list = []
+    def __init__(self, msgs: Any = ()) -> None:
+        self._msgs = list(msgs)
 
-    async def aput_messages(self, messages: Any) -> None:
-        self._captured.extend(messages)
-
-    async def aset(self, messages: Any) -> None:
-        self._captured.extend(messages)
+    async def aget(self, input: Any = None) -> list:
+        return list(self._msgs)
 
     async def aget_all(self, status: Any = None) -> list:
-        return list(self._captured)
+        return list(self._msgs)
 
-    def schedule_embed(self, messages: Any) -> None:
-        self.embedded.extend(messages)
-
-    def _estimate_token_count(self, message: Any) -> int:
-        return len(str(message.content or ""))
+    async def aset(self, messages: Any) -> None:
+        self._msgs = list(messages)
 
 
-class TestExtractImageData:
-    """Tests for extract_image_data()."""
+class TestSanitizeMemory:
+    """Tests for the _sanitize_memory helper."""
 
     @staticmethod
-    def test_returns_base64_for_image_elements(tmp_path: Path) -> None:
-        img_file = tmp_path / "photo.png"
-        img_file.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 50)
+    def _make_memory(*messages) -> Any:
+        """Build a fake Memory backed by an in-memory list."""
+        return _FakeMemory(messages)
 
-        message = _mock_message(
-            elements=[
-                SimpleNamespace(
-                    path=str(img_file),
-                    mime="image/png",
-                    name="photo.png",
-                ),
-            ],
-        )
+    @pytest.mark.asyncio
+    async def test_empty_memory_is_noop(self) -> None:
 
-        result = session_module.extract_image_data(message)
+        memory = self._make_memory()
+        await pipeline._sanitize_memory(memory)
+        assert await memory.aget() == []
 
-        assert len(result) == 1
-        assert result[0]["mime_type"] == "image/png"
-        assert result[0]["name"] == "photo.png"
-        assert isinstance(result[0]["base64"], str)
-        assert len(result[0]["base64"]) > 0
+    @pytest.mark.asyncio
+    async def test_already_alternating_is_unchanged(self) -> None:
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
 
-    @staticmethod
-    def test_skips_non_image_elements(tmp_path: Path) -> None:
-        pdf_file = tmp_path / "doc.pdf"
-        pdf_file.write_bytes(b"%PDF-1.4")
-
-        message = _mock_message(
-            elements=[
-                SimpleNamespace(
-                    path=str(pdf_file),
-                    mime="application/pdf",
-                    name="doc.pdf",
-                ),
-            ],
-        )
-
-        result = session_module.extract_image_data(message)
-        assert result == []
-
-    @staticmethod
-    def test_detects_image_by_extension_when_mime_missing(
-        tmp_path: Path,
-    ) -> None:
-        img_file = tmp_path / "shot.jpg"
-        img_file.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 20)
-
-        message = _mock_message(
-            elements=[
-                SimpleNamespace(
-                    path=str(img_file),
-                    mime="",
-                    name="shot.jpg",
-                ),
-            ],
-        )
-
-        result = session_module.extract_image_data(message)
-
-        assert len(result) == 1
-        # .jpg maps to the registered image/jpeg MIME (not image/jpg).
-        assert result[0]["mime_type"] == "image/jpeg"
-
-    @staticmethod
-    def test_handles_multiple_images(tmp_path: Path) -> None:
-        img1 = tmp_path / "a.png"
-        img2 = tmp_path / "b.webp"
-        img1.write_bytes(b"\x89PNG" + b"\x00" * 10)
-        img2.write_bytes(b"RIFF" + b"\x00" * 10)
-
-        message = _mock_message(
-            elements=[
-                SimpleNamespace(path=str(img1), mime="image/png", name="a.png"),
-                SimpleNamespace(path=str(img2), mime="image/webp", name="b.webp"),
-            ],
-        )
-
-        result = session_module.extract_image_data(message)
-
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="hi"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="hello"),
+        ]
+        memory = self._make_memory(*msgs)
+        await pipeline._sanitize_memory(memory)
+        result = await memory.aget()
         assert len(result) == 2
-        assert result[0]["name"] == "a.png"
-        assert result[1]["name"] == "b.webp"
+        assert result[0].content == "hi"
+        assert result[1].content == "hello"
+
+    @pytest.mark.asyncio
+    async def test_consecutive_user_messages_collapsed(self) -> None:
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="first"),
+            ChatMessage(role=MessageRole.USER, content="second"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="reply"),
+        ]
+        memory = self._make_memory(*msgs)
+        await pipeline._sanitize_memory(memory)
+        result = await memory.aget()
+        assert [m.content for m in result] == ["second", "reply"]
+
+    @pytest.mark.asyncio
+    async def test_trailing_user_message_removed(self) -> None:
+        """A dangling user message from a failed run is dropped."""
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
+            ChatMessage(role=MessageRole.USER, content="unanswered"),
+        ]
+        memory = self._make_memory(*msgs)
+        await pipeline._sanitize_memory(memory)
+        result = await memory.aget()
+        assert [m.content for m in result] == ["q", "a"]
+
+    @pytest.mark.asyncio
+    async def test_round_trip_preserves_aget_all_when_already_valid(self) -> None:
+        """Regression: sanitize must read the raw chat store, not the rendered one.
+
+        If ``aget()`` (which splices the retrieved vector context into the
+        last user message) were read and ``set()`` were written, the
+        injected blob would be persisted permanently and grow unbounded
+        across repairs.  Reading ``aget_all()`` + writing ``aset()``
+        leaves valid history byte-identical.
+        """
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q1"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
+            ChatMessage(role=MessageRole.USER, content="q2"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a2"),
+        ]
+        memory = self._make_memory(*msgs)
+        before = await memory.aget_all()
+        await pipeline._sanitize_memory(memory)
+        after = await memory.aget_all()
+        assert [m.content for m in after] == [m.content for m in before]
+        assert [m.role for m in after] == [m.role for m in before]
+
+    @pytest.mark.asyncio
+    async def test_repair_never_grows_message_length(self) -> None:
+        """Regression: no message should grow across a sanitize round-trip."""
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
+        ]
+        memory = self._make_memory(*msgs)
+        before_lens = [len(m.content or "") for m in await memory.aget_all()]
+        await pipeline._sanitize_memory(memory)
+        after_lens = [len(m.content or "") for m in await memory.aget_all()]
+        assert after_lens == before_lens
+
+
+class TestRollbackMemory:
+    """Tests for the _rollback_memory helper."""
 
     @staticmethod
-    def test_returns_empty_for_no_elements() -> None:
-        message = _mock_message(elements=[])
-        assert session_module.extract_image_data(message) == []
+    def _make_memory(*messages) -> Any:
+        return _FakeMemory(messages)
 
-    @staticmethod
-    def test_returns_empty_when_elements_is_none() -> None:
-        message = _mock_message(elements=None)
-        assert session_module.extract_image_data(message) == []
+    @pytest.mark.asyncio
+    async def test_none_memory_is_noop(self) -> None:
+        # Should not raise
+        await pipeline._rollback_memory(None)
 
-    @staticmethod
-    def test_skips_element_without_path() -> None:
-        message = _mock_message(
-            elements=[
-                SimpleNamespace(path=None, mime="image/png", name="no.png"),
-            ],
+    @pytest.mark.asyncio
+    async def test_empty_memory_is_noop(self) -> None:
+        memory = self._make_memory()
+        await pipeline._rollback_memory(memory)
+        assert await memory.aget() == []
+
+    @pytest.mark.asyncio
+    async def test_removes_trailing_user_message(self) -> None:
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
+            ChatMessage(role=MessageRole.USER, content="dangling"),
+        ]
+        memory = self._make_memory(*msgs)
+        await pipeline._rollback_memory(memory)
+        result = await memory.aget()
+        assert [m.content for m in result] == ["q", "a"]
+
+    @pytest.mark.asyncio
+    async def test_leaves_valid_alternation_unchanged(self) -> None:
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
+        ]
+        memory = self._make_memory(*msgs)
+        await pipeline._rollback_memory(memory)
+        result = await memory.aget()
+        assert len(result) == 2
+
+    @pytest.mark.asyncio
+    async def test_round_trip_preserves_aget_all_when_already_valid(self) -> None:
+        """Regression: rollback reads raw chat store, never grows messages."""
+        from llama_index.core.base.llms.types import ChatMessage, MessageRole
+
+        msgs = [
+            ChatMessage(role=MessageRole.USER, content="q1"),
+            ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
+        ]
+        memory = self._make_memory(*msgs)
+        before = await memory.aget_all()
+        await pipeline._rollback_memory(memory)
+        after = await memory.aget_all()
+        assert [m.content for m in after] == [m.content for m in before]
+
+
+class TestResetMemoryForEdit:
+    """Tests for _reset_memory_for_edit — memory rebuild on message edit."""
+
+    @pytest.mark.asyncio
+    async def test_rebuilds_memory_from_db(self, monkeypatch) -> None:
+        """_reset_memory_for_edit rebuilds memory from DB."""
+        mock_vector_db = MagicMock()
+        monkeypatch.setattr(pipeline._state, "vector_db", mock_vector_db)
+
+        mock_memory = MagicMock()
+        monkeypatch.setattr(pipeline, "create_memory", lambda tid: mock_memory)
+
+        mock_thread = {
+            "id": "thread-1",
+            "name": "Test",
+            "steps": [],
+        }
+        mock_data_layer = MagicMock()
+        mock_data_layer.get_thread = AsyncMock(return_value=mock_thread)
+        from aria.web import hooks
+
+        monkeypatch.setattr(
+            hooks,
+            "get_data_layer_handler",
+            lambda: mock_data_layer,
         )
 
-        result = session_module.extract_image_data(message)
-        assert result == []
-
-    @staticmethod
-    def test_handles_unreadable_file_gracefully(tmp_path: Path) -> None:
-        """When the image file doesn't exist, a warning is logged and skipped."""
-        message = _mock_message(
-            elements=[
-                SimpleNamespace(
-                    path=str(tmp_path / "missing.png"),
-                    mime="image/png",
-                    name="missing.png",
-                ),
-            ],
+        restored_memory = MagicMock()
+        monkeypatch.setattr(
+            pipeline,
+            "restore_chat_history",
+            AsyncMock(return_value=restored_memory),
         )
 
-        result = session_module.extract_image_data(message)
-        assert result == []
+        result = await pipeline._reset_memory_for_edit("thread-1")
 
+        mock_vector_db.delete_collection.assert_called_once_with("thread-1")
+        mock_data_layer.get_thread.assert_awaited_once_with("thread-1")
+        assert result is restored_memory
 
-def test_extract_file_paths_skips_image_elements(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """Image elements should be excluded from file_paths output."""
-    monkeypatch.setattr(session_module.WorkspaceConfig, "path", tmp_path)
+    @pytest.mark.asyncio
+    async def test_raises_when_thread_missing(self, monkeypatch) -> None:
+        """A missing thread aborts the edit instead of returning empty memory."""
+        mock_vector_db = MagicMock()
+        monkeypatch.setattr(pipeline._state, "vector_db", mock_vector_db)
 
-    img_file = tmp_path / "photo.png"
-    img_file.write_bytes(b"\x89PNG" + b"\x00" * 10)
-    pdf_file = tmp_path / "doc.pdf"
-    pdf_file.write_bytes(b"%PDF-1.4")
+        mock_memory = MagicMock()
+        monkeypatch.setattr(pipeline, "create_memory", lambda tid: mock_memory)
 
-    message = _mock_message(
-        thread_id="t1",
-        elements=[
-            SimpleNamespace(path=str(img_file), mime="image/png", name="photo.png"),
-            SimpleNamespace(
-                path=str(pdf_file),
-                mime="application/pdf",
-                name="doc.pdf",
-            ),
-        ],
-    )
+        mock_data_layer = MagicMock()
+        mock_data_layer.get_thread = AsyncMock(return_value=None)
+        from aria.web import hooks
 
-    paths = session_module.extract_file_paths(message)
-
-    assert len(paths) == 1
-    assert "doc.pdf" in paths[0]
-
-
-def test_extract_file_paths_uses_unique_destination_names(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    monkeypatch.setattr(session_module.WorkspaceConfig, "path", tmp_path)
-
-    src_a = tmp_path / "source-a.txt"
-    src_b = tmp_path / "source-b.txt"
-    src_a.write_text("first", encoding="utf-8")
-    src_b.write_text("second", encoding="utf-8")
-
-    message = _mock_message(
-        thread_id="thread-123",
-        elements=[
-            SimpleNamespace(path=str(src_a), name="report.txt"),
-            SimpleNamespace(path=str(src_b), name="report.txt"),
-        ],
-    )
-
-    paths = session_module.extract_file_paths(message)
-
-    assert len(paths) == 2
-    assert paths[0] != paths[1]
-    assert Path(paths[0]).read_text(encoding="utf-8") == "first"
-    assert Path(paths[1]).read_text(encoding="utf-8") == "second"
-
-
-@pytest.mark.asyncio
-async def test_restore_chat_history_sorts_root_messages_chronologically(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    captured_messages = []
-
-    monkeypatch.setattr(
-        session_module,
-        "create_memory",
-        lambda thread_id: _CaptureMemory(captured_messages),
-    )
-
-    thread = {
-        "id": "thread-1",
-        "name": "Example",
-        "steps": [
-            {
-                "id": "2",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:01Z",
-                "type": "assistant_message",
-                "output": "second",
-            },
-            {
-                "id": "1",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:00Z",
-                "type": "user_message",
-                "output": "first",
-            },
-        ],
-    }
-
-    await session_module.restore_chat_history(cast(ThreadDict, thread))
-
-    assert [message.content for message in captured_messages] == [
-        "first",
-        "second",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_restore_chat_history_includes_child_assistant_messages(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Assistant messages with parentId set must still be restored.
-
-    get_thread() returns the raw parent-child tree where assistant
-    messages are children of user messages (parentId != None).
-    """
-    captured_messages = []
-
-    monkeypatch.setattr(
-        session_module,
-        "create_memory",
-        lambda thread_id: _CaptureMemory(captured_messages),
-    )
-
-    thread = {
-        "id": "thread-child",
-        "name": "Child test",
-        "steps": [
-            {
-                "id": "u1",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:00Z",
-                "type": "user_message",
-                "output": "Hello",
-            },
-            {
-                "id": "a1",
-                "parentId": "u1",
-                "createdAt": "2026-03-27T10:00:01Z",
-                "type": "assistant_message",
-                "output": "Hi there!",
-            },
-            {
-                "id": "u2",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:02Z",
-                "type": "user_message",
-                "output": "How are you?",
-            },
-            {
-                "id": "a2",
-                "parentId": "u2",
-                "createdAt": "2026-03-27T10:00:03Z",
-                "type": "assistant_message",
-                "output": "I'm great!",
-            },
-        ],
-    }
-
-    await session_module.restore_chat_history(cast(ThreadDict, thread))
-
-    assert [m.content for m in captured_messages] == [
-        "Hello",
-        "Hi there!",
-        "How are you?",
-        "I'm great!",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_restore_chat_history_sanitises_consecutive_same_role(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Consecutive messages of the same role should collapse to the last."""
-    captured_messages = []
-
-    monkeypatch.setattr(
-        session_module,
-        "create_memory",
-        lambda thread_id: _CaptureMemory(captured_messages),
-    )
-
-    thread = {
-        "id": "thread-dup",
-        "name": "Dup test",
-        "steps": [
-            {
-                "id": "u1",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:00Z",
-                "type": "user_message",
-                "output": "first user",
-            },
-            {
-                "id": "u2",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:01Z",
-                "type": "user_message",
-                "output": "second user",
-            },
-            {
-                "id": "a1",
-                "parentId": "u2",
-                "createdAt": "2026-03-27T10:00:02Z",
-                "type": "assistant_message",
-                "output": "reply",
-            },
-        ],
-    }
-
-    await session_module.restore_chat_history(cast(ThreadDict, thread))
-
-    # The first user message is dropped (consecutive duplicate → keep last).
-    assert [m.content for m in captured_messages] == [
-        "second user",
-        "reply",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_restore_chat_history_keeps_trailing_user_message(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A trailing user message (no assistant reply) is kept on resume.
-
-    Unlike the pre-run sanitisation path, restore must not drop the
-    user's last message — otherwise an unanswered turn loses that
-    content from the model's context forever.
-    """
-    captured_messages = []
-
-    monkeypatch.setattr(
-        session_module,
-        "create_memory",
-        lambda thread_id: _CaptureMemory(captured_messages),
-    )
-
-    thread = {
-        "id": "thread-trailing",
-        "name": "Trailing test",
-        "steps": [
-            {
-                "id": "u1",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:00Z",
-                "type": "user_message",
-                "output": "Hello",
-            },
-            {
-                "id": "a1",
-                "parentId": "u1",
-                "createdAt": "2026-03-27T10:00:01Z",
-                "type": "assistant_message",
-                "output": "Hi!",
-            },
-            {
-                "id": "u2",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:02Z",
-                "type": "user_message",
-                "output": "unanswered",
-            },
-        ],
-    }
-
-    await session_module.restore_chat_history(cast(ThreadDict, thread))
-
-    # Trailing user message is kept on resume (no follow-up yet).
-    assert [m.content for m in captured_messages] == [
-        "Hello",
-        "Hi!",
-        "unanswered",
-    ]
-
-
-@pytest.mark.asyncio
-async def test_restore_chat_history_embeds_trimmed_off_turns(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Turns dropped by the budget trim are scheduled for embedding.
-
-    They are only in Chroma if a previous session flushed them, which
-    is not guaranteed if that session died before draining — so resume
-    must hand them to ``schedule_embed`` or they are lost.
-    """
-    captured_messages: list = []
-    memory = _CaptureMemory(captured_messages)
-    monkeypatch.setattr(session_module, "create_memory", lambda thread_id: memory)
-    # _CaptureMemory counts tokens as characters; budget = 20 * 0.5 * 0.9 = 9.
-    monkeypatch.setattr(session_module.EmbeddingsConfig, "token_limit", 20)
-    monkeypatch.setattr(
-        session_module.EmbeddingsConfig, "chat_history_token_ratio", 0.5
-    )
-
-    thread = {
-        "id": "thread-trim",
-        "name": "Trim test",
-        "steps": [
-            {
-                "id": "u1",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:00Z",
-                "type": "user_message",
-                "output": "oldest question",
-            },
-            {
-                "id": "a1",
-                "parentId": "u1",
-                "createdAt": "2026-03-27T10:00:01Z",
-                "type": "assistant_message",
-                "output": "oldest answer",
-            },
-            {
-                "id": "u2",
-                "parentId": None,
-                "createdAt": "2026-03-27T10:00:02Z",
-                "type": "user_message",
-                "output": "new q",
-            },
-            {
-                "id": "a2",
-                "parentId": "u2",
-                "createdAt": "2026-03-27T10:00:03Z",
-                "type": "assistant_message",
-                "output": "new a",
-            },
-        ],
-    }
-
-    await session_module.restore_chat_history(cast(ThreadDict, thread))
-
-    assert [m.content for m in captured_messages] == ["new q", "new a"]
-    assert [m.content for m in memory.embedded] == [
-        "oldest question",
-        "oldest answer",
-    ]
-
-
-def test_sanitize_chat_history_empty() -> None:
-    assert session_module._sanitize_chat_history([]) == []
-
-
-def test_sanitize_chat_history_already_alternating() -> None:
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="a"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="b"),
-        ChatMessage(role=MessageRole.USER, content="c"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="d"),
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    assert [m.content for m in result] == ["a", "b", "c", "d"]
-
-
-def test_sanitize_chat_history_leading_assistant_dropped() -> None:
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.ASSISTANT, content="orphan"),
-        ChatMessage(role=MessageRole.USER, content="a"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="b"),
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    assert [m.content for m in result] == ["a", "b"]
-
-
-def test_sanitize_chat_history_trailing_user_dropped() -> None:
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="a"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="b"),
-        ChatMessage(role=MessageRole.USER, content="dangling"),
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    assert [m.content for m in result] == ["a", "b"]
-
-
-def _assistant_with_tool_calls(n: int, content: str = "") -> Any:  # noqa: F821
-    from llama_index.core.base.llms.types import (
-        ChatMessage,
-        MessageRole,
-        TextBlock,
-        ToolCallBlock,
-    )
-
-    blocks: list = [TextBlock(text=content)] if content else []
-    for i in range(n):
-        blocks.append(
-            ToolCallBlock(
-                tool_call_id=f"call_{i}",
-                tool_name=f"tool_{i}",
-                tool_kwargs="{}",
-            )
+        monkeypatch.setattr(
+            hooks,
+            "get_data_layer_handler",
+            lambda: mock_data_layer,
         )
-    return ChatMessage(role=MessageRole.ASSISTANT, blocks=blocks)
 
+        with pytest.raises(pipeline._EditThreadMissingError):
+            await pipeline._reset_memory_for_edit("ghost-thread")
 
-def _tool_message(call_id: str, content: str = "ok") -> Any:  # noqa: F821
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    return ChatMessage(
-        role=MessageRole.TOOL,
-        content=content,
-        additional_kwargs={"tool_call_id": call_id},
-    )
-
-
-def test_sanitize_preserves_parallel_tool_calls() -> None:
-    """Regression: two parallel tool calls must keep BOTH tool responses.
-
-    Previously consecutive TOOL messages were collapsed into one, leaving
-    2 tool calls with 1 response → Mistral 400.
-    """
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q"),
-        _assistant_with_tool_calls(2),
-        _tool_message("call_0", "r0"),
-        _tool_message("call_1", "r1"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="final"),
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-
-    tool_msgs = [m for m in result if m.role == MessageRole.TOOL]
-    assert len(tool_msgs) == 2
-    # call count == response count
-    assistant_calls = session_module._message_tool_call_count(result[1])
-    assert assistant_calls == len(tool_msgs)
-    assert result[-1].content == "final"
-
-
-def test_sanitize_drops_dangling_tool_call_group() -> None:
-    """Assistant with tool calls but no following tool messages → dropped.
-
-    The trailing user message is then also dropped (no assistant reply
-    follows), so the whole history collapses to empty — the important
-    invariant is that no unbalanced tool group survives.
-    """
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q"),
-        _assistant_with_tool_calls(2),  # failed mid-turn, no tool results
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    assert all(m.role != MessageRole.TOOL for m in result)
-    assert all(session_module._message_tool_call_count(m) == 0 for m in result)
-
-
-def test_sanitize_drops_dangling_tool_call_group_keeps_prior_turn() -> None:
-    """A complete prior turn survives even when the latest turn dangles."""
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q1"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
-        ChatMessage(role=MessageRole.USER, content="q2"),
-        _assistant_with_tool_calls(2),  # failed mid-turn, no tool results
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    # Dangling tool group + its trailing user turn are dropped; the first
-    # complete user/assistant turn remains and is balanced.
-    assert [m.content for m in result] == ["q1", "a1"]
-    assert all(m.role != MessageRole.TOOL for m in result)
-
-
-def test_sanitize_drops_partial_tool_call_group() -> None:
-    """2 tool calls but only 1 response → whole group dropped."""
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q"),
-        _assistant_with_tool_calls(2),
-        _tool_message("call_0", "r0"),
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    assert all(m.role != MessageRole.TOOL for m in result)
-    assert all(session_module._message_tool_call_count(m) == 0 for m in result)
-
-
-def test_sanitize_drops_orphan_tool_message() -> None:
-    """A tool message with no preceding assistant tool-call is dropped."""
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q"),
-        _tool_message("call_x", "orphan"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="final"),
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    assert all(m.role != MessageRole.TOOL for m in result)
-    assert [m.content for m in result] == ["q", "final"]
-
-
-def test_sanitize_counts_additional_kwargs_tool_calls() -> None:
-    """Tool calls in additional_kwargs (no blocks) are counted correctly."""
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    assistant = ChatMessage(
-        role=MessageRole.ASSISTANT,
-        additional_kwargs={"tool_calls": [{"id": "a"}, {"id": "b"}]},
-    )
-    assert session_module._message_tool_call_count(assistant) == 2
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q"),
-        assistant,
-        _tool_message("a"),
-        _tool_message("b"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="final"),
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    assert len([m for m in result if m.role == MessageRole.TOOL]) == 2
-
-
-def test_sanitize_keeps_single_tool_call_turn() -> None:
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q"),
-        _assistant_with_tool_calls(1),
-        _tool_message("call_0"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="final"),
-    ]
-    result = session_module._sanitize_chat_history(msgs)
-    assert len(result) == 4
-    assert len([m for m in result if m.role == MessageRole.TOOL]) == 1
-
-
-# ---------------------------------------------------------------------------
-# _trim_to_budget — keeps the newest tail under a token budget
-# ---------------------------------------------------------------------------
-
-
-def test_trim_to_budget_keeps_tail_within_budget() -> None:
-    """Newest messages are kept as long as they fit."""
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="hello"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="hi"),
-        ChatMessage(role=MessageRole.USER, content="how are you?"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="good"),
-    ]
-    result = session_module._trim_to_budget(
-        msgs, budget=10_000, token_counter=lambda m: len(m.content or "")
-    )
-    assert [m.content for m in result] == [m.content for m in msgs]
-
-
-def test_trim_to_budget_starts_with_user_message() -> None:
-    """Leading non-user messages are dropped — _manage_queue requires this."""
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q1"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
-        ChatMessage(role=MessageRole.USER, content="q2"),
-    ]
-    result = session_module._trim_to_budget(
-        msgs, budget=1, token_counter=lambda m: len(m.content or "")
-    )
-    assert result
-    assert result[0].role == MessageRole.USER
-
-
-def test_trim_to_budget_keeps_last_user_turn_even_when_oversize() -> None:
-    """A single message over the budget is still kept (never silently lost)."""
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    big = "x" * 2000
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q1"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
-        ChatMessage(role=MessageRole.USER, content=big),
-    ]
-    result = session_module._trim_to_budget(
-        msgs, budget=10, token_counter=lambda m: len(m.content or "")
-    )
-    assert result
-    assert result[-1].content == big
-    assert result[-1].role == MessageRole.USER
-
-
-def test_trim_to_budget_does_not_mutate_input() -> None:
-    """Returns a fresh list; the caller's list is untouched."""
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="a"),
-    ]
-    snapshot = list(msgs)
-    session_module._trim_to_budget(
-        msgs, budget=1, token_counter=lambda m: len(m.content or "")
-    )
-    assert msgs == snapshot
-
-
-def test_trim_to_budget_keeps_pair_when_newest_assistant_exceeds_budget() -> None:
-    """Regression: newest ASSISTANT + pair over budget must not return [].
-
-    When the last message is ASSISTANT and the trailing user→assistant
-    pair exceeds the budget, the backward walk collects only the
-    assistant message, which the pop loop then removes — previously
-    returning an empty list and dropping all context on resume.
-    """
-    from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-    msgs = [
-        ChatMessage(role=MessageRole.USER, content="q1"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
-        ChatMessage(role=MessageRole.USER, content="q2"),
-        ChatMessage(role=MessageRole.ASSISTANT, content="x" * 6000),
-    ]
-    result = session_module._trim_to_budget(
-        msgs, budget=3584, token_counter=lambda m: len(m.content or "")
-    )
-    assert result, "must not return empty list — newest turn must survive"
-    assert result[0].role == MessageRole.USER
-    assert result[-1].role == MessageRole.ASSISTANT
+        mock_vector_db.delete_collection.assert_called_once_with("ghost-thread")

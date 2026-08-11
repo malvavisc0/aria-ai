@@ -1,730 +1,46 @@
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
+import chainlit as cl
 import pytest
 
 from aria.web import message_pipeline as pipeline
 
 
-class _FakeMemory:
-    """In-memory fake Memory for sanitize/rollback tests.
-
-    Backed by a list; supports the ``aget``/``aget_all``/``aset``
-    contract that ``_sanitize_memory`` and ``_rollback_memory`` use.
-    """
-
-    def __init__(self, msgs: Any = ()) -> None:
-        self._msgs = list(msgs)
-
-    async def aget(self, input: Any = None) -> list:
-        return list(self._msgs)
-
-    async def aget_all(self, status: Any = None) -> list:
-        return list(self._msgs)
-
-    async def aset(self, messages: Any) -> None:
-        self._msgs = list(messages)
-
-
-class TestStreamAgentResponse:
-    """Tests for the simplified _stream_agent_response."""
-
-    @staticmethod
-    def _make_handler(*events) -> Any:
-        """Build a mock handler yielding the given events."""
-
-        async def _stream():
-            for ev in events:
-                yield ev
-
-        _result = SimpleNamespace(response=SimpleNamespace(content=None))
-
-        async def _await_result():
-            return _result
-
-        class _MockHandler:
-            """Minimal awaitable mock for WorkflowHandler."""
-
-            stream_events = staticmethod(_stream)
-
-            def __await__(self):
-                return _await_result().__await__()
-
-        return _MockHandler()
-
-    @staticmethod
-    def _make_output() -> Any:
-        output = MagicMock()
-        output.stream_token = AsyncMock()
-        return output
-
-    @pytest.mark.asyncio
-    async def test_removes_last_tool_step_when_answer_delta_starts(
-        self, monkeypatch
-    ) -> None:
-        """The last ToolCall step must be cleared as soon as the final
-        answer's first delta streams — not left visible until AgentOutput.
-
-        Regression guard for the "lingering last tool step" bug.
-        """
-        from llama_index.core.agent.workflow import AgentStream, ToolCall
-
-        tool_event = ToolCall(
-            tool_name="read_file",
-            tool_kwargs={},
-            tool_id="t1",
-        )
-        answer = AgentStream(
-            delta="Here is the answer",
-            response="Here is the answer",
-            current_agent_name="test",
-        )
-
-        handler = self._make_handler(tool_event, answer)
-        output = self._make_output()
-
-        sent_step = MagicMock()
-        sent_step.remove = AsyncMock()
-        monkeypatch.setattr(
-            pipeline, "send_tool_step", AsyncMock(return_value=sent_step)
-        )
-
-        await pipeline._stream_agent_response(handler, output)
-
-        # The tool step is created on ToolCall and removed once the answer
-        # delta begins streaming — before any AgentOutput event.
-        sent_step.remove.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_interleaved_stream_tool_stream_removes_each_tool_step(
-        self, monkeypatch
-    ) -> None:
-        """Models may interleave: answer → tool → answer → tool → answer.
-
-        Every tool step must appear while its tool runs and be cleared when
-        the answer resumes; the last tool (no delta after it) is cleared by
-        the AgentOutput cleanup.  None should linger at the end.
-        """
-        from llama_index.core.agent.workflow import (
-            AgentOutput,
-            AgentStream,
-            ToolCall,
-        )
-        from llama_index.core.llms import ChatMessage
-
-        events = [
-            AgentStream(delta="Let me check ", response="", current_agent_name="t"),
-            ToolCall(tool_name="search", tool_kwargs={}, tool_id="t1"),
-            AgentStream(delta="found it, now ", response="", current_agent_name="t"),
-            ToolCall(tool_name="read_file", tool_kwargs={}, tool_id="t2"),
-            AgentStream(
-                delta="here is the answer", response="", current_agent_name="t"
-            ),
-            AgentOutput(
-                response=ChatMessage(content="here is the answer"),
-                current_agent_name="t",
-            ),
-        ]
-
-        handler = self._make_handler(*events)
-        output = self._make_output()
-
-        steps: list[MagicMock] = []
-
-        async def _send_tool_step(_event):
-            s = MagicMock()
-            s.remove = AsyncMock()
-            steps.append(s)
-            return s
-
-        monkeypatch.setattr(pipeline, "send_tool_step", _send_tool_step)
-
-        await pipeline._stream_agent_response(handler, output)
-
-        # Two tool steps were created; both must have been removed (the
-        # first by the intervening answer delta, the second by the
-        # AgentOutput cleanup — no delta follows it).
-        assert len(steps) == 2
-        for s in steps:
-            s.remove.assert_awaited()
-
-    @pytest.mark.asyncio
-    async def test_streams_text_delta(self) -> None:
-        from llama_index.core.agent.workflow import AgentStream
-
-        event = AgentStream(
-            delta="hello",
-            response="hello",
-            current_agent_name="test",
-        )
-        handler = self._make_handler(event)
-        output = self._make_output()
-
-        emitted, meta, _answer = await pipeline._stream_agent_response(handler, output)
-
-        assert emitted is True
-        assert meta["tools_called"] == []
-        assert meta["has_thinking"] is False
-        output.stream_token.assert_any_await("hello")
-
-    @pytest.mark.asyncio
-    async def test_streams_thinking_delta_as_blockquote(self) -> None:
-        from llama_index.core.agent.workflow import AgentStream
-
-        event = AgentStream(
-            delta="",
-            response="",
-            current_agent_name="test",
-            thinking_delta="pondering",
-        )
-        handler = self._make_handler(event)
-        output = self._make_output()
-
-        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
-
-        assert emitted is True
-        assert meta["has_thinking"] is True
-        assert meta["tools_called"] == []
-        assert answer == ""
-
-        output.stream_token.assert_any_await(pipeline._BLOCKQUOTE_PREFIX)
-        output.stream_token.assert_any_await("pondering")
-
-    @pytest.mark.asyncio
-    async def test_closes_thinking_block_on_regular_delta(self) -> None:
-        from llama_index.core.agent.workflow import AgentStream
-
-        thinking = AgentStream(
-            delta="",
-            response="",
-            current_agent_name="test",
-            thinking_delta="thought",
-        )
-        regular = AgentStream(
-            delta="answer",
-            response="answer",
-            current_agent_name="test",
-        )
-        handler = self._make_handler(thinking, regular)
-        output = self._make_output()
-
-        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
-
-        assert emitted is True
-        assert meta["has_thinking"] is True
-        assert answer == "answer"
-        calls = [c.args[0] for c in output.stream_token.call_args_list]
-        assert calls == [
-            pipeline._BLOCKQUOTE_PREFIX,
-            "thought",
-            pipeline._BLOCKQUOTE_END,
-            "answer",
-        ]
-
-    @pytest.mark.asyncio
-    async def test_agent_output_fallback_when_no_streamed_content(
-        self,
-    ) -> None:
-        from llama_index.core.agent.workflow import AgentOutput
-        from llama_index.core.llms import ChatMessage
-
-        event = AgentOutput(
-            response=ChatMessage(content="fallback answer"),
-            current_agent_name="test",
-        )
-        handler = self._make_handler(event)
-        output = self._make_output()
-
-        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
-
-        assert emitted is True
-        assert meta["tools_called"] == []
-        assert meta["has_thinking"] is False
-        assert answer == "fallback answer"
-        output.stream_token.assert_any_await("fallback answer")
-
-    @pytest.mark.asyncio
-    async def test_thinking_then_distinct_final_answer_is_streamed(self) -> None:
-        """Thinking streamed as blockquote; a distinct final answer is also
-        streamed (the original bug dropped it because thinking set emitted)."""
-        from llama_index.core.agent.workflow import AgentOutput, AgentStream
-        from llama_index.core.llms import ChatMessage
-
-        thinking = AgentStream(
-            delta="",
-            response="",
-            current_agent_name="test",
-            thinking_delta="reasoning here",
-        )
-        final = AgentOutput(
-            response=ChatMessage(content="the actual answer"),
-            current_agent_name="test",
-        )
-        handler = self._make_handler(thinking, final)
-        output = self._make_output()
-
-        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
-
-        assert emitted is True
-        assert meta["has_thinking"] is True
-        assert answer == "the actual answer"
-        calls = [c.args[0] for c in output.stream_token.call_args_list]
-        # blockquoted thinking + the distinct final answer must both appear
-        assert "reasoning here" in calls
-        assert "the actual answer" in calls
-
-    @pytest.mark.asyncio
-    async def test_thinking_duplicated_as_final_not_restreamed(self) -> None:
-        """When the final answer equals the thinking text, it is not
-        streamed twice (some models echo thinking as the response)."""
-        from llama_index.core.agent.workflow import AgentOutput, AgentStream
-        from llama_index.core.llms import ChatMessage
-
-        thinking = AgentStream(
-            delta="",
-            response="",
-            current_agent_name="test",
-            thinking_delta="same text",
-        )
-        final = AgentOutput(
-            response=ChatMessage(content="same text"),
-            current_agent_name="test",
-        )
-        handler = self._make_handler(thinking, final)
-        output = self._make_output()
-
-        emitted, meta, answer = await pipeline._stream_agent_response(handler, output)
-
-        assert emitted is True
-        assert meta["has_thinking"] is True
-        assert answer == ""
-        calls = [c.args[0] for c in output.stream_token.call_args_list]
-        # "same text" appears once (as the blockquoted thinking), not twice
-        assert calls.count("same text") == 1
-
-
-# ---------------------------------------------------------------------------
-# _sanitize_memory — repairs broken alternation in the Memory chat store
-# ---------------------------------------------------------------------------
-
-
-class TestSanitizeMemory:
-    """Tests for the _sanitize_memory helper."""
-
-    @staticmethod
-    def _make_memory(*messages) -> Any:
-        """Build a fake Memory backed by an in-memory list."""
-        return _FakeMemory(messages)
-
-    @pytest.mark.asyncio
-    async def test_empty_memory_is_noop(self) -> None:
-
-        memory = self._make_memory()
-        await pipeline._sanitize_memory(memory)
-        assert await memory.aget() == []
-
-    @pytest.mark.asyncio
-    async def test_already_alternating_is_unchanged(self) -> None:
-        from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-        msgs = [
-            ChatMessage(role=MessageRole.USER, content="hi"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="hello"),
-        ]
-        memory = self._make_memory(*msgs)
-        await pipeline._sanitize_memory(memory)
-        result = await memory.aget()
-        assert len(result) == 2
-        assert result[0].content == "hi"
-        assert result[1].content == "hello"
-
-    @pytest.mark.asyncio
-    async def test_consecutive_user_messages_collapsed(self) -> None:
-        from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-        msgs = [
-            ChatMessage(role=MessageRole.USER, content="first"),
-            ChatMessage(role=MessageRole.USER, content="second"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="reply"),
-        ]
-        memory = self._make_memory(*msgs)
-        await pipeline._sanitize_memory(memory)
-        result = await memory.aget()
-        assert [m.content for m in result] == ["second", "reply"]
-
-    @pytest.mark.asyncio
-    async def test_trailing_user_message_removed(self) -> None:
-        """A dangling user message from a failed run is dropped."""
-        from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-        msgs = [
-            ChatMessage(role=MessageRole.USER, content="q"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
-            ChatMessage(role=MessageRole.USER, content="unanswered"),
-        ]
-        memory = self._make_memory(*msgs)
-        await pipeline._sanitize_memory(memory)
-        result = await memory.aget()
-        assert [m.content for m in result] == ["q", "a"]
-
-    @pytest.mark.asyncio
-    async def test_round_trip_preserves_aget_all_when_already_valid(self) -> None:
-        """Regression: sanitize must read the raw chat store, not the rendered one.
-
-        If ``aget()`` (which splices the retrieved vector context into the
-        last user message) were read and ``set()`` were written, the
-        injected blob would be persisted permanently and grow unbounded
-        across repairs.  Reading ``aget_all()`` + writing ``aset()``
-        leaves valid history byte-identical.
-        """
-        from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-        msgs = [
-            ChatMessage(role=MessageRole.USER, content="q1"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
-            ChatMessage(role=MessageRole.USER, content="q2"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="a2"),
-        ]
-        memory = self._make_memory(*msgs)
-        before = await memory.aget_all()
-        await pipeline._sanitize_memory(memory)
-        after = await memory.aget_all()
-        assert [m.content for m in after] == [m.content for m in before]
-        assert [m.role for m in after] == [m.role for m in before]
-
-    @pytest.mark.asyncio
-    async def test_repair_never_grows_message_length(self) -> None:
-        """Regression: no message should grow across a sanitize round-trip."""
-        from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-        msgs = [
-            ChatMessage(role=MessageRole.USER, content="q"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
-        ]
-        memory = self._make_memory(*msgs)
-        before_lens = [len(m.content or "") for m in await memory.aget_all()]
-        await pipeline._sanitize_memory(memory)
-        after_lens = [len(m.content or "") for m in await memory.aget_all()]
-        assert after_lens == before_lens
-
-
-# ---------------------------------------------------------------------------
-# _rollback_memory — removes dangling user message after failure
-# ---------------------------------------------------------------------------
-
-
-class TestRollbackMemory:
-    """Tests for the _rollback_memory helper."""
-
-    @staticmethod
-    def _make_memory(*messages) -> Any:
-        return _FakeMemory(messages)
-
-    @pytest.mark.asyncio
-    async def test_none_memory_is_noop(self) -> None:
-        # Should not raise
-        await pipeline._rollback_memory(None)
-
-    @pytest.mark.asyncio
-    async def test_empty_memory_is_noop(self) -> None:
-        memory = self._make_memory()
-        await pipeline._rollback_memory(memory)
-        assert await memory.aget() == []
-
-    @pytest.mark.asyncio
-    async def test_removes_trailing_user_message(self) -> None:
-        from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-        msgs = [
-            ChatMessage(role=MessageRole.USER, content="q"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
-            ChatMessage(role=MessageRole.USER, content="dangling"),
-        ]
-        memory = self._make_memory(*msgs)
-        await pipeline._rollback_memory(memory)
-        result = await memory.aget()
-        assert [m.content for m in result] == ["q", "a"]
-
-    @pytest.mark.asyncio
-    async def test_leaves_valid_alternation_unchanged(self) -> None:
-        from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-        msgs = [
-            ChatMessage(role=MessageRole.USER, content="q"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="a"),
-        ]
-        memory = self._make_memory(*msgs)
-        await pipeline._rollback_memory(memory)
-        result = await memory.aget()
-        assert len(result) == 2
-
-    @pytest.mark.asyncio
-    async def test_round_trip_preserves_aget_all_when_already_valid(self) -> None:
-        """Regression: rollback reads raw chat store, never grows messages."""
-        from llama_index.core.base.llms.types import ChatMessage, MessageRole
-
-        msgs = [
-            ChatMessage(role=MessageRole.USER, content="q1"),
-            ChatMessage(role=MessageRole.ASSISTANT, content="a1"),
-        ]
-        memory = self._make_memory(*msgs)
-        before = await memory.aget_all()
-        await pipeline._rollback_memory(memory)
-        after = await memory.aget_all()
-        assert [m.content for m in after] == [m.content for m in before]
-
-
-# ---------------------------------------------------------------------------
-# _describe_image — vision API call for image description
-# ---------------------------------------------------------------------------
-
-
-class TestDescribeImage:
-    """Tests for the _describe_image helper."""
-
-    @staticmethod
-    def _patch_chat_config(monkeypatch):
-        """Set ChatConfig attributes for tests (bypasses _Lazy descriptors).
-
-        _Lazy is a non-data descriptor that caches its value internally.
-        We patch the _value attribute directly to avoid triggering the
-        factory (which requires env vars that aren't set in tests).
-        """
-        from aria.config.models import Chat as ChatConfigCls
-
-        monkeypatch.setattr(
-            ChatConfigCls.__dict__["api_url"], "_value", "http://test:9090/v1"
-        )
-        monkeypatch.setattr(ChatConfigCls.__dict__["model"], "_value", "test-model")
-        monkeypatch.setattr(pipeline.VllmConfig, "api_key", "sk-test")
-
-    @staticmethod
-    def _mock_client(response: MagicMock) -> AsyncMock:
-        client = AsyncMock()
-        client.post = AsyncMock(return_value=response)
-        return client
-
-    @pytest.mark.asyncio
-    async def test_returns_description_on_success(self, monkeypatch) -> None:
-        self._patch_chat_config(monkeypatch)
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "A screenshot of a dashboard."}}]
-        }
-
-        client = self._mock_client(mock_response)
-
-        result = await pipeline._describe_image(client, "image/png", "base64data")
-        assert result == "A screenshot of a dashboard."
-
-    @pytest.mark.asyncio
-    async def test_raises_on_http_error(self, monkeypatch) -> None:
-        import httpx as real_httpx
-
-        self._patch_chat_config(monkeypatch)
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status.side_effect = real_httpx.HTTPStatusError(
-            "Bad request",
-            request=MagicMock(),
-            response=MagicMock(status_code=400),
-        )
-
-        client = self._mock_client(mock_response)
-
-        with pytest.raises(real_httpx.HTTPStatusError):
-            await pipeline._describe_image(client, "image/jpeg", "base64data")
-
-    @pytest.mark.asyncio
-    async def test_sends_correct_payload(self, monkeypatch) -> None:
-        self._patch_chat_config(monkeypatch)
-
-        mock_response = MagicMock()
-        mock_response.raise_for_status = MagicMock()
-        mock_response.json.return_value = {
-            "choices": [{"message": {"content": "desc"}}]
-        }
-
-        client = self._mock_client(mock_response)
-
-        await pipeline._describe_image(client, "image/png", "abc123")
-
-        call_kwargs = client.post.call_args
-        url = call_kwargs[0][0]
-        assert url == "http://test:9090/v1/chat/completions"
-
-        headers = call_kwargs[1]["headers"]
-        assert headers["Authorization"] == "Bearer sk-test"
-
-        body = call_kwargs[1]["json"]
-        assert body["model"] == "test-model"
-        # Thinking is disabled per-request so the model's CoT doesn't eat
-        # the entire token budget and leave content=null.
-        assert body["chat_template_kwargs"] == {"enable_thinking": False}
-        assert body["max_tokens"] == 1024
-        content = body["messages"][0]["content"]
-        assert content[1]["image_url"]["url"] == "data:image/png;base64,abc123"
-
-
-# ---------------------------------------------------------------------------
-# _handle_message — vision integration in prompt assembly
-# ---------------------------------------------------------------------------
-
-
-def _mock_message(**kwargs) -> Any:
+def _mock_message(**kwargs: Any) -> Any:
     """Create a mock cl.Message from keyword attributes."""
     return SimpleNamespace(**kwargs)
 
 
-class TestHandleMessageVision:
-    """Tests for _handle_message vision image processing."""
+class TestRoutePipelineError:
+    """Tests for _route_pipeline_error — error-to-user-message routing."""
 
-    @pytest.mark.asyncio
-    async def test_appends_image_descriptions_when_vision_enabled(
-        self, monkeypatch
-    ) -> None:
-        monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", True)
-        monkeypatch.setattr(
-            pipeline,
-            "extract_image_data",
-            lambda msg: [{"mime_type": "image/png", "base64": "b64", "name": "a.png"}],
+    def test_context_overflow_message(self) -> None:
+        """Substring 'maximum context length' maps to overflow message."""
+        msg = pipeline._route_pipeline_error(
+            "This model's maximum context length is 32768 tokens."
         )
-        monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
-        monkeypatch.setattr(
-            pipeline,
-            "_describe_image",
-            AsyncMock(return_value="A red circle on white background."),
+        assert "context window" in msg
+        assert "new conversation" in msg
+
+    def test_generic_message_for_unknown_error(self) -> None:
+        """Anything else maps to the generic retry message."""
+        msg = pipeline._route_pipeline_error("Connection refused")
+        assert msg == "An error occurred. Please try again."
+
+    def test_case_insensitive_match(self) -> None:
+        """Matching is case-insensitive."""
+        msg = pipeline._route_pipeline_error("MAXIMUM CONTEXT LENGTH exceeded")
+        assert "context window" in msg
+
+    def test_empty_string_returns_generic(self) -> None:
+        """Empty error string falls through to generic."""
+        assert (
+            pipeline._route_pipeline_error("") == "An error occurred. Please try again."
         )
-
-        message = _mock_message(
-            content="What is this?",
-            command=None,
-            thread_id="t1",
-            elements=[],
-        )
-
-        prompt, meta = await pipeline._handle_message(message)
-
-        assert "[Attached images]:" in prompt
-        assert "[Image 1 (a.png)]: A red circle on white background." in prompt
-        assert meta == {}
-
-    @pytest.mark.asyncio
-    async def test_omits_image_block_when_vision_off(self, monkeypatch) -> None:
-        """When vision is disabled, image placeholders are NOT injected —
-        a ``<vision disabled>`` notice would be noise the model can't act on."""
-        monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", False)
-        monkeypatch.setattr(
-            pipeline,
-            "extract_image_data",
-            lambda msg: [
-                {"mime_type": "image/png", "base64": "b64", "name": "pic.png"}
-            ],
-        )
-        monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
-
-        message = _mock_message(
-            content="Look at this",
-            command=None,
-            thread_id="t1",
-            elements=[],
-        )
-
-        prompt, meta = await pipeline._handle_message(message)
-
-        assert "[Attached images]:" not in prompt
-        assert "vision disabled" not in prompt
-        assert "ARIA_VLLM_VISION_ENABLED" not in prompt
-
-    @pytest.mark.asyncio
-    async def test_no_image_block_when_no_images(self, monkeypatch) -> None:
-        monkeypatch.setattr(pipeline, "extract_image_data", lambda msg: [])
-        monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
-
-        message = _mock_message(
-            content="Just text",
-            command=None,
-            thread_id="t1",
-            elements=[],
-        )
-
-        prompt, meta = await pipeline._handle_message(message)
-
-        assert "[Attached images]:" not in prompt
-        assert "Thread ID" not in prompt
-        assert meta == {}
-
-    @pytest.mark.asyncio
-    async def test_fallback_when_vision_api_fails(self, monkeypatch) -> None:
-        monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", True)
-        monkeypatch.setattr(
-            pipeline,
-            "extract_image_data",
-            lambda msg: [
-                {"mime_type": "image/png", "base64": "b64", "name": "fail.png"}
-            ],
-        )
-        monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
-        monkeypatch.setattr(
-            pipeline,
-            "_describe_image",
-            AsyncMock(side_effect=Exception("connection refused")),
-        )
-
-        message = _mock_message(
-            content="What's this?",
-            command=None,
-            thread_id="t3",
-            elements=[],
-        )
-
-        prompt, meta = await pipeline._handle_message(message)
-
-        assert "[Attached images]:" in prompt
-        assert "<description unavailable>" in prompt
-
-
-class TestAppendMcpBlock:
-    """Tests for the per-turn connected-MCP-servers prompt injection."""
-
-    def test_no_servers_leaves_prompt_unchanged(self, monkeypatch) -> None:
-        from aria.tools import mcp_bridge
-
-        monkeypatch.setattr(mcp_bridge, "connected_server_names", lambda: [])
-        assert pipeline._append_mcp_block("hello") == "hello"
-
-    def test_appends_server_names(self, monkeypatch) -> None:
-        from aria.tools import mcp_bridge
-
-        monkeypatch.setattr(
-            mcp_bridge, "connected_server_names", lambda: ["github", "db"]
-        )
-        out = pipeline._append_mcp_block("hello")
-        assert "[Connected MCP servers]: github, db" in out
-        assert 'ax(family="mcp", command="list")' in out
-
-    @pytest.mark.asyncio
-    async def test_handle_message_appends_mcp_block(self, monkeypatch) -> None:
-        from aria.tools import mcp_bridge
-
-        monkeypatch.setattr(pipeline, "extract_image_data", lambda msg: [])
-        monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
-        monkeypatch.setattr(mcp_bridge, "connected_server_names", lambda: ["github"])
-        message = _mock_message(
-            content="do something",
-            command=None,
-            thread_id="t1",
-            elements=[],
-        )
-        prompt, meta = await pipeline._handle_message(message)
-        assert "[Connected MCP servers]: github" in prompt
-        assert meta == {}
 
 
 class TestEditDetection:
@@ -794,10 +110,10 @@ class TestEditDetection:
             lambda: None,
         )
 
-        # Mock _handle_message
+        # Mock handle_message
         monkeypatch.setattr(
             pipeline,
-            "_handle_message",
+            "handle_message",
             AsyncMock(return_value=("prompt", {})),
         )
 
@@ -815,7 +131,7 @@ class TestEditDetection:
         # Mock the workflow run + streaming
         monkeypatch.setattr(
             pipeline,
-            "_stream_agent_response",
+            "stream_agent_response",
             AsyncMock(return_value=(True, {}, "")),
         )
 
@@ -866,7 +182,7 @@ class TestEditDetection:
         object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
         monkeypatch.setattr(
             pipeline,
-            "_handle_message",
+            "handle_message",
             AsyncMock(return_value=("prompt", {})),
         )
 
@@ -886,7 +202,7 @@ class TestEditDetection:
 
         monkeypatch.setattr(
             pipeline,
-            "_stream_agent_response",
+            "stream_agent_response",
             AsyncMock(return_value=(True, {}, "")),
         )
 
@@ -936,12 +252,12 @@ class TestEditDetection:
         object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
         monkeypatch.setattr(
             pipeline,
-            "_handle_message",
+            "handle_message",
             AsyncMock(return_value=("prompt", {})),
         )
         monkeypatch.setattr(
             pipeline,
-            "_stream_agent_response",
+            "stream_agent_response",
             AsyncMock(return_value=(True, {}, "")),
         )
         monkeypatch.setattr(
@@ -994,12 +310,12 @@ class TestEditDetection:
         object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
         monkeypatch.setattr(
             pipeline,
-            "_handle_message",
+            "handle_message",
             AsyncMock(return_value=("prompt", {})),
         )
         monkeypatch.setattr(
             pipeline,
-            "_stream_agent_response",
+            "stream_agent_response",
             AsyncMock(side_effect=RuntimeError("boom")),
         )
         monkeypatch.setattr(
@@ -1044,116 +360,6 @@ class TestEditDetection:
         streaming_output.send.assert_awaited_once()
         streaming_output.remove.assert_awaited_once()
         streaming_output.update.assert_not_awaited()
-        """_reset_memory_for_edit rebuilds memory from DB."""
-        mock_vector_db = MagicMock()
-        monkeypatch.setattr(pipeline._state, "vector_db", mock_vector_db)
-
-        mock_memory = MagicMock()
-        monkeypatch.setattr(pipeline, "create_memory", lambda tid: mock_memory)
-
-        mock_thread = {
-            "id": "thread-1",
-            "name": "Test",
-            "steps": [],
-        }
-        mock_data_layer = MagicMock()
-        mock_data_layer.get_thread = AsyncMock(return_value=mock_thread)
-        monkeypatch.setattr(
-            pipeline,
-            "get_data_layer_handler",
-            lambda: mock_data_layer,
-        )
-
-        restored_memory = MagicMock()
-        monkeypatch.setattr(
-            pipeline,
-            "restore_chat_history",
-            AsyncMock(return_value=restored_memory),
-        )
-
-        result = await pipeline._reset_memory_for_edit("thread-1")
-
-        mock_vector_db.delete_collection.assert_called_once_with("thread-1")
-        mock_data_layer.get_thread.assert_awaited_once_with("thread-1")
-        assert result is restored_memory
-
-    @pytest.mark.asyncio
-    async def test_reset_memory_for_edit_raises_when_thread_missing(
-        self, monkeypatch
-    ) -> None:
-        """A missing thread aborts the edit instead of returning empty memory."""
-        mock_vector_db = MagicMock()
-        monkeypatch.setattr(pipeline._state, "vector_db", mock_vector_db)
-
-        mock_memory = MagicMock()
-        monkeypatch.setattr(pipeline, "create_memory", lambda tid: mock_memory)
-
-        mock_data_layer = MagicMock()
-        mock_data_layer.get_thread = AsyncMock(return_value=None)
-        monkeypatch.setattr(
-            pipeline,
-            "get_data_layer_handler",
-            lambda: mock_data_layer,
-        )
-
-        with pytest.raises(pipeline._EditThreadMissingError):
-            await pipeline._reset_memory_for_edit("ghost-thread")
-
-        mock_vector_db.delete_collection.assert_called_once_with("ghost-thread")
-
-
-class TestRoutePipelineError:
-    """Tests for _route_pipeline_error — error-to-user-message routing."""
-
-    def test_context_overflow_message(self) -> None:
-        """Substring 'maximum context length' maps to overflow message."""
-        msg = pipeline._route_pipeline_error(
-            "This model's maximum context length is 32768 tokens."
-        )
-        assert "context window" in msg
-        assert "new conversation" in msg
-
-    def test_generic_message_for_unknown_error(self) -> None:
-        """Anything else maps to the generic retry message."""
-        msg = pipeline._route_pipeline_error("Connection refused")
-        assert msg == "An error occurred. Please try again."
-
-    def test_case_insensitive_match(self) -> None:
-        """Matching is case-insensitive."""
-        msg = pipeline._route_pipeline_error("MAXIMUM CONTEXT LENGTH exceeded")
-        assert "context window" in msg
-
-    def test_empty_string_returns_generic(self) -> None:
-        """Empty error string falls through to generic."""
-        assert (
-            pipeline._route_pipeline_error("") == "An error occurred. Please try again."
-        )
-
-
-class TestAppendFilesBlock:
-    """Tests for _append_files_block — [Uploaded files] prompt block."""
-
-    @pytest.mark.asyncio
-    async def test_no_block_when_no_files(self) -> None:
-        """Empty file list leaves the prompt unchanged."""
-        assert await pipeline._append_files_block("hello", []) == "hello"
-
-    @pytest.mark.asyncio
-    async def test_lists_file_paths(self) -> None:
-        """Block contains each file path on its own line."""
-        result = await pipeline._append_files_block(
-            "prompt", ["/tmp/a.txt", "/tmp/b.pdf"]
-        )
-        assert "[Uploaded files]:" in result
-        assert "/tmp/a.txt" in result
-        assert "/tmp/b.pdf" in result
-
-    @pytest.mark.asyncio
-    async def test_no_routing_guidance(self) -> None:
-        """Block does not contain agent-facing tool routing instructions."""
-        result = await pipeline._append_files_block("p", ["/tmp/a.txt"])
-        assert "read_file" not in result
-        assert "ax documents" not in result
 
 
 class TestOnMessageHandlerReturn:
@@ -1171,12 +377,12 @@ class TestOnMessageHandlerReturn:
         object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
         monkeypatch.setattr(
             pipeline,
-            "_handle_message",
+            "handle_message",
             AsyncMock(return_value=("prompt", {})),
         )
         monkeypatch.setattr(
             pipeline,
-            "_stream_agent_response",
+            "stream_agent_response",
             AsyncMock(return_value=(True, {}, "")),
         )
 
@@ -1186,7 +392,7 @@ class TestOnMessageHandlerReturn:
         mock_memory.aget_all = AsyncMock(return_value=[])
         mock_session = {"memory": mock_memory}
         monkeypatch.setattr(
-            pipeline.cl,
+            cl,
             "user_session",
             SimpleNamespace(
                 get=lambda k: mock_session.get(k),
@@ -1199,7 +405,7 @@ class TestOnMessageHandlerReturn:
         mock_output.update = AsyncMock()
         mock_output.remove = AsyncMock()
         mock_output.content = "Final answer"
-        monkeypatch.setattr(pipeline.cl, "Message", lambda **kw: mock_output)
+        monkeypatch.setattr(cl, "Message", lambda **kw: mock_output)
 
         message = _mock_message(
             id="msg-1",
@@ -1222,138 +428,3 @@ class TestOnMessageHandlerReturn:
         monkeypatch.setattr(pipeline, "_warn_not_initialized", AsyncMock())
         result = await pipeline.on_message_handler(MagicMock())
         assert result is None
-
-
-# ---------------------------------------------------------------------------
-# _extract_renderable_items + _create_render_elements
-# ---------------------------------------------------------------------------
-
-
-class TestExtractRenderableItems:
-    def test_extracts_backtick_path(self, tmp_path: Path) -> None:
-        f = tmp_path / "report.md"
-        f.write_text("# Report")
-        text = f"I saved it to `{f}` for you"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == [str(f)]
-        assert urls == []
-
-    def test_extracts_standalone_path_on_own_line(self, tmp_path: Path) -> None:
-        f = tmp_path / "report.md"
-        f.write_text("# Report")
-        text = f"Here's the summary.\n{f}"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == [str(f)]
-
-    def test_extracts_standalone_path_with_label(self, tmp_path: Path) -> None:
-        f = tmp_path / "report.md"
-        f.write_text("# Report")
-        text = f"Done!\nFile: {f}"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == [str(f)]
-
-    def test_extracts_multiple_backtick_paths(self, tmp_path: Path) -> None:
-        f1 = tmp_path / "code.py"
-        f1.write_text("print(1)")
-        f2 = tmp_path / "data.json"
-        f2.write_text("{}")
-        text = f"Files: `{f1}` and `{f2}`"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert str(f1) in paths
-        assert str(f2) in paths
-
-    def test_extracts_path_from_markdown_link(self, tmp_path: Path) -> None:
-        f = tmp_path / "notes.txt"
-        f.write_text("notes")
-        text = f"See [the notes]({f}) for details"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == [str(f)]
-
-    def test_extracts_backtick_url(self) -> None:
-        text = "Image: `https://example.com/cat.png`"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == []
-        assert urls == ["https://example.com/cat.png"]
-
-    def test_extracts_standalone_url(self) -> None:
-        text = "Here's the chart:\nhttps://example.com/chart.pdf"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert urls == ["https://example.com/chart.pdf"]
-
-    def test_ignores_bare_path_in_prose(self, tmp_path: Path) -> None:
-        """Bare paths embedded in prose must not be rendered."""
-        f = tmp_path / "report.md"
-        f.write_text("# Report")
-        text = f"The config at {f} needs editing"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == []
-
-    def test_ignores_bare_url_in_prose(self) -> None:
-        text = "Check https://example.com/cat.png for the image"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert urls == []
-
-    def test_skips_nonexistent_paths(self) -> None:
-        text = "Missing: `/nonexistent/file.md`"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == []
-
-    def test_deduplicates(self, tmp_path: Path) -> None:
-        f = tmp_path / "dup.md"
-        f.write_text("dup")
-        text = f"`{f}` and again `{f}`"
-        paths, urls = pipeline._extract_renderable_items(text)
-        assert paths == [str(f)]
-
-
-class TestCreateRenderElements:
-    @pytest.fixture
-    def mock_elements(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Mock cl.Text/Image/Pdf/File so they don't need a Chainlit context."""
-        for name in ("Text", "Image", "Pdf", "File"):
-            monkeypatch.setattr(pipeline.cl, name, lambda **kw: SimpleNamespace(**kw))
-
-    def test_text_file_becomes_cl_text(
-        self, tmp_path: Path, mock_elements: None
-    ) -> None:
-        f = tmp_path / "report.md"
-        f.write_text("# Report")
-        elements = pipeline._create_render_elements([str(f)], [])
-        assert len(elements) == 1
-        assert elements[0].name == "report.md"
-
-    def test_image_becomes_cl_image(self, tmp_path: Path, mock_elements: None) -> None:
-        f = tmp_path / "photo.png"
-        f.write_bytes(b"\x89PNG")
-        elements = pipeline._create_render_elements([str(f)], [])
-        assert len(elements) == 1
-        assert elements[0].name == "photo.png"
-
-    def test_pdf_becomes_cl_pdf(self, tmp_path: Path, mock_elements: None) -> None:
-        f = tmp_path / "doc.pdf"
-        f.write_bytes(b"%PDF")
-        elements = pipeline._create_render_elements([str(f)], [])
-        assert len(elements) == 1
-        assert elements[0].name == "doc.pdf"
-
-    def test_unknown_ext_becomes_cl_file(
-        self, tmp_path: Path, mock_elements: None
-    ) -> None:
-        f = tmp_path / "data.bin"
-        f.write_bytes(b"\x00")
-        elements = pipeline._create_render_elements([str(f)], [])
-        assert len(elements) == 1
-        assert elements[0].name == "data.bin"
-
-    def test_remote_image_url_becomes_cl_image(self, mock_elements: None) -> None:
-        elements = pipeline._create_render_elements([], ["https://example.com/cat.png"])
-        assert len(elements) == 1
-        assert elements[0].name == "cat.png"
-
-    def test_mixed_paths_and_urls(self, tmp_path: Path, mock_elements: None) -> None:
-        f = tmp_path / "code.py"
-        f.write_text("print(1)")
-        elements = pipeline._create_render_elements(
-            [str(f)], ["https://example.com/img.jpg"]
-        )
-        assert len(elements) == 2

@@ -90,6 +90,11 @@ def check_status():
         if whisper:
             table.add_row("Whisper Binary", str(whisper))
             table.add_row("Whisper Model File", str(Voice.get_whisper_model_path()))
+            build_tag = whisper.parent / ".build_type"
+            if build_tag.is_file():
+                table.add_row("Build Type", build_tag.read_text().strip())
+            else:
+                table.add_row("Build Type", "[dim]unknown[/dim]")
         else:
             table.add_row("Whisper", "[yellow]✗ Not installed[/yellow]")
 

@@ -464,6 +464,123 @@ def _sanitize_chat_history(
     return step3
 
 
+def _history_fingerprint(messages: list) -> int:
+    """Stable hash of a chat-history list for change detection.
+
+    Comparing fingerprints (instead of ``len``) catches in-place rewrites
+    that preserve message count — a length-only check would silently skip
+    a repair in that case.
+    """
+    h = 0
+    for m in messages:
+        role = getattr(m, "role", None)
+        role_name = getattr(role, "value", role)
+        content = getattr(m, "content", "") or ""
+        h ^= hash((role_name, content))
+    return h
+
+
+async def _sanitize_memory(memory: BackgroundFlushMemory) -> None:
+    """Ensure memory chat history has valid user/assistant alternation.
+
+    After a failed live turn the ``Memory`` chat store may contain a
+    trailing user message with no matching assistant reply (or other
+    alternation violations).  This normalises the history so the next
+    model invocation sees strictly alternating roles.
+
+    Reads via ``memory.aget_all()`` (raw chat store, no injected vector
+    context) and writes via ``memory.aset()`` (replaces without running
+    the token-limit waterfall).  Both are required: ``aget`` would
+    splice the retrieved block output into the last user message and a
+    subsequent ``set`` would persist that injected blob permanently.
+    """
+    messages = await memory.aget_all()
+    if not messages:
+        return
+    before = _history_fingerprint(messages)
+    sanitized = _sanitize_chat_history(messages)
+    after = _history_fingerprint(sanitized)
+    if before != after:
+        logger.debug(
+            f"Sanitized memory chat history: {len(messages)} → "
+            f"{len(sanitized)} messages (repaired alternation)"
+        )
+        await memory.aset(sanitized)
+
+
+async def _rollback_memory(memory: BackgroundFlushMemory | None) -> None:
+    """Repair dangling state left by a failed workflow run.
+
+    When an LLM/infrastructure error occurs after ``AgentWorkflow.run()``
+    has begun persisting a turn, the memory may end with:
+
+    * a dangling user message (no assistant reply), breaking alternation; or
+    * an assistant message advertising tool calls whose matching ``tool``
+      responses are missing (or only partially present), breaking
+      Mistral's "same number of function calls and responses" invariant.
+
+    Routing through :func:`_sanitize_chat_history` repairs all of these in
+    one pass so the next turn sees a structurally valid history.
+    """
+    if memory is None:
+        return
+    try:
+        messages = await memory.aget_all()
+        if not messages:
+            return
+        before = _history_fingerprint(messages)
+        repaired = _sanitize_chat_history(messages)
+        after = _history_fingerprint(repaired)
+        if before != after:
+            logger.debug(
+                "Rolling back dangling/partial turn from memory "
+                f"({len(messages)} → {len(repaired)} messages)"
+            )
+            await memory.aset(repaired)
+    except Exception:
+        logger.warning("Failed to rollback memory", exc_info=True)
+
+
+class _EditThreadMissingError(RuntimeError):
+    """Raised when a thread cannot be found while applying a message edit."""
+
+
+async def _reset_memory_for_edit(
+    thread_id: str,
+) -> BackgroundFlushMemory:
+    """Reset and rebuild memory after a message edit.
+
+    Deletes the vector collection for the thread, creates fresh
+    memory, and restores chat history from the persisted thread
+    data (which Chainlit has already updated with the edited
+    content).
+
+    Raises:
+        _EditThreadMissingError: If the thread no longer exists in the
+            data layer.  An edit against a missing thread would silently
+            wipe the conversation's memory, so we abort instead.
+    """
+    from aria.web.hooks import get_data_layer_handler
+
+    try:
+        if _state.vector_db is not None:
+            _state.vector_db.delete_collection(thread_id)
+    except Exception:
+        logger.debug(
+            f"Could not delete vector collection for {thread_id}",
+            exc_info=True,
+        )
+
+    data_layer = get_data_layer_handler()
+    thread = await data_layer.get_thread(thread_id)
+    if not thread:
+        raise _EditThreadMissingError(
+            f"Thread {thread_id} not found; cannot apply edit to a thread "
+            "that no longer exists."
+        )
+    return await restore_chat_history(thread)
+
+
 def _last_user_assistant_pair(messages: list[ChatMessage]) -> list[ChatMessage]:
     """Return the last ``user`` message and whatever follows it.
 

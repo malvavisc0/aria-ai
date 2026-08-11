@@ -288,6 +288,23 @@ def _check_voice(checks: list[CheckResult]) -> None:
         )
         return
 
+    # Informational: tell the user if their hardware supports the CUDA build.
+    from aria.scripts.voice import _detect_whisper_target
+
+    try:
+        target = _detect_whisper_target()
+        if target == "cuda":
+            checks.append(
+                CheckResult(
+                    name="whisper.cpp GPU",
+                    passed=True,
+                    category="binaries",
+                    details="NVIDIA GPU detected — CUDA build available",
+                )
+            )
+    except RuntimeError:
+        pass  # non-Linux; skip
+
     whisper = Voice.get_whisper_binary_path()
     if whisper is not None:
         checks.append(

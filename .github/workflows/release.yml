@@ -66,6 +66,75 @@ jobs:
           echo "✅ Versions match: ${TAG_VERSION}"
 
   # ────────────────────────────────────────────────────────────────────────────
+  # Job 1b: Build static CUDA whisper-server
+  # ────────────────────────────────────────────────────────────────────────────
+  build-whisper-cuda:
+    name: Build whisper-server (CUDA, static)
+    needs: validate-version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Install CUDA toolkit
+        uses: Jimver/cuda-toolkit@v0.2.36
+        with:
+          cuda: "12.4.0"
+          method: "network"
+          sub-packages: '["nvcc"]'
+
+      - name: Verify nvcc
+        run: nvcc --version
+
+      - name: Clone whisper.cpp
+        run: |
+          git clone --depth 1 --branch v1.9.2 \
+            https://github.com/ggml-org/whisper.cpp /tmp/whisper.cpp
+
+      - name: Configure (static CUDA build)
+        run: |
+          cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build \
+            -DGGML_CUDA=ON \
+            -DGGML_METAL=OFF \
+            -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90" \
+            -DWHISPER_BUILD_SERVER=ON \
+            -DBUILD_SHARED_LIBS=OFF \
+            -DGGML_STATIC=ON \
+            -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build /tmp/whisper.cpp/build --config Release -j
+
+      - name: Verify binary is static (no ggml .so deps)
+        run: |
+          ldd /tmp/whisper.cpp/build/bin/whisper-server | grep -i "ggml\|whisper" && exit 1 || true
+          echo "Static binary confirmed"
+
+      - name: Package
+        run: |
+          mkdir -p staging
+          cp /tmp/whisper.cpp/build/bin/whisper-server staging/
+          tar -czf whisper-server-cuda-12.4-x86_64.tar.gz \
+            -C staging whisper-server
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: whisper-server-cuda-12.4-x86_64.tar.gz
+          path: whisper-server-cuda-12.4-x86_64.tar.gz
+          retention-days: 7
+
+  # ────────────────────────────────────────────────────────────────────────────
   # Job 1: Build the Windows .exe
   # ────────────────────────────────────────────────────────────────────────────
   build-windows:
@@ -252,7 +321,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   release:
     name: Create GitHub Release
-    needs: [build-windows, build-macos, publish-pypi, build-docker]
+    needs: [build-windows, build-macos, build-whisper-cuda, publish-pypi, build-docker]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
 
@@ -275,6 +344,12 @@ jobs:
           name: Aria-macOS-arm64.zip
           path: release-assets/
 
+      - name: Download whisper CUDA artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: whisper-server-cuda-12.4-x86_64.tar.gz
+          path: release-assets/
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -284,6 +359,7 @@ jobs:
           files: |
             release-assets/Aria-Windows-x86_64.zip
             release-assets/Aria-macOS-arm64.zip
+            release-assets/whisper-server-cuda-12.4-x86_64.tar.gz
           body: |
             ## Aria ${{ github.ref_name }}
 
@@ -293,6 +369,7 @@ jobs:
             |----------|------|
             | Windows (x86_64) | `Aria-Windows-x86_64.zip` |
             | macOS (Apple Silicon) | `Aria-macOS-arm64.zip` |
+            | Linux (NVIDIA CUDA) | `whisper-server-cuda-12.4-x86_64.tar.gz` |
 
             ### pip
 
