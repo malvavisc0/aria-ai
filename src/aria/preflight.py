@@ -221,12 +221,13 @@ def _check_lightpanda(checks: list[CheckResult]) -> None:
 
 
 def _check_docling(checks: list[CheckResult]) -> None:
-    """Report the docling worker state (non-blocking, informational).
+    """Report the docling worker state.
 
-    The Granite-Docling worker is optional — the documents tool falls
-    back to MarkItDown when it is not installed. This check always
-    passes; it only surfaces install/model/device state so the user
-    knows what to expect for PDF conversions.
+    The Granite-Docling worker is required: the documents tool and the
+    knowledge hub both need it for PDF conversion. The hub's
+    ``_pdf_chunks`` raises a skip with reason ``docling_not_installed``
+    when PDFs are present and the worker is missing, so silent fallback
+    cannot happen.
     """
     from pathlib import Path
 
@@ -238,10 +239,10 @@ def _check_docling(checks: list[CheckResult]) -> None:
         checks.append(
             CheckResult(
                 name="docling worker",
-                passed=True,  # optional — never blocks
+                passed=False,
                 category="binaries",
-                details="not installed (optional; PDFs fall back to MarkItDown; "
-                "install with: aria docling install)",
+                error="docling worker not installed",
+                hint="Run: aria docling install",
             )
         )
         return

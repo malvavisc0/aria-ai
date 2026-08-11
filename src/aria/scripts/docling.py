@@ -18,8 +18,8 @@ from aria.scripts.vllm import _create_venv  # reuse the venv builder
 
 # Heavy deps installed into the isolated venv (immutable — never mutate).
 _PACKAGES: tuple[str, ...] = (
-    "docling>=2.0,<3.0",
-    "docling-ibm-models>=2.0",
+    "docling",
+    "docling-ibm-models",
     "pypdfium2",  # page-count pre-check
 )
 

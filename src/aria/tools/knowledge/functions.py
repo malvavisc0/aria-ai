@@ -49,6 +49,7 @@ def _index_status() -> dict[str, Any]:
 @log_tool_call
 async def knowledge_status(reason: Reason) -> str:
     """Show knowledge hub index status."""
+    from aria.scripts.docling import is_installed
     from aria.web.state import _state
 
     data: dict[str, Any] = {
@@ -56,6 +57,7 @@ async def knowledge_status(reason: Reason) -> str:
         "dir": KnowledgeHub.dir,
         "collection": "aria_knowledge",
         "vector_db_ready": _state.vector_db is not None,
+        "docling_installed": is_installed(),
     }
     data.update(_index_status())
     return ok(tool=_TOOL, reason=reason, data=data)

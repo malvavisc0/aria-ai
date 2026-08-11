@@ -243,3 +243,28 @@ class TestReindex:
 
         hits = await indexer.query("content", top_k=10)
         assert all(h["source"] != "notes.txt" for h in hits)
+
+    @pytest.mark.asyncio
+    async def test_pdf_skipped_when_docling_missing(
+        self,
+        indexer: KnowledgeHubIndexer,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """PDFs must fail-fast (skipped with reason) when docling is absent.
+
+        No silent fallback to MarkItDown: the hub's value for PDFs is
+        structure-aware chunks with section headings. The skip reason
+        tells the user to install the worker.
+        """
+        monkeypatch.setattr("aria.config.folders.Bin.path", tmp_path / "no_such_bin")
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "report.pdf").write_bytes(b"%PDF-1.4\n%fake\n")
+
+        result = await indexer.reindex()
+        assert result["indexed"] == 0
+        assert len(result["skipped"]) == 1
+        skip = result["skipped"][0]
+        assert skip["reason"] == "docling_not_installed"
+        assert skip["path"].endswith("report.pdf")

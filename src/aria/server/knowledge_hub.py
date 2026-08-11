@@ -9,6 +9,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from llama_index.core.node_parser import SentenceSplitter
 from loguru import logger
 from sqlalchemy import delete as sa_delete
 from sqlalchemy import select
@@ -57,20 +58,12 @@ class KnowledgeHubIndexer:
             return await self._run(force=force)
 
     async def _run(self, *, force: bool = False) -> dict[str, Any]:
-        from llama_index.core.node_parser import SentenceSplitter
-
         from aria.web.state import _state
 
-        if _state.vector_db is None or _state.embeddings is None:
-            return {"indexed": 0, "skipped": [], "error": "infra not ready"}
-        if self._settings.chunk_overlap > self._settings.chunk_size:
-            return {"indexed": 0, "skipped": [], "error": "overlap > chunk_size"}
-
-        collection = _state.vector_db.get_or_create_collection(_COLLECTION)
-        if force:
-            _state.vector_db.delete_collection(_COLLECTION)
-            collection = _state.vector_db.get_or_create_collection(_COLLECTION)
-            _clear_index_state()
+        early = self._preflight_errors()
+        if early is not None:
+            return early
+        collection = self._open_collection(force)
         splitter = SentenceSplitter(
             chunk_size=self._settings.chunk_size,
             chunk_overlap=self._settings.chunk_overlap,
@@ -105,6 +98,28 @@ class KnowledgeHubIndexer:
             _flush_state_cache(state_cache)
         await asyncio.to_thread(_purge_removed, collection, walked)
         return {"indexed": indexed, "skipped": skipped, "forced": force}
+
+    def _preflight_errors(self) -> dict[str, Any] | None:
+        """Return a fatal error dict, or None if the env is ready to index."""
+        from aria.web.state import _state
+
+        if _state.vector_db is None or _state.embeddings is None:
+            return {"indexed": 0, "skipped": [], "error": "infra not ready"}
+        if self._settings.chunk_overlap > self._settings.chunk_size:
+            return {"indexed": 0, "skipped": [], "error": "overlap > chunk_size"}
+        return None
+
+    def _open_collection(self, force: bool) -> Any:
+        """Return the Chroma collection, rebuilding it when *force* is set."""
+        from aria.web.state import _state
+
+        vdb = _state.vector_db
+        assert vdb is not None  # guarded by _preflight_errors
+        if not force:
+            return vdb.get_or_create_collection(_COLLECTION)
+        vdb.delete_collection(_COLLECTION)
+        _clear_index_state()
+        return vdb.get_or_create_collection(_COLLECTION)
 
     async def _index_one(
         self,
@@ -209,25 +224,18 @@ class KnowledgeHubIndexer:
     async def _pdf_chunks(self, fp: Path) -> list[str]:
         """Structure-aware chunks via the docling worker's --chunks flag.
 
-        Falls back to MarkItDown + SentenceSplitter if the docling worker
-        isn't installed.
+        Docling is required for PDFs: only it produces heading-bounded
+        chunks with section provenance. Without the worker the file is
+        skipped (reason ``docling_not_installed``) — silently falling
+        back to MarkItDown + flat SentenceSplitter would lose the
+        section headings that grounded answers rely on.
         """
         from aria.config.folders import Bin
         from aria.config.pdf import Pdf
 
         shim = Bin.path / "docling"
         if not shim.exists():
-            logger.info(
-                "knowledge hub: docling worker not installed; "
-                "falling back to markitdown for PDF"
-            )
-            from llama_index.core.node_parser import SentenceSplitter
-
-            md = await self._markitdown(fp)
-            return SentenceSplitter(
-                chunk_size=self._settings.chunk_size,
-                chunk_overlap=self._settings.chunk_overlap,
-            ).split_text(md)
+            raise _SkipFile("docling_not_installed")
         from aria.tools.documents._subprocess import convert as vlm_convert
 
         fd, tmp_name = tempfile.mkstemp(suffix=".json")

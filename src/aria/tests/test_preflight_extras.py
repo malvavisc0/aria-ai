@@ -278,3 +278,35 @@ class TestRunPreflightChecks:
         categories = {c.category for c in result.checks}
         assert "connectivity" in categories
         assert "tools" in categories
+
+
+class TestCheckDocling:
+    """docling is a required worker — preflight must fail loudly if missing."""
+
+    @patch("aria.scripts.docling.is_installed", return_value=False)
+    def test_missing_fails_with_hint(self, _mock_installed):
+        from aria.preflight import _check_docling
+
+        checks: list = []
+        _check_docling(checks)
+        assert len(checks) == 1
+        assert checks[0].passed is False
+        assert checks[0].category == "binaries"
+        assert "not installed" in checks[0].error
+        assert "aria docling install" in checks[0].hint
+
+    @patch("aria.scripts.docling.is_installed", return_value=True)
+    @patch("aria.scripts.docling.detect_device", return_value="cpu")
+    @patch("aria.config.models._resolve_model_path", return_value="/nonexistent")
+    @patch("aria.config.pdf.Pdf.model_path", "")
+    @patch("aria.config.pdf.Pdf.vlm_device", "auto")
+    @patch("aria.config.pdf.Pdf.vlm_model_id", "ibm-granite/granite-docling-258M")
+    def test_installed_passes_with_state(self, *_: object) -> None:
+        from aria.preflight import _check_docling
+
+        checks: list = []
+        _check_docling(checks)
+        assert len(checks) == 1
+        assert checks[0].passed is True
+        assert "installed" in checks[0].details
+        assert "device=cpu" in checks[0].details
