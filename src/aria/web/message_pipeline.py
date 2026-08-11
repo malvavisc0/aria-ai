@@ -282,6 +282,27 @@ async def _append_files_block(prompt: str, file_paths: list[str]) -> str:
     return f"{prompt}\n\n[Uploaded files]:\n" + "\n".join(lines)
 
 
+def _append_mcp_block(prompt: str) -> str:
+    """Append a ``[Connected MCP servers]`` block when servers are connected.
+
+    Per-turn injection so the agent knows which external services are
+    available without calling ``ax mcp list`` first — servers connect
+    mid-session via the UI after the system prompt is fixed at startup.
+    Returns the prompt unchanged when no servers are connected (no noise).
+    """
+    from aria.tools.mcp_bridge import connected_server_names
+
+    names = connected_server_names()
+    if not names:
+        return prompt
+    logger.debug(f"Appended {len(names)} MCP server(s) to prompt")
+    listing = ", ".join(names)
+    return (
+        f"{prompt}\n\n[Connected MCP servers]: {listing}\n"
+        'Discover tools with `ax(family="mcp", command="list")`.'
+    )
+
+
 async def _append_images_block(prompt: str, image_data: list[dict]) -> str:
     """Append an ``[Attached images]`` block with vision descriptions.
 
@@ -339,6 +360,7 @@ async def _handle_message(
 
     prompt = await _append_files_block(prompt, file_paths)
     prompt = await _append_images_block(prompt, image_data)
+    prompt = _append_mcp_block(prompt)
 
     return prompt, meta
 

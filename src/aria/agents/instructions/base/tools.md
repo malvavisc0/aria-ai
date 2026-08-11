@@ -56,7 +56,7 @@ Persistent key-value store that **survives across conversations and restarts** �
 
 ### External Services (`ax mcp`)
 
-Tools from MCP servers the user connected (GitHub, Postgres, Slack, …). Not visible here — discover with `ax(family="mcp", command="list")` first, then `ax help lookup mcp` for commands.
+Tools from MCP servers the user connected. Server names appear in the `[Connected MCP servers]` block each turn; call `ax(family="mcp", command="list")` for details.
 
 ### Python Sandbox (`ax dev run`)
 

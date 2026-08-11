@@ -52,6 +52,19 @@ def _connected_sessions() -> dict[str, ClientSession] | None:
     return cl.user_session.get("_mcp_sessions")
 
 
+def connected_server_names() -> list[str]:
+    """Return the names of connected MCP servers in this session (sync, cheap).
+
+    Reads only the session-store keys — no async ``list_tools`` round-trip.
+    Used for the per-turn prompt nudge so the agent knows which servers exist
+    without calling ``ax mcp list`` first.
+    """
+    sessions = _connected_sessions()
+    if not sessions:
+        return []
+    return list(sessions.keys())
+
+
 async def list_servers() -> str:
     """Return the connected-server index for ``ax mcp list`` (no server arg).
 
