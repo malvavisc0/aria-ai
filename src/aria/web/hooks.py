@@ -368,12 +368,10 @@ async def process_audio() -> None:
 
     logger.info(f"Transcription: {transcription}")
 
-    input_audio = cl.Audio(content=wav_bytes, name="input.wav", mime="audio/wav")
     await cl.Message(
         content=transcription,
         author="You",
         type="user_message",
-        elements=[input_audio],
     ).send()
 
     from aria.web.message_pipeline import on_message_handler
@@ -385,17 +383,13 @@ async def process_audio() -> None:
         return
 
     audio_bytes = await _text_to_speech(_strip_markdown_for_tts(answer))
-    if audio_bytes:
-        await cl.Message(
-            content=answer,
-            elements=[
-                cl.Audio(
-                    content=audio_bytes,
-                    auto_play=True,
-                    name="answer.wav",
-                    mime="audio/wav",
-                )
-            ],
-        ).send()
-    else:
-        await cl.Message(content=answer).send()
+    if audio_bytes and output is not None:
+        output.elements = [  # type: ignore[attr-defined]
+            cl.Audio(
+                content=audio_bytes,
+                auto_play=True,
+                name="answer.wav",
+                mime="audio/wav",
+            )
+        ]
+        await output.update()

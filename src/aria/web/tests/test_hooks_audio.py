@@ -214,6 +214,7 @@ async def test_process_audio_full_flow(
     )
 
     output = MagicMock()
+    output.update = AsyncMock()
     output.answer_text = "And hello to you"
     monkeypatch.setattr(
         "aria.web.message_pipeline.on_message_handler", AsyncMock(return_value=output)
@@ -223,12 +224,10 @@ async def test_process_audio_full_flow(
 
     user_msgs = [m for m in _Message.instances if m.get("type") == "user_message"]
     assert user_msgs[0]["content"] == "hello there"
-    audio_msgs = [
-        m
-        for m in _Message.instances
-        if m.get("elements") and m.get("type") != "user_message"
-    ]
-    assert audio_msgs[0]["elements"][0]["auto_play"] is True
+    assert not user_msgs[0].get("elements")
+    assert isinstance(output.elements, list)
+    assert output.elements[0].get("auto_play") is True
+    output.update.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -252,28 +251,50 @@ async def test_process_audio_skips_tts_when_no_output(
     await hooks_mod.process_audio()
 
     tts.assert_not_awaited()
-    auto_play_msgs = [
-        m
-        for m in _Message.instances
-        if m.get("elements")
-        and any(isinstance(e, dict) and e.get("auto_play") for e in m["elements"])
-    ]
-    assert auto_play_msgs == []
 
 
 @pytest.mark.asyncio
-async def test_process_audio_text_answer_sent_when_tts_fails(
+async def test_process_audio_skips_tts_when_empty_answer(
     user_session: _UserSession, monkeypatch: pytest.MonkeyPatch, patch_cl: None
 ) -> None:
-    """When TTS returns empty bytes, the text answer must still be sent."""
+    """Empty answer text from the pipeline skips TTS entirely."""
     await hooks_mod.on_audio_start_handler()
     for _ in range(10):
         await hooks_mod.on_audio_chunk_handler(_chunk(100.0))
 
-    monkeypatch.setattr(hooks_mod, "_speech_to_text", AsyncMock(return_value="hello"))
-    monkeypatch.setattr(hooks_mod, "_text_to_speech", AsyncMock(return_value=b""))
+    monkeypatch.setattr(hooks_mod, "_speech_to_text", AsyncMock(return_value="hi"))
+    tts = AsyncMock(return_value=b"RIFFaudio")
+    monkeypatch.setattr(hooks_mod, "_text_to_speech", tts)
 
     output = MagicMock()
+    output.update = AsyncMock()
+    output.answer_text = "   "
+    monkeypatch.setattr(
+        "aria.web.message_pipeline.on_message_handler", AsyncMock(return_value=output)
+    )
+
+    await hooks_mod.process_audio()
+
+    tts.assert_not_awaited()
+    output.update.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_process_audio_attaches_audio_to_streamed_output(
+    user_session: _UserSession, monkeypatch: pytest.MonkeyPatch, patch_cl: None
+) -> None:
+    """TTS audio must attach to the streamed assistant message, not a new one."""
+    await hooks_mod.on_audio_start_handler()
+    for _ in range(10):
+        await hooks_mod.on_audio_chunk_handler(_chunk(100.0))
+
+    monkeypatch.setattr(hooks_mod, "_speech_to_text", AsyncMock(return_value="hi"))
+    monkeypatch.setattr(
+        hooks_mod, "_text_to_speech", AsyncMock(return_value=b"RIFFaudio")
+    )
+
+    output = MagicMock()
+    output.update = AsyncMock()
     output.answer_text = "Hello to you"
     monkeypatch.setattr(
         "aria.web.message_pipeline.on_message_handler", AsyncMock(return_value=output)
@@ -281,9 +302,15 @@ async def test_process_audio_text_answer_sent_when_tts_fails(
 
     await hooks_mod.process_audio()
 
-    answer_msgs = [m for m in _Message.instances if m.get("content") == "Hello to you"]
-    assert len(answer_msgs) == 1
-    assert not answer_msgs[0].get("elements")
+    assert isinstance(output.elements, list)
+    assert output.elements[0].get("auto_play") is True
+    output.update.assert_awaited_once()
+    assistant_msgs = [
+        m
+        for m in _Message.instances
+        if m.get("content") == "Hello to you" and m.get("type") != "user_message"
+    ]
+    assert assistant_msgs == []
 
 
 @pytest.mark.asyncio
@@ -347,6 +374,7 @@ async def test_process_audio_strips_markdown_before_tts(
     monkeypatch.setattr(hooks_mod, "_text_to_speech", tts)
 
     output = MagicMock()
+    output.update = AsyncMock()
     output.answer_text = "**Hello** there"
     monkeypatch.setattr(
         "aria.web.message_pipeline.on_message_handler", AsyncMock(return_value=output)
