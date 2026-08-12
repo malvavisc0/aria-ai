@@ -42,13 +42,15 @@ class TestStreamAgentResponse:
         return output
 
     @pytest.mark.asyncio
-    async def test_removes_last_tool_step_when_answer_delta_starts(
+    async def test_tool_step_persists_when_answer_delta_starts(
         self, monkeypatch
     ) -> None:
-        """The last ToolCall step must be cleared as soon as the final
-        answer's first delta streams — not left visible until AgentOutput.
+        """Tool steps are persisted and never removed — the full per-turn
+        hierarchy (Thinking ▸ tool ▸ answer) must stay visible.
 
-        Regression guard for the "lingering last tool step" bug.
+        Replaces the old "lingering last tool step" regression guard: tool
+        steps now intentionally persist instead of being cleared when the
+        answer begins.
         """
         from llama_index.core.agent.workflow import AgentStream, ToolCall
 
@@ -68,25 +70,22 @@ class TestStreamAgentResponse:
 
         sent_step = MagicMock()
         sent_step.remove = AsyncMock()
+        sent_step.update = AsyncMock()
         monkeypatch.setattr(
             pipeline, "send_tool_step", AsyncMock(return_value=sent_step)
         )
 
         await pipeline.stream_agent_response(handler, output)
 
-        # The tool step is created on ToolCall and removed once the answer
-        # delta begins streaming — before any AgentOutput event.
-        sent_step.remove.assert_awaited()
+        sent_step.remove.assert_not_awaited()
+        sent_step.update.assert_awaited()
 
     @pytest.mark.asyncio
-    async def test_interleaved_stream_tool_stream_removes_each_tool_step(
-        self, monkeypatch
-    ) -> None:
+    async def test_interleaved_tool_steps_persist(self, monkeypatch) -> None:
         """Models may interleave: answer → tool → answer → tool → answer.
 
-        Every tool step must appear while its tool runs and be cleared when
-        the answer resumes; the last tool (no delta after it) is cleared by
-        the AgentOutput cleanup.  None should linger at the end.
+        Every tool step stays visible (persisted, never removed), so the
+        full hierarchy remains in the UI and the persisted history.
         """
         from llama_index.core.agent.workflow import (
             AgentOutput,
@@ -117,6 +116,7 @@ class TestStreamAgentResponse:
         async def _send_tool_step(_event):
             s = MagicMock()
             s.remove = AsyncMock()
+            s.update = AsyncMock()
             steps.append(s)
             return s
 
@@ -124,12 +124,107 @@ class TestStreamAgentResponse:
 
         await pipeline.stream_agent_response(handler, output)
 
-        # Two tool steps were created; both must have been removed (the
-        # first by the intervening answer delta, the second by the
-        # AgentOutput cleanup — no delta follows it).
         assert len(steps) == 2
         for s in steps:
-            s.remove.assert_awaited()
+            s.remove.assert_not_awaited()
+        steps[-1].update.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tool_call_result_populates_step_output(self, monkeypatch) -> None:
+        """A ToolCallResult event sets step.output from the tool result and
+        finalizes the step via update().
+        """
+        from llama_index.core.agent.workflow import ToolCall, ToolCallResult
+        from llama_index.core.tools import ToolOutput
+
+        tool_call = ToolCall(
+            tool_name="read_file",
+            tool_kwargs={"path": "/tmp/x.md"},
+            tool_id="t1",
+        )
+        tool_output = ToolOutput(
+            tool_name="read_file",
+            content="file contents here",
+            raw_input={"path": "/tmp/x.md"},
+            raw_output="file contents here",
+        )
+        result = ToolCallResult(
+            tool_name="read_file",
+            tool_kwargs={"path": "/tmp/x.md"},
+            tool_id="t1",
+            tool_output=tool_output,
+            return_direct=False,
+        )
+
+        handler = self._make_handler(tool_call, result)
+        output = self._make_output()
+
+        sent_step = MagicMock()
+        sent_step.update = AsyncMock()
+        sent_step.metadata = {"tool_id": "t1"}
+
+        async def _send(_event):
+            sent_step.input = _event.tool_kwargs
+            return sent_step
+
+        monkeypatch.setattr(pipeline, "send_tool_step", _send)
+
+        await pipeline.stream_agent_response(handler, output)
+
+        assert sent_step.output == "file contents here"
+        sent_step.update.assert_awaited()
+
+    @pytest.mark.asyncio
+    async def test_tool_call_result_parses_json_output(self, monkeypatch) -> None:
+        """JSON tool output is parsed to a dict so Chainlit renders it as
+        formatted, syntax-highlighted JSON instead of a raw string.
+        """
+        import json
+
+        from llama_index.core.agent.workflow import ToolCall, ToolCallResult
+        from llama_index.core.tools import ToolOutput
+
+        payload = {
+            "status": "success",
+            "tool": "search",
+            "data": {"results": ["a", "b"]},
+        }
+        tool_call = ToolCall(
+            tool_name="search",
+            tool_kwargs={"query": "test"},
+            tool_id="t1",
+        )
+        tool_output = ToolOutput(
+            tool_name="search",
+            content=json.dumps(payload),
+            raw_input={"query": "test"},
+            raw_output=json.dumps(payload),
+        )
+        result = ToolCallResult(
+            tool_name="search",
+            tool_kwargs={"query": "test"},
+            tool_id="t1",
+            tool_output=tool_output,
+            return_direct=False,
+        )
+
+        handler = self._make_handler(tool_call, result)
+        output = self._make_output()
+
+        sent_step = MagicMock()
+        sent_step.update = AsyncMock()
+        sent_step.metadata = {"tool_id": "t1"}
+
+        async def _send(_event):
+            sent_step.input = _event.tool_kwargs
+            return sent_step
+
+        monkeypatch.setattr(pipeline, "send_tool_step", _send)
+
+        await pipeline.stream_agent_response(handler, output)
+
+        assert sent_step.output == payload
+        sent_step.update.assert_awaited()
 
     @pytest.mark.asyncio
     async def test_streams_text_delta(self) -> None:
@@ -151,7 +246,7 @@ class TestStreamAgentResponse:
         output.stream_token.assert_any_await("hello")
 
     @pytest.mark.asyncio
-    async def test_streams_thinking_delta_as_blockquote(self) -> None:
+    async def test_streams_thinking_delta_as_step(self, monkeypatch) -> None:
         from llama_index.core.agent.workflow import AgentStream
 
         event = AgentStream(
@@ -163,6 +258,12 @@ class TestStreamAgentResponse:
         handler = self._make_handler(event)
         output = self._make_output()
 
+        thinking_step = MagicMock()
+        thinking_step.stream_token = AsyncMock()
+        thinking_step.update = AsyncMock()
+        send_mock = AsyncMock(return_value=thinking_step)
+        monkeypatch.setattr(pipeline, "send_thinking_step", send_mock)
+
         emitted, meta, answer = await pipeline.stream_agent_response(handler, output)
 
         assert emitted is True
@@ -170,11 +271,13 @@ class TestStreamAgentResponse:
         assert meta["tools_called"] == []
         assert answer == ""
 
-        output.stream_token.assert_any_await(pipeline._BLOCKQUOTE_PREFIX)
-        output.stream_token.assert_any_await("pondering")
+        send_mock.assert_awaited()
+        thinking_step.stream_token.assert_awaited_with("pondering")
+        thinking_step.update.assert_awaited()
+        output.stream_token.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_closes_thinking_block_on_regular_delta(self) -> None:
+    async def test_finalizes_thinking_step_on_regular_delta(self, monkeypatch) -> None:
         from llama_index.core.agent.workflow import AgentStream
 
         thinking = AgentStream(
@@ -191,18 +294,21 @@ class TestStreamAgentResponse:
         handler = self._make_handler(thinking, regular)
         output = self._make_output()
 
+        thinking_step = MagicMock()
+        thinking_step.stream_token = AsyncMock()
+        thinking_step.update = AsyncMock()
+        monkeypatch.setattr(
+            pipeline, "send_thinking_step", AsyncMock(return_value=thinking_step)
+        )
+
         emitted, meta, answer = await pipeline.stream_agent_response(handler, output)
 
         assert emitted is True
         assert meta["has_thinking"] is True
         assert answer == "answer"
-        calls = [c.args[0] for c in output.stream_token.call_args_list]
-        assert calls == [
-            pipeline._BLOCKQUOTE_PREFIX,
-            "thought",
-            pipeline._BLOCKQUOTE_END,
-            "answer",
-        ]
+        thinking_step.stream_token.assert_awaited_with("thought")
+        thinking_step.update.assert_awaited()
+        output.stream_token.assert_awaited_with("answer")
 
     @pytest.mark.asyncio
     async def test_agent_output_fallback_when_no_streamed_content(
@@ -227,9 +333,12 @@ class TestStreamAgentResponse:
         output.stream_token.assert_any_await("fallback answer")
 
     @pytest.mark.asyncio
-    async def test_thinking_then_distinct_final_answer_is_streamed(self) -> None:
-        """Thinking streamed as blockquote; a distinct final answer is also
-        streamed (the original bug dropped it because thinking set emitted).
+    async def test_thinking_then_distinct_final_answer_is_streamed(
+        self, monkeypatch
+    ) -> None:
+        """Thinking is streamed to its own step; a distinct final answer is
+        also streamed (the original bug dropped it because thinking set
+        emitted).
         """
         from llama_index.core.agent.workflow import AgentOutput, AgentStream
         from llama_index.core.llms import ChatMessage
@@ -247,18 +356,25 @@ class TestStreamAgentResponse:
         handler = self._make_handler(thinking, final)
         output = self._make_output()
 
+        thinking_step = MagicMock()
+        thinking_step.stream_token = AsyncMock()
+        thinking_step.update = AsyncMock()
+        monkeypatch.setattr(
+            pipeline, "send_thinking_step", AsyncMock(return_value=thinking_step)
+        )
+
         emitted, meta, answer = await pipeline.stream_agent_response(handler, output)
 
         assert emitted is True
         assert meta["has_thinking"] is True
         assert answer == "the actual answer"
-        calls = [c.args[0] for c in output.stream_token.call_args_list]
-        # blockquoted thinking + the distinct final answer must both appear
-        assert "reasoning here" in calls
-        assert "the actual answer" in calls
+        thinking_step.stream_token.assert_awaited_with("reasoning here")
+        output.stream_token.assert_awaited_with("the actual answer")
 
     @pytest.mark.asyncio
-    async def test_thinking_duplicated_as_final_not_restreamed(self) -> None:
+    async def test_thinking_duplicated_as_final_not_restreamed(
+        self, monkeypatch
+    ) -> None:
         """When the final answer equals the thinking text, it is not
         streamed twice (some models echo thinking as the response).
         """
@@ -278,11 +394,67 @@ class TestStreamAgentResponse:
         handler = self._make_handler(thinking, final)
         output = self._make_output()
 
+        thinking_step = MagicMock()
+        thinking_step.stream_token = AsyncMock()
+        thinking_step.update = AsyncMock()
+        monkeypatch.setattr(
+            pipeline, "send_thinking_step", AsyncMock(return_value=thinking_step)
+        )
+
         emitted, meta, answer = await pipeline.stream_agent_response(handler, output)
 
         assert emitted is True
         assert meta["has_thinking"] is True
         assert answer == ""
-        calls = [c.args[0] for c in output.stream_token.call_args_list]
-        # "same text" appears once (as the blockquoted thinking), not twice
-        assert calls.count("same text") == 1
+        thinking_step.stream_token.assert_awaited_once_with("same text")
+        output.stream_token.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_creates_multiple_thinking_steps_for_interleaved_segments(
+        self, monkeypatch
+    ) -> None:
+        """Each contiguous thinking run becomes its own, independently
+        finalized Thinking step.
+        """
+        from llama_index.core.agent.workflow import AgentStream
+
+        events = [
+            AgentStream(
+                delta="",
+                response="",
+                current_agent_name="t",
+                thinking_delta="reason one",
+            ),
+            AgentStream(delta="part one ", response="", current_agent_name="t"),
+            AgentStream(
+                delta="",
+                response="",
+                current_agent_name="t",
+                thinking_delta="reason two",
+            ),
+            AgentStream(delta="part two", response="", current_agent_name="t"),
+        ]
+        handler = self._make_handler(*events)
+        output = self._make_output()
+
+        thinking_steps: list[MagicMock] = []
+
+        async def _send_thinking_step():
+            step = MagicMock()
+            step.stream_token = AsyncMock()
+            step.update = AsyncMock()
+            thinking_steps.append(step)
+            return step
+
+        monkeypatch.setattr(pipeline, "send_thinking_step", _send_thinking_step)
+
+        emitted, meta, answer = await pipeline.stream_agent_response(handler, output)
+
+        assert emitted is True
+        assert meta["has_thinking"] is True
+        assert answer == "part one part two"
+        assert len(thinking_steps) == 2
+        thinking_steps[0].stream_token.assert_awaited_with("reason one")
+        thinking_steps[0].update.assert_awaited()
+        thinking_steps[1].stream_token.assert_awaited_with("reason two")
+        thinking_steps[1].update.assert_awaited()

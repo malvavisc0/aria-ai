@@ -158,22 +158,22 @@ def create_render_elements(paths: list[str], urls: list[str]) -> list[Any]:
         if ext in _IMAGE_EXTS:
             elements.append(cl.Image(name=name, path=p, display="inline"))
         elif ext in _PDF_EXTS:
-            elements.append(cl.Pdf(name=name, path=p, display="inline"))
+            elements.append(cl.Pdf(name=name, path=p, display="side"))
         elif ext in _TEXT_EXTS:
             elements.append(
                 cl.Text(
-                    name=name, path=p, display="inline", language=LANG_MAP.get(ext, "")
+                    name=name, path=p, display="side", language=LANG_MAP.get(ext, "")
                 )
             )
         else:
-            elements.append(cl.File(name=name, path=p, display="inline"))
+            elements.append(cl.File(name=name, path=p, display="side"))
     for u in urls:
         ext = Path(u.split("?")[0]).suffix.lower()
         name = Path(u).name or u
         if ext in _IMAGE_EXTS:
             elements.append(cl.Image(name=name, url=u, display="inline"))
         elif ext in _PDF_EXTS:
-            elements.append(cl.Pdf(name=name, url=u, display="inline"))
+            elements.append(cl.Pdf(name=name, url=u, display="side"))
         else:
-            elements.append(cl.Text(name=name, url=u, display="inline"))
+            elements.append(cl.Text(name=name, url=u, display="side"))
     return elements

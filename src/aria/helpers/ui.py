@@ -9,20 +9,33 @@ from llama_index.core.agent.workflow import ToolCall
 
 
 async def send_tool_step(event: ToolCall) -> cl.Step:
-    """Create + send a tool Step for a ToolCall event."""
+    """Create + send a tool Step for a ToolCall event.
 
+    Populates ``step.input`` with the tool-call kwargs (so the collapsed
+    step shows what was asked) and stores ``tool_id`` in ``metadata`` so
+    the matching ``ToolCallResult`` can fill ``step.output``.
+    """
     label = _step_label_from_tool_call(event)
     tool_name = (event.tool_name or "").strip() or "tool"
     step = _make_tool_step(label, tool_name)
+    step.input = event.tool_kwargs or {}
+    if event.tool_id:
+        step.metadata = {"tool_id": event.tool_id}
     await step.send()
     return step
 
 
-async def maybe_remove_step(step: cl.Step | None) -> None:
-    """Remove a Step if present."""
-    if step is None:
-        return
-    await step.remove()
+async def send_thinking_step() -> cl.Step:
+    """Create + persist a collapsed 'Thinking' step for one reasoning segment."""
+    step = cl.Step(
+        name="Thinking",
+        type="run",
+        default_open=False,
+        auto_collapse=True,
+        show_input=False,
+    )
+    await step.send()
+    return step
 
 
 def _step_label_from_tool_call(event: ToolCall) -> str:
