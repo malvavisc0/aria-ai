@@ -1,76 +1,18 @@
 """Main window for the Aria application."""
 
-import stat
+import os
 from pathlib import Path
 
 from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QTextCharFormat
-from PySide6.QtWidgets import QApplication, QMainWindow
+from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
 from aria.config.folders import Debug
-from aria.config.models import Chat
 from aria.gui.dialogs import AboutDialog
 from aria.gui.tray import TrayIcon
 from aria.gui.ui.mainwindow import Ui_MainWindow
 from aria.gui.windows.server_handlers import ServerHandlersMixin
 from aria.gui.windows.user_handlers import UserHandlersMixin
-
-
-def human_size(path: Path) -> str:
-    """Convert file size to human-readable format.
-
-    Args:
-        path: Path to the file
-
-    Returns:
-        Human-readable size string (e.g., "1.5 MiB") or empty string
-        if the file doesn't exist.
-    """
-    if not path.exists():
-        return ""
-    size_bytes = path.stat().st_size
-    size = float(size_bytes)
-    for unit in ["", "Ki", "Mi", "Gi", "Ti", "Pi"]:
-        if size < 1024:
-            return f"{size:.1f} {unit}B"
-        size /= 1024
-    return f"{size:.1f} EiB"
-
-
-def friendly_permissions(path: Path) -> dict[str, list[str]]:
-    """
-    Returns a dict like:
-    {
-        "Owner":  ["Read", "Write", "Execute"],
-        "Group":  ["Read"],
-        "Others": ["Read"]
-    }
-    or with empty list if no permissions
-    """
-    if not path.exists():
-        return {"Owner": [], "Group": [], "Others": []}
-
-    try:
-        mode = path.stat().st_mode
-
-        def get_perms(r: int, w: int, x: int) -> list[str]:
-            perms = []
-            if mode & r:
-                perms.append("Read")
-            if mode & w:
-                perms.append("Write")
-            if mode & x:
-                perms.append("Execute")
-            return perms
-
-        return {
-            "Owner": get_perms(stat.S_IRUSR, stat.S_IWUSR, stat.S_IXUSR),
-            "Group": get_perms(stat.S_IRGRP, stat.S_IWGRP, stat.S_IXGRP),
-            "Others": get_perms(stat.S_IROTH, stat.S_IWOTH, stat.S_IXOTH),
-        }
-
-    except Exception:
-        return {"Owner": [], "Group": [], "Others": []}
 
 
 class MainWindow(
@@ -125,10 +67,6 @@ class MainWindow(
         # Incremental log reading state
         self._log_file_offset: int = 0
         self._log_filter_active: bool = False
-
-        # Responsive layout state
-        self._narrow_mode: bool = False
-        self._setup_responsive_layouts()
 
     def _connect_menu_signals(self):
         """Connect menu action signals."""
@@ -296,6 +234,48 @@ class MainWindow(
             self.ui.textEdit_Logs.verticalScrollBar().maximum()
         )
 
+    def _reload_logs_full(self) -> None:
+        """Full reload: tail the file, clear the viewer, and reset offset."""
+        lines = self._tail_file(Debug.logs_path)
+        self.ui.textEdit_Logs.clear()
+        self._append_log_lines(lines)
+        try:
+            self._log_file_offset = Debug.logs_path.stat().st_size
+        except OSError:
+            self._log_file_offset = 0
+
+    def _append_incremental_logs(self) -> None:
+        """Read only new bytes since the last read and append them.
+
+        On file truncation/rotation (size shrunk below the last offset),
+        falls back to a full reload.
+        """
+        try:
+            file_size = Debug.logs_path.stat().st_size
+        except OSError:
+            return
+
+        if file_size < self._log_file_offset:
+            # File was truncated/rotated — full reload
+            self._log_file_offset = 0
+            self._reload_logs_full()
+            return
+
+        if file_size == self._log_file_offset:
+            return  # No new data
+
+        try:
+            with open(Debug.logs_path, "rb") as f:
+                f.seek(self._log_file_offset)
+                new_data = f.read()
+                self._log_file_offset = file_size
+        except OSError:
+            return
+
+        if new_data:
+            text = new_data.decode("utf-8", errors="replace")
+            self._append_log_lines(text.splitlines())
+
     def load_logs(self):
         """Load logs with color coding, search, and level filter.
 
@@ -315,146 +295,93 @@ class MainWindow(
         filter_changed = has_filter != self._log_filter_active
 
         if has_filter or filter_changed or self._log_file_offset == 0:
-            # Full reload: tail the file and reset offset
-            lines = self._tail_file(Debug.logs_path)
-            self.ui.textEdit_Logs.clear()
-            self._append_log_lines(lines)
-            # Track where we are in the file
-            try:
-                self._log_file_offset = Debug.logs_path.stat().st_size
-            except OSError:
-                self._log_file_offset = 0
+            self._reload_logs_full()
         else:
-            # Incremental: read only new bytes
-            try:
-                file_size = Debug.logs_path.stat().st_size
-            except OSError:
-                return
-
-            if file_size < self._log_file_offset:
-                # File was truncated/rotated — full reload
-                self._log_file_offset = 0
-                self.load_logs()
-                return
-
-            if file_size == self._log_file_offset:
-                return  # No new data
-
-            new_lines: list[str] = []
-            try:
-                with open(Debug.logs_path, "rb") as f:
-                    f.seek(self._log_file_offset)
-                    new_data = f.read()
-                    self._log_file_offset = file_size
-                if new_data:
-                    text = new_data.decode("utf-8", errors="replace")
-                    new_lines = text.splitlines()
-            except OSError:
-                return
-
-            if new_lines:
-                self._append_log_lines(new_lines)
+            self._append_incremental_logs()
 
         self._log_filter_active = has_filter
 
     def load_overview(self):
-        """Load overview tab content - local status."""
-        from aria.config.api import Vllm
+        """Load overview tab content from the live .env."""
+        from aria.config import get_bool_env, get_optional_env
+
+        api_url = get_optional_env("CHAT_OPENAI_API", "")
+        ctx_size = get_optional_env("CHAT_CONTEXT_SIZE", "65536")
 
         # Update local status
-        self.ui.label_LocalEndpointValue.setText(Chat.api_url)
+        self.ui.label_LocalEndpointValue.setText(api_url)
 
-        # Populate remote settings from config
-        self.ui.lineEdit_EndpointUrl.setText(Chat.api_url)
-        self.ui.lineEdit_ApiKey.setText(Vllm.api_key)
-        self.ui.lineEdit_Model.setText(Chat.model)
-        # Select matching context size in combo box
-        try:
-            idx = self._CONTEXT_VALUES.index(Vllm.chat_context_size)
-        except ValueError:
-            idx = 1  # default to 32K
-        self.ui.comboBox_ContextSize.setCurrentIndex(idx)
+        # Populate remote settings
+        self.ui.lineEdit_EndpointUrl.setText(api_url)
+        self.ui.lineEdit_ApiKey.setText(get_optional_env("ARIA_VLLM_API_KEY", ""))
+        self.ui.lineEdit_Model.setText(get_optional_env("CHAT_MODEL", ""))
+        self.ui.lineEdit_ContextSize.setText(ctx_size)
 
-    # Ordered list matching comboBox_ContextSize item indices
-    _CONTEXT_VALUES: list[int] = [
-        24576,
-        32768,
-        49152,
-        65536,
-        131072,
-        262144,
-        393216,
-        524288,
-        786432,
-        1048576,
-    ]
-
-    # Context size → recommended TOKEN_LIMIT_RATIO
-    _RATIO_TABLE: dict[int, float] = {
-        24576: 0.85,
-        32768: 0.80,
-        49152: 0.75,
-        65536: 0.70,
-        131072: 0.60,
-        262144: 0.50,
-        393216: 0.45,
-        524288: 0.40,
-        786432: 0.35,
-        1048576: 0.30,
-    }
+        # Reflect the persisted connection mode
+        remote = get_bool_env("ARIA_VLLM_REMOTE", False)
+        self.ui.radioButton_RemoteMode.setChecked(remote)
+        self.ui.radioButton_LocalMode.setChecked(not remote)
 
     def _save_remote_settings(self):
-        """Save remote settings from the UI back to the .env file."""
-        from pathlib import Path
+        """Save connection settings to .env.
 
+        Persists the selected mode and, in remote mode, the endpoint,
+        API key, model, and context size. TOKEN_LIMIT_RATIO is left
+        untouched — it is configured manually in .env.
+        """
         from aria.config import reload_env
         from aria.helpers.dotenv import parse_dotenv, write_dotenv
 
-        env_path = Path.home() / ".aria" / ".env"
-        values, raw_lines = parse_dotenv(env_path)
+        env_path = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria")) / ".env"
 
-        ctx_size = self._CONTEXT_VALUES[self.ui.comboBox_ContextSize.currentIndex()]
+        values: dict[str, str] = {}
+        remote = self.ui.radioButton_RemoteMode.isChecked()
+        values["ARIA_VLLM_REMOTE"] = "true" if remote else "false"
 
-        values["CHAT_OPENAI_API"] = self.ui.lineEdit_EndpointUrl.text()
-        values["ARIA_VLLM_API_KEY"] = self.ui.lineEdit_ApiKey.text()
-        values["CHAT_MODEL"] = self.ui.lineEdit_Model.text()
-        values["CHAT_CONTEXT_SIZE"] = str(ctx_size)
+        if remote:
+            try:
+                ctx_size = int(self.ui.lineEdit_ContextSize.text().strip())
+            except ValueError:
+                QMessageBox.warning(
+                    self, "Invalid Context Size", "Context Size must be an integer."
+                )
+                return
+            values["CHAT_OPENAI_API"] = self.ui.lineEdit_EndpointUrl.text().strip()
+            values["ARIA_VLLM_API_KEY"] = self.ui.lineEdit_ApiKey.text().strip()
+            values["CHAT_MODEL"] = self.ui.lineEdit_Model.text().strip()
+            values["CHAT_CONTEXT_SIZE"] = str(ctx_size)
 
-        ratio = self._RATIO_TABLE.get(ctx_size, 0.80)
-        values["TOKEN_LIMIT_RATIO"] = f"{ratio:.2f}"
-
+        _, raw_lines = parse_dotenv(env_path)
         write_dotenv(env_path, values, raw_lines)
         reload_env()
 
+        self.load_overview()
         self.statusBar().showMessage("Settings saved.", 5000)
 
     def _init_connection_mode(self):
-        """Detect platform and set appropriate default connection mode.
-
-        On macOS, vLLM is not supported, so default to Remote API mode.
-        Connects radio button signals for runtime toggling.
-        """
+        """Connect mode radio signals; on macOS vLLM is unavailable."""
         import sys
 
-        # Connect radio button signals
         self.ui.radioButton_RemoteMode.toggled.connect(self._on_connection_mode_toggled)
+        self.ui.radioButton_LocalMode.toggled.connect(self._on_connection_mode_toggled)
 
         if sys.platform == "darwin":
-            self.ui.radioButton_RemoteMode.setChecked(True)
             self.ui.radioButton_LocalMode.setEnabled(False)
             self.ui.radioButton_LocalMode.setToolTip("vLLM is not supported on macOS.")
-        else:
-            self.ui.radioButton_LocalMode.setChecked(True)
+            self.ui.radioButton_RemoteMode.setChecked(True)
 
-    def _on_connection_mode_toggled(self, checked: bool):
+        self._on_connection_mode_toggled(self.ui.radioButton_RemoteMode.isChecked())
+
+    def _on_connection_mode_toggled(self, _checked: bool):
         """Handle connection mode radio button toggle.
 
-        The Remote radio emits toggled(True) when selected.
+        The Save Settings button writes remote-mode fields, so it is only
+        reachable in remote mode — in local mode only the mode flag would
+        be persisted, so the button is hidden to avoid a misleading no-op.
         """
-        if not checked:
-            return  # Ignore unchecked signal from the other radio
         remote = self.ui.radioButton_RemoteMode.isChecked()
         self.ui.frame_RemoteSettings.setVisible(remote)
+        self.ui.pushButton_SaveSettings.setVisible(remote)
         self.ui.frame_LocalStatus.setVisible(not remote)
 
     def on_tab_changed(self, index: int):
@@ -478,17 +405,6 @@ class MainWindow(
                 self._logs_timer.stop()
                 self.statusBar().clearMessage()
 
-    def _setup_responsive_layouts(self) -> None:
-        """Initialize responsive layout settings.
-
-        The Home tab uses dynamic direction switching handled in resizeEvent.
-        """
-        pass
-
-    def resizeEvent(self, event) -> None:  # type: ignore[override]
-        """Handle window resize events."""
-        super().resizeEvent(event)
-
     def show_about_dialog(self):
         """Show the About dialog."""
         dialog = AboutDialog(self)
@@ -498,10 +414,10 @@ class MainWindow(
         """Minimize to tray or clean up on forced quit.
 
         When the user closes the window, it is hidden and continues
-        running in the system tray.  A forced quit (via tray menu or
+        running in the system tray. A forced quit (via tray menu or
         Ctrl+Q) sets ``_force_quit`` to True to skip this behaviour.
         """
-        if not getattr(self, "_force_quit", False):
+        if not self._force_quit:
             event.ignore()
             self.hide()
             return
@@ -511,16 +427,9 @@ class MainWindow(
         if wizard is not None:
             wizard.reject()
 
-        # Stop server before closing
-        if hasattr(self, "_server_manager"):
-            self._server_manager.stop()
-
-        if hasattr(self, "_server_timer"):
-            self._server_timer.stop()
-
-        # Hide tray icon so QApplication can exit
-        if hasattr(self, "_tray_icon"):
-            self._tray_icon._tray.hide()
+        self._server_manager.stop()
+        self._server_timer.stop()
+        self._tray_icon.hide()
 
         super().closeEvent(event)
         QApplication.quit()

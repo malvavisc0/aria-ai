@@ -6,6 +6,7 @@ import json
 import re
 import uuid
 from datetime import UTC, datetime
+from typing import cast
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor
@@ -172,9 +173,7 @@ class UserHandlersMixin:
                     select(User).where(User.identifier == identifier)
                 ).scalar_one_or_none()
                 if user:
-                    # self is MainWindow which inherits from QWidget
-                    parent_widget: QWidget = self  # type: ignore[assignment]
-                    dialog = EditUserDialog(parent_widget, user)
+                    dialog = EditUserDialog(cast(QWidget, self), user)
                     if dialog.exec() == QDialog.DialogCode.Accepted:
                         self.load_users()
         except Exception as e:
@@ -189,11 +188,8 @@ class UserHandlersMixin:
 
         identifier = selected_items[0].data(Qt.ItemDataRole.UserRole)
 
-        # self is MainWindow which inherits from QWidget
-        parent_widget: QWidget = self  # type: ignore[assignment]
-
         # Show confirmation dialog
-        msg_box = QMessageBox(parent_widget)
+        msg_box = QMessageBox(cast(QWidget, self))
         msg_box.setIcon(QMessageBox.Icon.Warning)
         msg_box.setWindowTitle("Confirm Delete")
         msg_box.setText(f"Are you sure you want to delete user '{identifier}'?")
@@ -222,10 +218,7 @@ class UserHandlersMixin:
 
     def show_error(self, message: str) -> None:
         """Display an error message box."""
-        # self is MainWindow which inherits from QWidget
-        parent_widget: QWidget = self  # type: ignore[assignment]
-
-        msg_box = QMessageBox(parent_widget)
+        msg_box = QMessageBox(cast(QWidget, self))
         msg_box.setIcon(QMessageBox.Icon.Critical)
         msg_box.setWindowTitle("Error")
         msg_box.setText(message)

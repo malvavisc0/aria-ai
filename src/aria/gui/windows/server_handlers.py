@@ -343,10 +343,9 @@ class ServerHandlersMixin:
         widget.style().polish(widget)
 
     def _update_server_status(self):
-        """Update server status display and button states.
+        """Update server status display and button states (called every second).
 
-        Called every second by the server timer.  The Service groupBox uses
-        a compact row layout:
+        The Service groupBox uses a compact row layout:
 
         Idle / Stopped:
           Row 0:  Status  ○ Idle                          [ Start Server ]
@@ -360,64 +359,64 @@ class ServerHandlersMixin:
         badge and the URL/detail rows hidden.
         """
         status = self._server_manager.get_status()
+        status_text, status_prop = self._render_status_state(status)
+        self.ui.label_ServiceStatus.setText(status_text)
+        self._refresh_status_style(self.ui.label_ServiceStatus, status_prop)
+        self._render_status_rows(status)
+        self._render_buttons(status)
+        self._render_start_tooltip(status)
+        self._sync_tray(status)
 
-        # ── Determine state and status text ──────────────────────────
+    def _render_status_state(self, status) -> tuple[str, str]:
+        """Return (label text, status property) and surface status-bar messages.
+
+        Tracks the ``_was_healthy`` flag for crash detection and clears the
+        ``_is_stopping`` flag once the server has actually stopped.
+        """
         if status.healthy:
             self._was_healthy = True
             latency = (
                 f" ({status.latency_ms:.0f}ms)" if status.latency_ms is not None else ""
             )
-            status_text = f"\u25cf Running{latency}"
-            status_prop = "running"
             self.statusBar().clearMessage()
-        elif status.running:
+            return f"\u25cf Running{latency}", "running"
+
+        if status.running:
             if self._is_stopping:
-                status_text = "\u25cf Stopping\u2026"
-                status_prop = "warning"
                 self.statusBar().showMessage("Stopping Aria server\u2026")
-            else:
-                status_text = "\u25cf Starting\u2026"
-                status_prop = "warning"
-                self.statusBar().showMessage(
-                    "Starting Aria server\u2026 this may take a few seconds."
-                )
+                return "\u25cf Stopping\u2026", "warning"
+            self.statusBar().showMessage(
+                "Starting Aria server\u2026 this may take a few seconds."
+            )
+            return "\u25cf Starting\u2026", "warning"
+
+        # Idle / stopped
+        if self._is_stopping:
+            self._is_stopping = False
+            self._stopping_since = 0.0
+        crashed = self._was_healthy
+        self._was_healthy = False
+        if crashed:
+            self.statusBar().showMessage(
+                "Server stopped unexpectedly. Check logs for details.", 10000
+            )
+        elif self._preflight_result is not None and not self._preflight_result.passed:
+            n = len(self._preflight_result.failures)
+            self.statusBar().showMessage(
+                f"Cannot start: {n} preflight check(s) failed. "
+                "Hover over Start button for details."
+            )
         else:
-            if self._is_stopping:
-                self._is_stopping = False
-                self._stopping_since = 0.0
-            crashed = self._was_healthy
-            self._was_healthy = False
-            status_text = "\u25cb Idle"
-            status_prop = "idle"
-            if crashed:
-                self.statusBar().showMessage(
-                    "Server stopped unexpectedly. Check logs for details.",
-                    10000,
-                )
-            elif (
-                self._preflight_result is not None and not self._preflight_result.passed
-            ):
-                n = len(self._preflight_result.failures)
-                self.statusBar().showMessage(
-                    f"Cannot start: {n} preflight check(s) failed. "
-                    "Hover over Start button for details."
-                )
-            else:
-                self.statusBar().clearMessage()
+            self.statusBar().clearMessage()
+        return "\u25cb Idle", "idle"
 
-        # ── Status label ─────────────────────────────────────────────
-        self.ui.label_ServiceStatus.setText(status_text)
-        self._refresh_status_style(self.ui.label_ServiceStatus, status_prop)
-
-        # ── URL row ──────────────────────────────────────────────────
+    def _render_status_rows(self, status) -> None:
+        """Update the URL, PID, and uptime rows from server status."""
         self.ui.label_ServiceURL.setText(
             f'<a href="{Server.get_base_url()}">{Server.get_base_url()}</a>'
         )
         self.ui.label_ServiceURL.setOpenExternalLinks(True)
-
-        # ── PID / Uptime row ─────────────────────────────────────────
         self.ui.label_ServicePID.setText(str(status.pid) if status.pid else "-")
-
         if status.uptime_seconds is not None:
             hours, remainder = divmod(int(status.uptime_seconds), 3600)
             minutes, seconds = divmod(remainder, 60)
@@ -427,13 +426,17 @@ class ServerHandlersMixin:
         else:
             self.ui.label_ServiceUptime.setText("-")
 
-        # ── Button visibility and enable state ───────────────────────
+    def _render_buttons(self, status) -> None:
+        """Enable/disable service buttons based on server and preflight state.
+
+        A 30-second safety timeout resets a stuck ``_is_stopping`` flag so
+        the buttons cannot lock up if the stop worker never reports back.
+        """
         preflight_ok = (
             self._preflight_result is not None and self._preflight_result.passed
         )
         can_start = not status.running and preflight_ok
 
-        # Safety timeout: reset stopping state after 30 seconds
         if self._is_stopping and time.monotonic() - self._stopping_since > 30:
             self._is_stopping = False
             self._stopping_since = 0.0
@@ -449,28 +452,39 @@ class ServerHandlersMixin:
 
         self.ui.pushButton_ServiceOpen.setEnabled(status.healthy)
 
-        # ── Start button tooltip ─────────────────────────────────────
+    def _render_start_tooltip(self, status) -> None:
+        """Set the Start button tooltip from the current preflight state."""
         if self._preflight_running:
             self.ui.pushButton_ServiceStart.setToolTip(
                 "Preflight checks are running\u2026"
             )
-        elif not status.running and not preflight_ok:
-            if self._preflight_result is not None:
-                failures = "\n".join(
-                    f"  \u2022 {c.name}: {c.error}"
-                    for c in self._preflight_result.failures
-                )
-                self.ui.pushButton_ServiceStart.setToolTip(
-                    f"Cannot start \u2014 fix these issues first:\n{failures}"
-                )
-            else:
-                self.ui.pushButton_ServiceStart.setToolTip(
-                    "Cannot start \u2014 preflight checks have not run yet"
-                )
-        else:
-            self.ui.pushButton_ServiceStart.setToolTip("")
+            return
 
-        # ── Tray icon sync ───────────────────────────────────────────
+        preflight_ok = (
+            self._preflight_result is not None and self._preflight_result.passed
+        )
+        if status.running or preflight_ok:
+            self.ui.pushButton_ServiceStart.setToolTip("")
+            return
+
+        if self._preflight_result is not None:
+            failures = "\n".join(
+                f"  \u2022 {c.name}: {c.error}" for c in self._preflight_result.failures
+            )
+            self.ui.pushButton_ServiceStart.setToolTip(
+                f"Cannot start \u2014 fix these issues first:\n{failures}"
+            )
+        else:
+            self.ui.pushButton_ServiceStart.setToolTip(
+                "Cannot start \u2014 preflight checks have not run yet"
+            )
+
+    def _sync_tray(self, status) -> None:
+        """Mirror server state to the tray icon, if it has been created.
+
+        The tray icon is created late in MainWindow init (after the server
+        timer starts), so the first timer tick may fire before it exists.
+        """
         tray = getattr(self, "_tray_icon", None)
         if tray is not None:
             tray.update_status(running=status.running, healthy=status.healthy)

@@ -21,7 +21,6 @@ class TrayIcon:
     """
 
     def __init__(self, window) -> None:
-        self._window = window
         self._tray = QSystemTrayIcon(window)
         self._tray.setIcon(window.windowIcon())
         self._tray.setToolTip("Aria Service Manager")
@@ -71,6 +70,10 @@ class TrayIcon:
             )
         )
         self._tray.show()
+
+    def hide(self) -> None:
+        """Hide the tray icon so QApplication can exit."""
+        self._tray.hide()
 
     def update_status(self, *, running: bool, healthy: bool) -> None:
         """Enable or disable tray actions based on current server state."""

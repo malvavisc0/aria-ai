@@ -461,63 +461,10 @@
                </widget>
               </item>
               <item row="3" column="1">
-               <widget class="QComboBox" name="comboBox_ContextSize">
-                <property name="sizePolicy">
-                 <sizepolicy hsizetype="Expanding" vsizetype="Fixed">
-                  <horstretch>0</horstretch>
-                  <verstretch>0</verstretch>
-                 </sizepolicy>
+               <widget class="QLineEdit" name="lineEdit_ContextSize">
+                <property name="placeholderText">
+                 <string>65536</string>
                 </property>
-                <item>
-                 <property name="text">
-                  <string>24K (24,576)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>32K (32,768)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>48K (49,152)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>64K (65,536)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>128K (131,072)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>256K (262,144)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>384K (393,216)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>512K (524,288)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>768K (786,432)</string>
-                 </property>
-                </item>
-                <item>
-                 <property name="text">
-                  <string>1M (1,048,576)</string>
-                 </property>
-                </item>
                </widget>
               </item>
              </layout>
@@ -571,41 +518,13 @@
                <number>12</number>
               </property>
               <item row="0" column="0">
-               <widget class="QLabel" name="label_LocalStatus">
-                <property name="text">
-                 <string>Status</string>
-                </property>
-               </widget>
-              </item>
-              <item row="0" column="1">
-               <widget class="QLabel" name="label_LocalStatusValue">
-                <property name="text">
-                 <string>-</string>
-                </property>
-               </widget>
-              </item>
-              <item row="1" column="0">
-               <widget class="QLabel" name="label_LocalModel">
-                <property name="text">
-                 <string>Chat model</string>
-                </property>
-               </widget>
-              </item>
-              <item row="1" column="1">
-               <widget class="QLabel" name="label_LocalModelValue">
-                <property name="text">
-                 <string>-</string>
-                </property>
-               </widget>
-              </item>
-              <item row="2" column="0">
                <widget class="QLabel" name="label_LocalEndpoint">
                 <property name="text">
                  <string>Endpoint</string>
                 </property>
                </widget>
               </item>
-              <item row="2" column="1">
+              <item row="0" column="1">
                <widget class="QLabel" name="label_LocalEndpointValue">
                 <property name="text">
                  <string>-</string>

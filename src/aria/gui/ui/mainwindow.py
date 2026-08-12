@@ -3,23 +3,13 @@
 ################################################################################
 ## Form generated from reading UI file 'mainwindow.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.11.0
+## Created by: Qt User Interface Compiler version 6.11.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide6.QtCore import (
-    QCoreApplication,
-    QMetaObject,
-    QRect,
-    QSize,
-    Qt,
-)
-from PySide6.QtGui import (
-    QAction,
-    QFont,
-    QIcon,
-)
+from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, QSize, Qt
+from PySide6.QtGui import QAction, QFont, QIcon
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -303,28 +293,11 @@ class Ui_MainWindow(object):
             3, QFormLayout.ItemRole.LabelRole, self.label_ContextSize
         )
 
-        self.comboBox_ContextSize = QComboBox(self.frame_RemoteSettings)
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.addItem("")
-        self.comboBox_ContextSize.setObjectName("comboBox_ContextSize")
-        sizePolicy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        sizePolicy.setHorizontalStretch(0)
-        sizePolicy.setVerticalStretch(0)
-        sizePolicy.setHeightForWidth(
-            self.comboBox_ContextSize.sizePolicy().hasHeightForWidth()
-        )
-        self.comboBox_ContextSize.setSizePolicy(sizePolicy)
+        self.lineEdit_ContextSize = QLineEdit(self.frame_RemoteSettings)
+        self.lineEdit_ContextSize.setObjectName("lineEdit_ContextSize")
 
         self.formLayout_remote.setWidget(
-            3, QFormLayout.ItemRole.FieldRole, self.comboBox_ContextSize
+            3, QFormLayout.ItemRole.FieldRole, self.lineEdit_ContextSize
         )
 
         self.verticalLayout_ai_connection.addWidget(self.frame_RemoteSettings)
@@ -366,46 +339,18 @@ class Ui_MainWindow(object):
         self.formLayout_local_status.setObjectName("formLayout_local_status")
         self.formLayout_local_status.setHorizontalSpacing(16)
         self.formLayout_local_status.setVerticalSpacing(12)
-        self.label_LocalStatus = QLabel(self.frame_LocalStatus)
-        self.label_LocalStatus.setObjectName("label_LocalStatus")
-
-        self.formLayout_local_status.setWidget(
-            0, QFormLayout.ItemRole.LabelRole, self.label_LocalStatus
-        )
-
-        self.label_LocalStatusValue = QLabel(self.frame_LocalStatus)
-        self.label_LocalStatusValue.setObjectName("label_LocalStatusValue")
-
-        self.formLayout_local_status.setWidget(
-            0, QFormLayout.ItemRole.FieldRole, self.label_LocalStatusValue
-        )
-
-        self.label_LocalModel = QLabel(self.frame_LocalStatus)
-        self.label_LocalModel.setObjectName("label_LocalModel")
-
-        self.formLayout_local_status.setWidget(
-            1, QFormLayout.ItemRole.LabelRole, self.label_LocalModel
-        )
-
-        self.label_LocalModelValue = QLabel(self.frame_LocalStatus)
-        self.label_LocalModelValue.setObjectName("label_LocalModelValue")
-
-        self.formLayout_local_status.setWidget(
-            1, QFormLayout.ItemRole.FieldRole, self.label_LocalModelValue
-        )
-
         self.label_LocalEndpoint = QLabel(self.frame_LocalStatus)
         self.label_LocalEndpoint.setObjectName("label_LocalEndpoint")
 
         self.formLayout_local_status.setWidget(
-            2, QFormLayout.ItemRole.LabelRole, self.label_LocalEndpoint
+            0, QFormLayout.ItemRole.LabelRole, self.label_LocalEndpoint
         )
 
         self.label_LocalEndpointValue = QLabel(self.frame_LocalStatus)
         self.label_LocalEndpointValue.setObjectName("label_LocalEndpointValue")
 
         self.formLayout_local_status.setWidget(
-            2, QFormLayout.ItemRole.FieldRole, self.label_LocalEndpointValue
+            0, QFormLayout.ItemRole.FieldRole, self.label_LocalEndpointValue
         )
 
         self.verticalLayout_ai_connection.addWidget(self.frame_LocalStatus)
@@ -508,13 +453,13 @@ class Ui_MainWindow(object):
         self.pushButton_CreateUser = QPushButton(self.groupBox_CreateUser)
         self.pushButton_CreateUser.setObjectName("pushButton_CreateUser")
         self.pushButton_CreateUser.setEnabled(False)
-        sizePolicy1 = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        sizePolicy1.setHorizontalStretch(0)
-        sizePolicy1.setVerticalStretch(0)
-        sizePolicy1.setHeightForWidth(
+        sizePolicy = QSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        sizePolicy.setHorizontalStretch(0)
+        sizePolicy.setVerticalStretch(0)
+        sizePolicy.setHeightForWidth(
             self.pushButton_CreateUser.sizePolicy().hasHeightForWidth()
         )
-        self.pushButton_CreateUser.setSizePolicy(sizePolicy1)
+        self.pushButton_CreateUser.setSizePolicy(sizePolicy)
 
         self.horizontalLayout_createBtn.addWidget(self.pushButton_CreateUser)
 
@@ -728,37 +673,9 @@ class Ui_MainWindow(object):
         self.label_ContextSize.setText(
             QCoreApplication.translate("MainWindow", "Context Size", None)
         )
-        self.comboBox_ContextSize.setItemText(
-            0, QCoreApplication.translate("MainWindow", "24K (24,576)", None)
+        self.lineEdit_ContextSize.setPlaceholderText(
+            QCoreApplication.translate("MainWindow", "65536", None)
         )
-        self.comboBox_ContextSize.setItemText(
-            1, QCoreApplication.translate("MainWindow", "32K (32,768)", None)
-        )
-        self.comboBox_ContextSize.setItemText(
-            2, QCoreApplication.translate("MainWindow", "48K (49,152)", None)
-        )
-        self.comboBox_ContextSize.setItemText(
-            3, QCoreApplication.translate("MainWindow", "64K (65,536)", None)
-        )
-        self.comboBox_ContextSize.setItemText(
-            4, QCoreApplication.translate("MainWindow", "128K (131,072)", None)
-        )
-        self.comboBox_ContextSize.setItemText(
-            5, QCoreApplication.translate("MainWindow", "256K (262,144)", None)
-        )
-        self.comboBox_ContextSize.setItemText(
-            6, QCoreApplication.translate("MainWindow", "384K (393,216)", None)
-        )
-        self.comboBox_ContextSize.setItemText(
-            7, QCoreApplication.translate("MainWindow", "512K (524,288)", None)
-        )
-        self.comboBox_ContextSize.setItemText(
-            8, QCoreApplication.translate("MainWindow", "768K (786,432)", None)
-        )
-        self.comboBox_ContextSize.setItemText(
-            9, QCoreApplication.translate("MainWindow", "1M (1,048,576)", None)
-        )
-
         self.pushButton_TestConnection.setText(
             QCoreApplication.translate("MainWindow", "Test Connection", None)
         )
@@ -766,18 +683,6 @@ class Ui_MainWindow(object):
             QCoreApplication.translate("MainWindow", "Save Settings", None)
         )
         self.label_ConnectionStatus.setText("")
-        self.label_LocalStatus.setText(
-            QCoreApplication.translate("MainWindow", "Status", None)
-        )
-        self.label_LocalStatusValue.setText(
-            QCoreApplication.translate("MainWindow", "-", None)
-        )
-        self.label_LocalModel.setText(
-            QCoreApplication.translate("MainWindow", "Chat model", None)
-        )
-        self.label_LocalModelValue.setText(
-            QCoreApplication.translate("MainWindow", "-", None)
-        )
         self.label_LocalEndpoint.setText(
             QCoreApplication.translate("MainWindow", "Endpoint", None)
         )

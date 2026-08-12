@@ -1,22 +1,13 @@
-"""First-run setup wizard for Aria.
-
-A QWizard-based guided setup that walks new users through:
-1. Connection setup (Local vs Remote)
-2. Download dependencies (Lightpanda, embeddings model)
-3. Create admin user
-4. Finish
-
-The wizard is shown automatically on first run when no users exist.
-"""
+"""Wizard pages and the SetupWizard container."""
 
 from __future__ import annotations
 
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
-from PySide6.QtCore import QObject, QThread, Signal
+from PySide6.QtCore import QThread
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
@@ -30,6 +21,9 @@ from PySide6.QtWidgets import (
     QWizardPage,
 )
 from sqlalchemy import select
+
+from aria.gui.wizard.db import _has_admin_user
+from aria.gui.wizard.workers import _DownloadWorker, _PreflightWorker
 
 if TYPE_CHECKING:
     from aria.gui.windows.main_window import MainWindow
@@ -77,28 +71,26 @@ class _ConnectionPage(QWizardPage):
         self._remote_container.addWidget(QLabel("Remote Settings:"))
 
         # Endpoint URL
-        from aria.config.models import Chat
+        from aria.config import get_optional_env
 
         self._endpoint_edit = QLineEdit()
         self._endpoint_edit.setPlaceholderText("https://api.openai.com/v1")
-        self._endpoint_edit.setText(Chat.api_url or "https://api.openai.com/v1")
+        self._endpoint_edit.setText(get_optional_env("CHAT_OPENAI_API", ""))
         self._remote_container.addWidget(QLabel("Endpoint:"))
         self._remote_container.addWidget(self._endpoint_edit)
 
         # API Key
-        from aria.config.api import Vllm
-
         self._api_key_edit = QLineEdit()
         self._api_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self._api_key_edit.setPlaceholderText("sk-...")
-        self._api_key_edit.setText(Vllm.api_key or "")
+        self._api_key_edit.setText(get_optional_env("ARIA_VLLM_API_KEY", ""))
         self._remote_container.addWidget(QLabel("API Key:"))
         self._remote_container.addWidget(self._api_key_edit)
 
         # Model name
         self._model_edit = QLineEdit()
         self._model_edit.setPlaceholderText("auto")
-        self._model_edit.setText(Chat.model or "")
+        self._model_edit.setText(get_optional_env("CHAT_MODEL", ""))
         self._remote_container.addWidget(QLabel("Model:"))
         self._remote_container.addWidget(self._model_edit)
 
@@ -176,59 +168,33 @@ class _ConnectionPage(QWizardPage):
         return "remote" if self._remote_radio.isChecked() else "local"
 
     def save_connection_config(self) -> bool:
-        """Save connection configuration to .env file.
+        """Save connection configuration to .env.
 
-        Uses the correct env var names expected by aria.config.api.Vllm
-        and aria.config.models.Chat. Preserves comments and blank lines.
+        Writes through the shared ``parse_dotenv``/``write_dotenv`` helpers
+        (same path as the main window) so comments and structure are
+        preserved. ``ARIA_VLLM_REMOTE`` is persisted explicitly for both
+        modes.
         """
+        import os
         from pathlib import Path
 
+        from aria.helpers.dotenv import parse_dotenv, write_dotenv
+
+        env_path = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria")) / ".env"
+        env_path.parent.mkdir(parents=True, exist_ok=True)
+
+        mode = self.get_connection_mode()
+        values: dict[str, str] = {
+            "ARIA_VLLM_REMOTE": "true" if mode == "remote" else "false",
+        }
+        if mode == "remote":
+            values["CHAT_OPENAI_API"] = self._endpoint_edit.text().strip()
+            values["ARIA_VLLM_API_KEY"] = self._api_key_edit.text().strip()
+            values["CHAT_MODEL"] = self._model_edit.text().strip()
+
         try:
-            import os
-
-            aria_home = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria"))
-            env_path = aria_home / ".env"
-            env_path.parent.mkdir(parents=True, exist_ok=True)
-
-            mode = self.get_connection_mode()
-
-            # Build the updates using the correct variable names
-            updates: dict[str, str] = {}
-            if mode == "remote":
-                updates["ARIA_VLLM_REMOTE"] = "true"
-                updates["CHAT_OPENAI_API"] = self._endpoint_edit.text().strip()
-                updates["ARIA_VLLM_API_KEY"] = self._api_key_edit.text().strip()
-                updates["CHAT_MODEL"] = self._model_edit.text().strip()
-            else:
-                updates["ARIA_VLLM_REMOTE"] = ""
-
-            # Read existing .env preserving comments and structure
-            lines: list[str] = []
-            keys_written: set[str] = set()
-            if env_path.exists():
-                for line in env_path.read_text().splitlines():
-                    stripped = line.strip()
-                    # Preserve comments and blank lines
-                    if not stripped or stripped.startswith("#"):
-                        lines.append(line)
-                        continue
-                    if "=" in stripped:
-                        key = stripped.split("=", 1)[0].strip()
-                        if key in updates:
-                            lines.append(f"{key} = {updates[key]}")
-                            keys_written.add(key)
-                        else:
-                            lines.append(line)
-                    else:
-                        lines.append(line)
-
-            # Append any new keys not already in the file
-            for key, value in updates.items():
-                if key not in keys_written:
-                    lines.append(f"{key} = {value}")
-
-            env_path.write_text("\n".join(lines) + "\n")
-            return True
+            _, raw_lines = parse_dotenv(env_path)
+            write_dotenv(env_path, values, raw_lines)
         except Exception as exc:
             QMessageBox.warning(
                 self,
@@ -236,78 +202,16 @@ class _ConnectionPage(QWizardPage):
                 f"Could not save connection settings:\n{exc}",
             )
             return False
-
-
-# ---------------------------------------------------------------------------
-# Background workers for dependency downloads
-# ---------------------------------------------------------------------------
-
-
-class _PreflightWorker(QObject):
-    """Run preflight checks off the GUI thread."""
-
-    finished = Signal(object)
-
-    def run(self):
-        from aria.preflight import run_preflight_checks
-
-        self.finished.emit(run_preflight_checks())
-
-
-class _DownloadWorker(QObject):
-    """Download a single dependency off the GUI thread."""
-
-    finished = Signal(bool, str)  # (success, message)
-
-    def __init__(self, target: str):
-        super().__init__()
-        self._target = target
-
-    def run(self):
-        try:
-            if self._target == "lightpanda":
-                from aria.config.api import Lightpanda
-                from aria.scripts.lightpanda import download_lightpanda
-
-                download_lightpanda(
-                    bin_dir=Lightpanda.get_bin_path(),
-                    version=Lightpanda.version,
-                )
-                self.finished.emit(True, "Lightpanda installed.")
-            elif self._target == "embeddings":
-                from os import getenv
-
-                from huggingface_hub import snapshot_download
-
-                from aria.config.huggingface import HuggingFace
-                from aria.config.models import Embeddings
-
-                repo_id = getenv("EMBED_MODEL_PATH", "")
-                local_dir = Embeddings.model_path
-                token = HuggingFace.token
-                snapshot_download(
-                    repo_id=repo_id,
-                    local_dir=local_dir,
-                    token=token,
-                )
-                self.finished.emit(True, "Embeddings model downloaded.")
-            else:
-                self.finished.emit(False, f"Unknown target: {self._target}")
-        except Exception as exc:
-            self.finished.emit(False, str(exc))
-
-
-# ---------------------------------------------------------------------------
-# Dependencies page
-# ---------------------------------------------------------------------------
+        return True
 
 
 class _DependenciesPage(QWizardPage):
-    """Wizard page that checks and downloads required dependencies.
+    """Wizard page that checks and downloads installable dependencies.
 
-    Uses ``run_preflight_checks()`` to detect what's missing, then lets
-    the user download each item with a button.  ``isComplete()`` returns
-    ``True`` only when all required checks pass.
+    Checks that can be installed from the wizard (lightpanda, embeddings)
+    gate progression. Other preflight results (chat model, docling, voice)
+    are shown for information only — they are enforced by the main window's
+    preflight gate on the Start button.
     """
 
     def __init__(self, parent=None):
@@ -342,7 +246,7 @@ class _DependenciesPage(QWizardPage):
 
     def nextId(self) -> int:
         """Skip User page if admin already exists."""
-        wizard: SetupWizard = self.wizard()  # type: ignore[assignment]
+        wizard = cast(SetupWizard, self.wizard())
         if wizard.has_admin:
             return 3  # Finish page
         return 2  # User page
@@ -361,9 +265,8 @@ class _DependenciesPage(QWizardPage):
         self._thread.finished.connect(self._thread.deleteLater)
         self._thread.start()
 
-    def _on_preflight_done(self, result):
-        """Display preflight results and build download buttons."""
-        # Clear previous widgets
+    def _clear_status_layout(self) -> None:
+        """Remove all widgets and layouts from the status area."""
         while self._status_layout.count():
             item = self._status_layout.takeAt(0)
             if item is None:
@@ -380,6 +283,10 @@ class _DependenciesPage(QWizardPage):
                         if cw is not None:
                             cw.deleteLater()
 
+    def _on_preflight_done(self, result):
+        """Display preflight results and build download buttons."""
+        self._clear_status_layout()
+
         # Filter for binaries + models categories
         relevant = [c for c in result.checks if c.category in ("binaries", "models")]
 
@@ -389,30 +296,41 @@ class _DependenciesPage(QWizardPage):
             self.completeChanged.emit()
             return
 
-        all_passed = True
-        for check in relevant:
-            row = QHBoxLayout()
-            icon = "\u2705" if check.passed else "\u274c"
-            label = QLabel(f"{icon}  {check.name}")
-            row.addWidget(label)
-
-            if not check.passed:
-                all_passed = False
-                btn = QPushButton("Download")
-                btn.setProperty("dep_name", check.name)
-                btn.clicked.connect(lambda checked, n=check.name: self._on_download(n))
-                row.addWidget(btn)
-
-            self._status_layout.addLayout(row)
-
-        self._all_ok = all_passed
-        if all_passed:
+        self._all_ok = all(self._add_check_row(c) for c in relevant)
+        if self._all_ok:
             self._info_label.setText("All dependencies are ready.")
         else:
-            self._info_label.setText(
-                "Some dependencies are missing. Click Download to install them."
-            )
+            self._info_label.setText("Install the missing dependencies to continue.")
         self.completeChanged.emit()
+
+    def _add_check_row(self, check) -> bool:
+        """Render one dependency row.
+
+        Returns True when the check does not block progression: it passed,
+        or it has no installable target and is shown for information only.
+        """
+        target = self._resolve_target(check.name)
+        icon = "\u2705" if check.passed else "\u274c"
+        text = f"{icon}  {check.name}"
+        if check.passed:
+            if check.details:
+                text += f"  ({check.details})"
+        elif check.hint and target is None:
+            text += f"  ({check.hint})"
+
+        download_required = target is not None and not check.passed
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel(text))
+        if download_required:
+            btn = QPushButton("Download")
+            btn.clicked.connect(
+                lambda checked=False, n=check.name: self._on_download(n)
+            )
+            row.addWidget(btn)
+        self._status_layout.addLayout(row)
+
+        return not download_required
 
     def _on_download(self, name: str):
         """Start downloading the named dependency."""
@@ -623,104 +541,3 @@ class SetupWizard(QWizard):
         if not self.has_admin:
             self.setPage(2, _UserPage(self))
         self.setPage(3, _FinishPage(self))
-
-
-def _has_admin_user() -> bool:
-    """Return True if at least one admin user exists in the database."""
-    try:
-        from aria.cli import get_db_session
-        from aria.db.models import User
-
-        with get_db_session() as session:
-            users = session.execute(select(User)).scalars().all()
-            return len(users) > 0
-    except Exception:
-        return False
-
-
-def _is_model_downloaded(model_path: str) -> bool:
-    """Check if a model directory exists and is non-empty."""
-    from pathlib import Path
-
-    p = Path(model_path)
-    return p.exists() and any(p.iterdir())
-
-
-def should_show_wizard() -> bool:
-    """Check if the first-run wizard should be shown.
-
-    Returns True when any setup step is incomplete:
-
-    1. No users in the database
-    2. No NVIDIA GPU → remote mode required:
-       Chat.api_url, Chat.model, and Vllm.api_key must be set
-    3. NVIDIA GPU present → local mode:
-       Chat model must be downloaded
-    4. Embeddings model must be downloaded (always)
-    5. Lightpanda must be installed (always)
-    """
-    from aria.helpers.nvidia import check_nvidia_smi_available
-
-    # 1. No users in DB → always show
-    if not _has_admin_user():
-        return True
-
-    has_nvidia = check_nvidia_smi_available()
-
-    if not has_nvidia:
-        # 2. No NVIDIA → remote mode required
-        from aria.config.api import Vllm
-        from aria.config.models import Chat
-
-        if not Chat.api_url or not Chat.model or not Vllm.api_key:
-            return True
-    else:
-        # 3. NVIDIA present → chat model must be downloaded
-        from aria.config.models import Chat
-
-        if not _is_model_downloaded(Chat.model_path):
-            return True
-
-    # 4. Embeddings model must be downloaded
-    from aria.config.models import Embeddings
-
-    if not _is_model_downloaded(Embeddings.model_path):
-        return True
-
-    # 5. Lightpanda must be installed
-    from aria.config.api import Lightpanda
-
-    if not Lightpanda.is_available():
-        return True
-
-    return False
-
-
-def run_wizard(parent: MainWindow | None = None) -> bool:
-    """Show the setup wizard and return True if setup succeeded.
-
-    Returns False if the wizard was cancelled, config save failed,
-    or user creation failed.
-    """
-    wizard = SetupWizard(parent)
-
-    # Store reference so closeEvent can reject the wizard on force-quit
-    if parent is not None:
-        parent._wizard = wizard
-
-    result = wizard.exec()
-
-    if result == QWizard.DialogCode.Accepted:
-        # Save connection config
-        conn_page: _ConnectionPage = wizard.page(0)  # type: ignore[assignment]
-        if not conn_page.save_connection_config():
-            return False
-
-        # Create user only if User page was shown
-        if not wizard.has_admin:
-            user_page: _UserPage = wizard.page(2)  # type: ignore[assignment]
-            return user_page.create_user()
-
-        return True
-
-    return False
