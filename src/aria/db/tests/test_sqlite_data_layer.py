@@ -3,11 +3,38 @@
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
+from chainlit.step import StepDict
 from chainlit.types import Pagination, ThreadFilter
 
 from aria.db.layer import SQLiteSQLAlchemyDataLayer, _to_local_timestamp_string
+
+
+def _insert_step_row(raw_db_query, *, step_id, thread_id, tags, metadata, generation):
+    """Insert a step row with raw JSON-string fields for read-path tests."""
+    return raw_db_query(
+        """
+        INSERT INTO steps
+            ("id", "name", "type", "threadId", "streaming",
+             "tags", "metadata", "generation", "createdAt")
+        VALUES
+            (:id, :name, :type, :thread_id, :streaming,
+             :tags, :metadata, :generation, :created_at)
+        """,
+        {
+            "id": step_id,
+            "name": "Test Step",
+            "type": "assistant_message",
+            "thread_id": thread_id,
+            "streaming": False,
+            "tags": tags,
+            "metadata": metadata,
+            "generation": generation,
+            "created_at": "2024-01-01T00:00:00Z",
+        },
+    )
 
 
 class TestThreadOperations:
@@ -124,6 +151,201 @@ class TestThreadOperations:
 
 class TestStepOperations:
     """Test suite for step operations."""
+
+    @pytest.mark.asyncio
+    async def test_create_step_serializes_tags(
+        self, data_layer: SQLiteSQLAlchemyDataLayer, raw_db_query: Callable
+    ):
+        """create_step must store tags as a JSON string (SQLite can't bind list)."""
+        from chainlit.context import init_http_context
+
+        thread_id = str(uuid.uuid4())
+        init_http_context(thread_id=thread_id)
+
+        step_dict = {
+            "id": str(uuid.uuid4()),
+            "name": "msg",
+            "type": "user_message",
+            "threadId": thread_id,
+            "streaming": False,
+            "tags": ["a", "b"],
+            "metadata": {"k": "v"},
+            "generation": {"model": "m"},
+            "createdAt": "2024-01-01T00:00:00Z",
+        }
+        await data_layer.create_step(cast(StepDict, step_dict))
+
+        rows = await raw_db_query(
+            "SELECT tags FROM steps WHERE id = :id", {"id": step_dict["id"]}
+        )
+        assert rows[0]["tags"] == '["a", "b"]'
+
+    @pytest.mark.asyncio
+    async def test_get_step_deserializes_json_fields(
+        self, data_layer: SQLiteSQLAlchemyDataLayer, raw_db_query: Callable
+    ):
+        """get_step must return tags/metadata/generation as Python objects."""
+        thread_id = str(uuid.uuid4())
+        await raw_db_query(
+            'INSERT INTO threads (id, "createdAt") VALUES (:id, :c)',
+            {"id": thread_id, "c": "2024-01-01T00:00:00Z"},
+        )
+        step_id = str(uuid.uuid4())
+        await _insert_step_row(
+            raw_db_query,
+            step_id=step_id,
+            thread_id=thread_id,
+            tags='["x", "y"]',
+            metadata='{"k": "v"}',
+            generation='{"model": "m"}',
+        )
+
+        step = await data_layer.get_step(step_id)
+        assert step is not None
+        assert step.get("tags") == ["x", "y"]
+        assert step.get("metadata") == {"k": "v"}
+        assert step.get("generation") == {"model": "m"}
+
+
+class TestElementRetrieval:
+    """Test suite for element read-path overrides."""
+
+    @pytest.mark.asyncio
+    async def test_get_element_null_props_does_not_crash(
+        self, data_layer: SQLiteSQLAlchemyDataLayer, raw_db_query: Callable
+    ):
+        """get_element must tolerate a NULL props column (parent 500s)."""
+        thread_id = str(uuid.uuid4())
+        element_id = str(uuid.uuid4())
+        await raw_db_query(
+            'INSERT INTO threads (id, "createdAt") VALUES (:id, :c)',
+            {"id": thread_id, "c": "2024-01-01T00:00:00Z"},
+        )
+        await raw_db_query(
+            'INSERT INTO elements (id, "threadId", name, type, props) '
+            "VALUES (:id, :tid, :name, :type, NULL)",
+            {"id": element_id, "tid": thread_id, "name": "img", "type": "image"},
+        )
+
+        element = await data_layer.get_element(thread_id, element_id)
+        assert element is not None
+        assert element.get("id") == element_id
+        assert element.get("props") == {}
+
+    @pytest.mark.asyncio
+    async def test_get_favorite_steps_deserializes_tags_generation(
+        self,
+        data_layer: SQLiteSQLAlchemyDataLayer,
+        create_user: Callable,
+        raw_db_query: Callable,
+    ):
+        """get_favorite_steps must return tags/generation as Python objects."""
+        user = await create_user()
+        thread_id = str(uuid.uuid4())
+        await data_layer.update_thread(thread_id=thread_id, user_id=user["id"])
+        step_id = str(uuid.uuid4())
+        await _insert_step_row(
+            raw_db_query,
+            step_id=step_id,
+            thread_id=thread_id,
+            tags='["fav"]',
+            metadata='{"favorite": true}',
+            generation='{"model": "m"}',
+        )
+
+        favorites = await data_layer.get_favorite_steps(user["id"])
+        match = [s for s in favorites if s.get("id") == step_id]
+        assert match, "step not returned as favorite"
+        assert match[0].get("tags") == ["fav"]
+        assert match[0].get("generation") == {"model": "m"}
+
+
+class TestPromotionInvariant:
+    """get_thread preserves parentId; get_all_user_threads promotes to root."""
+
+    @pytest.mark.asyncio
+    async def test_get_thread_preserves_parentid(
+        self, data_layer: SQLiteSQLAlchemyDataLayer, raw_db_query: Callable
+    ):
+        thread_id = str(uuid.uuid4())
+        parent_id = str(uuid.uuid4())
+        child_id = str(uuid.uuid4())
+        await raw_db_query(
+            'INSERT INTO threads (id, "createdAt") VALUES (:id, :c)',
+            {"id": thread_id, "c": "2024-01-01T00:00:00Z"},
+        )
+        await _insert_step_row(
+            raw_db_query,
+            step_id=parent_id,
+            thread_id=thread_id,
+            tags="[]",
+            metadata="{}",
+            generation="{}",
+        )
+        await raw_db_query(
+            'UPDATE steps SET "type" = :t WHERE "id" = :id',
+            {"t": "user_message", "id": parent_id},
+        )
+        await _insert_step_row(
+            raw_db_query,
+            step_id=child_id,
+            thread_id=thread_id,
+            tags="[]",
+            metadata="{}",
+            generation="{}",
+        )
+        await raw_db_query(
+            'UPDATE steps SET "type" = :t, "parentId" = :p WHERE "id" = :id',
+            {"t": "assistant_message", "p": parent_id, "id": child_id},
+        )
+
+        thread = await data_layer.get_thread(thread_id)
+        assert thread is not None
+        child = next(s for s in thread["steps"] if s.get("id") == child_id)
+        assert child.get("parentId") == parent_id, "get_thread must keep raw tree"
+
+    @pytest.mark.asyncio
+    async def test_get_all_user_threads_promotes_assistant_messages(
+        self,
+        data_layer: SQLiteSQLAlchemyDataLayer,
+        create_user: Callable,
+        raw_db_query: Callable,
+    ):
+        user = await create_user()
+        thread_id = str(uuid.uuid4())
+        await data_layer.update_thread(thread_id=thread_id, user_id=user["id"])
+        parent_id = str(uuid.uuid4())
+        child_id = str(uuid.uuid4())
+        await _insert_step_row(
+            raw_db_query,
+            step_id=parent_id,
+            thread_id=thread_id,
+            tags="[]",
+            metadata="{}",
+            generation="{}",
+        )
+        await raw_db_query(
+            'UPDATE steps SET "type" = :t WHERE "id" = :id',
+            {"t": "user_message", "id": parent_id},
+        )
+        await _insert_step_row(
+            raw_db_query,
+            step_id=child_id,
+            thread_id=thread_id,
+            tags="[]",
+            metadata="{}",
+            generation="{}",
+        )
+        await raw_db_query(
+            'UPDATE steps SET "type" = :t, "parentId" = :p WHERE "id" = :id',
+            {"t": "assistant_message", "p": parent_id, "id": child_id},
+        )
+
+        threads = await data_layer.get_all_user_threads(user_id=user["id"])
+        assert threads is not None
+        thread = next(t for t in threads if t["id"] == thread_id)
+        child = next(s for s in thread["steps"] if s.get("id") == child_id)
+        assert child.get("parentId") is None, "display path must promote to root"
 
 
 class TestThreadRetrieval:

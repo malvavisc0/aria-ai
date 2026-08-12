@@ -1,40 +1,21 @@
 """SQLite compatibility shim for Chainlit SQLAlchemy data layer.
 
-Chainlit's built-in [`SQLAlchemyDataLayer`](.venv/lib/python3.12/site-packages/chainlit/data/sql_alchemy.py:1)
-expects Postgres-style `TEXT[]` for the `tags` columns. With SQLite, Chainlit
-currently passes Python `list[str]` directly into a SQL parameter, which fails
-with:
+Chainlit's `SQLAlchemyDataLayer` passes Python `list[str]` directly into SQL
+parameters for `tags`, which SQLite cannot bind. This subclass serializes
+`tags` (and `metadata`, `generation`, `props`) as JSON strings on write and
+deserializes them on read.
 
-    sqlite3.ProgrammingError: Error binding parameter ... type 'list' is not supported
+Database column names use camelCase to match Chainlit's schema; Python
+attributes use snake_case with suffixes for reserved names (e.g. ``metadata_``
+for the ``metadata`` column).
 
-This subclass fixes SQLite compatibility by serializing `tags` as JSON strings
-on write and deserializing them back to `list[str]` on read.
-
-It also normalizes `metadata`, `generation`, and `props` fields to/from JSON
-strings in the same spirit as Chainlit's own SQLite handling.
-
-Naming Convention
------------------
-Database column names use camelCase (e.g., createdAt, userId) to match
-Chainlit's PostgreSQL schema. Python attributes use snake_case where
-possible, with suffixes for reserved names (e.g., metadata_ for the
-'metadata' column which conflicts with SQLAlchemy's DeclarativeBase).
-
-Workarounds
------------
-1. Message Promotion: Assistant messages are promoted to root level
-   (parentId=NULL) on read because Chainlit only displays root messages
-   in thread history. See _promote_assistant_messages(). This is applied
-   in get_all_user_threads() and list_threads() (display paths only).
-
-2. get_thread() intentionally bypasses _promote_assistant_messages()
-   to avoid in-place mutation of the thread dict. restore_chat_history()
-   no longer depends on parentId filtering — it collects all user/assistant
-   message steps regardless of their parent.
-
-3. User ID from Context: get_all_user_threads() attempts to infer
-   user_id from Chainlit's context when not provided, supporting
-   multi-user scenarios.
+Workarounds:
+1. Assistant messages are promoted to root level (parentId=NULL) on read in
+   ``get_all_user_threads`` (the display path) because Chainlit only shows
+   root messages in thread history. ``get_thread`` keeps the raw parent-child
+   tree so ``restore_chat_history`` can collect all user/assistant steps.
+2. ``get_all_user_threads`` infers ``user_id`` from the Chainlit session
+   context when not provided, for multi-user support.
 """
 
 from __future__ import annotations
@@ -50,15 +31,12 @@ from chainlit import PersistedUser
 from chainlit.data.sql_alchemy import SQLAlchemyDataLayer
 from chainlit.step import StepDict
 from chainlit.types import (
-    PaginatedResponse,
-    Pagination,
     ThreadDict,
-    ThreadFilter,
 )
 from chainlit.user import User
 
 if TYPE_CHECKING:
-    from chainlit.element import Element
+    from chainlit.element import Element, ElementDict
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +112,21 @@ def _to_local_timestamp_string(value: Any) -> Any:
         return value
 
     return parsed.astimezone().isoformat(timespec="microseconds")
+
+
+def _get_session_user() -> User | None:
+    """Return the active Chainlit session user, or None if no session.
+
+    Only ``ChainlitContextException`` (no active session) is swallowed; other
+    exceptions propagate. Shared by the user-resolution paths to avoid
+    duplicating the context-import + try/except boilerplate.
+    """
+    from chainlit.context import ChainlitContextException, context
+
+    try:
+        return context.session.user
+    except ChainlitContextException:
+        return None
 
 
 class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
@@ -219,17 +212,12 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
     async def get_thread(self, thread_id: str) -> ThreadDict | None:
         """Return thread data without promoting assistant messages.
 
-        Unlike get_all_user_threads() and list_threads() (sidebar display),
-        this returns the raw parent-child structure.  Promotion is
-        intentionally skipped here to avoid in-place mutation of the
-        thread dict that Chainlit re-uses for the resume UI.
-
-        ``restore_chat_history()`` no longer depends on ``parentId``
-        filtering — it collects *all* user/assistant message steps
-        regardless of their parent, so the raw tree is safe to pass.
+        Unlike ``get_all_user_threads`` (sidebar display), this returns the
+        raw parent-child tree. Promotion is skipped so the resume path
+        (``restore_chat_history``) can collect all user/assistant steps
+        regardless of parent, and to avoid mutating the dict Chainlit reuses.
         """
-        # Call parent directly to skip our get_all_user_threads override
-        # (which applies _promote_assistant_messages)
+        # Bypass our get_all_user_threads override (which promotes messages).
         user_threads = await SQLAlchemyDataLayer.get_all_user_threads(
             self, user_id=None, thread_id=thread_id
         )
@@ -339,22 +327,24 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
     async def _resolve_user_for_element(self, thread_id: str) -> str:
         """Resolve user_id from Chainlit session; fall back to DB lookup.
 
-        Only ``ChainlitContextException`` (no active session) is caught.
-        Database errors are swallowed by the base ``execute_sql`` (it returns
-        ``None``), so the ``"unknown"`` fallback still applies on DB failure.
-        Narrowing the except lets genuine non-DB exceptions (e.g.
-        ``AssertionError`` from a malformed user row in ``get_user``) propagate
-        instead of being silently swallowed.
+        Only ``ChainlitContextException`` (no active session) is caught when
+        reading the session. ``JSONDecodeError`` from a corrupt
+        ``users.metadata`` row in :meth:`get_user` is also tolerated (a single
+        corrupt row must not 500 every element upload for that user); it falls
+        through to the thread-based lookup and ultimately the ``"unknown"``
+        fallback. Other genuine exceptions still propagate.
         """
-        from chainlit.context import ChainlitContextException, context
-
-        try:
-            session_user = context.session.user
-        except ChainlitContextException:
-            session_user = None
+        session_user = _get_session_user()
 
         if session_user is not None:
-            persisted = await self.get_user(session_user.identifier)
+            try:
+                persisted = await self.get_user(session_user.identifier)
+            except json.JSONDecodeError:
+                logger.warning(
+                    f"Corrupt metadata for user {session_user.identifier}; "
+                    "falling back to thread lookup for element upload"
+                )
+                persisted = None
             if persisted:
                 return persisted.id
 
@@ -369,8 +359,12 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
         return "unknown"
 
     async def _read_element_content(self, element) -> Optional[Union[bytes, str]]:
-        from chainlit.logger import logger as chainlit_logger
+        """Read bytes to upload, or None to skip upload.
 
+        URL-backed elements return None: the remote URL is kept as the
+        persistent source and is *not* mirrored (the element dies if the link
+        rots). Path/content elements are read and uploaded.
+        """
         if element.path:
             async with aiofiles.open(element.path, "rb") as f:
                 return await f.read()
@@ -378,7 +372,7 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
             return None
         if element.content:
             return element.content
-        chainlit_logger.warning(f"create_element: no content {element.id}")
+        logger.warning(f"create_element: no content {element.id}")
         return None
 
     async def _upload_element_content(
@@ -397,9 +391,16 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
             mime=element.mime,
             overwrite=True,
         )
-        if uploaded:
-            element.url = uploaded.get("url")
-            setattr(element, "objectKey", uploaded.get("object_key"))
+        if not uploaded:
+            raise ValueError(
+                "create_element: storage provider upload returned no result"
+            )
+        # ``object_key`` is the snake_case field ``Element.to_dict()`` reads
+        # for ``objectKey``. Setting the camelCase attribute (as the parent
+        # does) is silently lost, leaving the row's objectKey NULL and leaking
+        # the stored file on thread/element deletion.
+        element.url = uploaded.get("url")
+        element.object_key = uploaded.get("object_key")
 
     def _element_insert_query(self, element) -> tuple[str, dict[str, Any]]:
         element_dict = cast(dict[str, Any], element.to_dict())
@@ -467,18 +468,12 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
     async def _resolve_user_id_from_context(self) -> str | None:
         """Try to resolve the user_id from the active Chainlit session.
 
-        Only ``ChainlitContextException`` (no active session) is swallowed.
-        Database errors are swallowed by the base ``execute_sql`` (it returns
-        ``None``), so a DB failure still yields ``None`` rather than raising.
-        Narrowing the except lets genuine non-DB exceptions propagate instead
-        of being silently swallowed.
+        Returns None when there is no active session or the session user has no
+        usable identifier. Database errors are swallowed by the base
+        ``execute_sql`` (it returns ``None``), so a DB failure yields ``None``
+        rather than raising.
         """
-        from chainlit.context import ChainlitContextException, context
-
-        try:
-            current_user = context.session.user
-        except ChainlitContextException:
-            return None
+        current_user = _get_session_user()
 
         identifier = getattr(current_user, "identifier", None)
         if not current_user or not identifier:
@@ -549,26 +544,55 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
 
         return self._deserialize_step(step)
 
-    async def list_threads(
-        self, pagination: Pagination, filters: ThreadFilter
-    ) -> PaginatedResponse:
-        """List threads with pagination, ensuring JSON fields are deserialized.
+    async def get_element(self, thread_id: str, element_id: str) -> ElementDict | None:
+        """Get an element by ID, deserializing ``props`` defensively.
 
-        Args:
-            pagination: Pagination parameters
-            filters: Thread filter parameters
-
-        Returns:
-            PaginatedResponse with deserialized thread data
+        The parent does ``json.loads(row.get("props", "{}"))``; the default
+        only applies when the key is absent, so a NULL ``props`` column (the
+        norm for image/pdf/audio/file elements) yields ``json.loads(None)``
+        and a TypeError. Deserializing via ``_deserialize_element`` matches the
+        other read paths.
         """
-        response = await super().list_threads(pagination, filters)
+        from chainlit.element import ElementDict
 
-        # Deserialize JSON fields in all returned threads
-        for thread in response.data:
-            self._deserialize_thread(thread)
+        query = (
+            'SELECT * FROM elements WHERE "threadId" = :thread_id '
+            'AND "id" = :element_id'
+        )
+        parameters = {"thread_id": thread_id, "element_id": element_id}
+        element = await self.execute_sql(query=query, parameters=parameters)
+        if not (isinstance(element, list) and element):
+            return None
 
-            # Promote assistant messages to root level for thread display
-            steps = thread.get("steps") or []
-            self._promote_assistant_messages(steps)
+        element_dict = element[0]
+        self._deserialize_element(element_dict)
+        return ElementDict(
+            id=element_dict["id"],
+            threadId=element_dict.get("threadId"),
+            type=element_dict["type"],
+            chainlitKey=element_dict.get("chainlitKey"),
+            url=element_dict.get("url"),
+            objectKey=element_dict.get("objectKey"),
+            name=element_dict["name"],
+            props=element_dict.get("props", {}),
+            display=element_dict["display"],
+            size=element_dict.get("size"),
+            language=element_dict.get("language"),
+            page=element_dict.get("page"),
+            autoPlay=element_dict.get("autoPlay"),
+            playerConfig=element_dict.get("playerConfig"),
+            forId=element_dict.get("forId"),
+            mime=element_dict.get("mime"),
+        )
 
-        return response
+    async def get_favorite_steps(self, user_id: str) -> list[StepDict]:
+        """Favorite steps with ``tags``/``generation`` deserialized.
+
+        The parent returns ``tags``/``generation`` as raw JSON strings while
+        other read paths return Python objects; ``_deserialize_step`` is
+        idempotent for the already-deserialized ``metadata``.
+        """
+        steps = await super().get_favorite_steps(user_id)
+        for step in steps:
+            self._deserialize_step(step)
+        return steps

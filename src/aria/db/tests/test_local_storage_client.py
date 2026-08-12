@@ -93,6 +93,35 @@ class TestPathValidation:
         path = client._validate_object_key("test.txt")
         assert path.is_absolute()
 
+    @pytest.mark.asyncio
+    async def test_rejects_null_byte_in_key(self, tmp_path: Path):
+        """Null bytes (a path injection vector) must be rejected."""
+        client = LocalStorageClient(storage_path=str(tmp_path / "storage"))
+        with pytest.raises((ValueError, TypeError)):
+            client._validate_object_key("evil\0/etc/passwd")
+
+    @pytest.mark.asyncio
+    async def test_rejects_symlink_escape(self, tmp_path: Path):
+        """A symlink inside storage pointing outside must not escape on upload."""
+        storage = tmp_path / "storage"
+        secret = tmp_path / "secret.txt"
+        secret.write_bytes(b"private")
+        client = LocalStorageClient(storage_path=str(storage))
+        # Pre-place a symlink inside storage that points outside.
+        link = storage / "escape.png"
+        link.symlink_to(secret)
+        # Uploading *through* the symlink must not write outside storage; the
+        # resolved target is outside, so validation should reject it.
+        with pytest.raises(ValueError):
+            await client.upload_file(object_key="escape.png", data=b"x")
+
+    @pytest.mark.asyncio
+    async def test_rejects_empty_object_key(self, tmp_path: Path):
+        """An empty key resolves to the storage dir itself; upload must fail."""
+        client = LocalStorageClient(storage_path=str(tmp_path / "storage"))
+        with pytest.raises((ValueError, IsADirectoryError, OSError)):
+            await client.upload_file(object_key="", data=b"x")
+
 
 class TestUploadFile:
     """Test suite for file upload operations."""
@@ -227,6 +256,20 @@ class TestUploadFile:
             file_path = client.storage_path / object_key
             assert file_path.exists()
             assert file_path.read_bytes() == data
+
+    @pytest.mark.asyncio
+    async def test_upload_rejects_non_bytes_or_str(self, tmp_path: Path):
+        """L5: non-bytes/str input must raise, not silently stringify garbage."""
+        from typing import Any
+
+        client = LocalStorageClient(storage_path=str(tmp_path / "storage"))
+        bad_none: Any = None
+        bad_int: Any = 123
+        with pytest.raises(TypeError):
+            await client.upload_file(object_key="bad.txt", data=bad_none)
+        with pytest.raises(TypeError):
+            await client.upload_file(object_key="bad.txt", data=bad_int)
+        assert not (client.storage_path / "bad.txt").exists()
 
 
 class TestURLGeneration:

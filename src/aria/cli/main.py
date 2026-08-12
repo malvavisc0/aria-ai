@@ -39,6 +39,7 @@ from aria.cli import (
     lightpanda,
     models,
     server,
+    storage,
     system,
     users,
     voice,
@@ -73,6 +74,7 @@ app.add_typer(config.app, name="config")
 app.add_typer(server.app, name="server")
 app.add_typer(system.app, name="system")
 app.add_typer(tools_cli.app, name="tools")
+app.add_typer(storage.app, name="storage")
 
 console = Console()
 

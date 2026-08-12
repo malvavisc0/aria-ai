@@ -569,6 +569,35 @@ async def _init_critical_infra() -> None:
     _init_storage_mount()
     logger.info("Initializing database...")
     _init_database()
+    await _sweep_orphaned_storage()
+
+
+async def _sweep_orphaned_storage() -> None:
+    """Reclaim element files on disk with no matching DB row.
+
+    Stranded files accumulate when a thread/element is deleted while the
+    ``objectKey`` column is NULL (the C1 bug). Runs off-thread (sync fs +
+    SQLite I/O) so it never blocks startup. Failures are logged, never
+    fatal — a partial sweep is better than aborting the server.
+    """
+    try:
+        deleted, bytes_reclaimed = await asyncio.to_thread(_run_storage_sweep)
+        if deleted:
+            from aria.cli.storage import _format_size
+
+            logger.info(
+                f"Storage sweep reclaimed {deleted} orphaned file(s) "
+                f"({_format_size(bytes_reclaimed)})"
+            )
+    except Exception as e:
+        logger.warning(f"Storage sweep failed (non-fatal): {e}")
+
+
+def _run_storage_sweep() -> tuple[int, int]:
+    """Thin wrapper so the import stays local to the sweep path."""
+    from aria.cli.storage import sweep_orphans
+
+    return sweep_orphans()
 
 
 def _warn_low_history_ratio() -> None:

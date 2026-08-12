@@ -29,6 +29,7 @@ Example:
     ```
 """
 
+import asyncio
 import json
 import uuid
 from datetime import UTC, datetime
@@ -51,6 +52,31 @@ app = typer.Typer(
 
 console = Console()
 error_console = Console(stderr=True, style="bold red")
+
+
+async def _delete_user_threads(thread_ids: list[str]) -> None:
+    """Delete threads via the data layer so element files are cleaned too.
+
+    Builds a short-lived data layer with the local storage provider (mirroring
+    the web app's wiring) and calls ``delete_thread`` per thread, which removes
+    the stored files (via ``objectKey``) and the DB rows in one pass.
+    """
+    from aria.config.database import SQLite
+    from aria.config.folders import Storage
+    from aria.db.layer import SQLiteSQLAlchemyDataLayer
+    from aria.db.local_storage_client import LocalStorageClient
+
+    storage_client = LocalStorageClient(storage_path=Storage.path, base_url="/storage")
+    layer = SQLiteSQLAlchemyDataLayer(
+        conninfo=SQLite.conn_info,
+        storage_provider=storage_client,
+        show_logger=False,
+    )
+    try:
+        for thread_id in thread_ids:
+            await layer.delete_thread(thread_id)
+    finally:
+        await layer.close()
 
 
 @app.command("list")
@@ -373,9 +399,14 @@ def clean_user_chats(
             )
             typer.confirm("Proceed?", abort=True)
 
-        for thread in list(user.threads):
-            session.delete(thread)
+        # Collect IDs while the session is open (the relationship needs it);
+        # deletion runs via the data layer afterwards so stored element files
+        # are removed too. A raw ORM cascade deletes DB rows but never touches
+        # storage, leaking every uploaded file on disk.
+        thread_ids = [thread.id for thread in user.threads]
 
-        console.print(
-            f"[green]✓[/green] Deleted {thread_count} thread(s) for user '[cyan]{identifier}[/cyan]'"
-        )
+    asyncio.run(_delete_user_threads(thread_ids))
+
+    console.print(
+        f"[green]✓[/green] Deleted {thread_count} thread(s) for user '[cyan]{identifier}[/cyan]'"
+    )

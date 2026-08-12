@@ -137,9 +137,11 @@ class LocalStorageClient(BaseStorageClient):
         if isinstance(data, bytes):
             async with aiofiles.open(file_path, "wb") as f:
                 await f.write(data)
-        else:
+        elif isinstance(data, str):
             async with aiofiles.open(file_path, "w", encoding="utf-8") as f:
-                await f.write(str(data))
+                await f.write(data)
+        else:
+            raise TypeError(f"data must be bytes or str, got {type(data).__name__}")
 
         # Generate URL using the relative object_key
         url = f"{self.base_url}/{object_key}"
