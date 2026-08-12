@@ -91,7 +91,7 @@ jobs:
         with:
           cuda: "12.6.3"
           method: "network"
-          sub-packages: '["nvcc"]'
+          sub-packages: '["nvcc", "libraries-dev"]'
 
       - name: Verify nvcc
         run: nvcc --version
@@ -105,6 +105,7 @@ jobs:
         run: |
           cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build \
             -DGGML_CUDA=ON \
+            -DGGML_CUDA_NO_VMM=ON \
             -DGGML_METAL=OFF \
             -DGGML_NATIVE=OFF \
             -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE \
