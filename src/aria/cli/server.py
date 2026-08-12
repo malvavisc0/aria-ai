@@ -29,7 +29,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Callable
 from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.request import urlopen
 
 import typer
 from rich.box import ROUNDED
@@ -40,6 +40,12 @@ from rich.table import Table
 from aria.config.folders import Debug as DebugConfig
 from aria.preflight import run_preflight_checks
 from aria.server import ServerManager
+from aria.server.lifecycle import (
+    ensure_endpoint_reachable,
+    is_vllm_healthy,
+    stop_server,
+    wait_for_web_health,
+)
 
 app = typer.Typer(
     name="server",
@@ -50,24 +56,6 @@ error_console = Console(stderr=True, style="bold red")
 
 # Health check settings
 HEALTH_CHECK_TIMEOUT = 180  # seconds (vLLM model loading can take 30s+)
-HEALTH_CHECK_INTERVAL = 0.5  # seconds
-
-
-def _authenticated_request(url: str, timeout: float = 5):
-    """Open a URL with the vLLM API key when in remote mode.
-
-    Remote vLLM servers enforce ``--api-key`` auth, so every request
-    must carry ``Authorization: Bearer <key>``.  Local mode leaves the
-    key unset (``sk-aria`` default) and the local server doesn't check,
-    so the header is harmless.
-    """
-    from aria.config.api import Vllm as VllmConfig
-
-    headers = {}
-    if VllmConfig.remote and VllmConfig.api_key:
-        headers["Authorization"] = f"Bearer {VllmConfig.api_key}"
-    req = Request(url, headers=headers)
-    return urlopen(req, timeout=timeout)
 
 
 def _print_startup_banner(host: str, port: int, background: bool = False) -> None:
@@ -205,37 +193,8 @@ def _wait_for_health(
     *,
     process_alive: Callable[[], bool] | None = None,
 ) -> bool:
-    """Wait for server to become healthy.
-
-    Args:
-        host: Server host address.
-        port: Server port.
-        timeout: Maximum seconds to wait.
-        process_alive: Optional callable that returns False if the
-            subprocess has died, enabling early exit instead of
-            polling until the full timeout expires.
-
-    Returns:
-        True if server is healthy, False if timeout or process died.
-    """
-    import time
-
-    url = f"http://{host}:{port}/health"
-    deadline = time.time() + timeout
-
-    while time.time() < deadline:
-        # Early exit if the subprocess crashed
-        if process_alive is not None and not process_alive():
-            return False
-        try:
-            with urlopen(url, timeout=2) as resp:
-                if resp.status == 200:
-                    return True
-        except (URLError, OSError):
-            pass
-        time.sleep(HEALTH_CHECK_INTERVAL)
-
-    return False
+    """Wait for the web UI to become healthy (delegates to shared lifecycle)."""
+    return wait_for_web_health(host, port, timeout, process_alive=process_alive)
 
 
 @app.command("run")
@@ -277,23 +236,7 @@ def server_run():
 
 def _is_vllm_healthy() -> bool:
     """Check if the vLLM chat server is responding to health checks."""
-    from aria.config.api import Vllm as VllmConfig
-    from aria.config.models import Chat
-
-    if VllmConfig.remote:
-        # In remote mode, check the configured API URL directly
-        try:
-            with _authenticated_request(f"{Chat.api_url}/models", timeout=5) as resp:
-                return resp.status == 200
-        except (URLError, OSError):
-            return False
-
-    port = Chat.get_port()
-    try:
-        with urlopen(f"http://localhost:{port}/health", timeout=2) as resp:
-            return resp.status == 200
-    except (URLError, OSError):
-        return False
+    return is_vllm_healthy()
 
 
 def _ensure_lightpanda_installed() -> None:
@@ -401,116 +344,20 @@ def _ensure_models_downloaded() -> None:
         _download_model(alias, raw_value, path, max_retries=3)
 
 
-def _has_cuda() -> bool:
-    """Check if CUDA-capable hardware is available."""
-    try:
-        from aria.helpers.nvidia import get_total_vram_mb
-
-        return get_total_vram_mb() > 0
-    except Exception:
-        return False
-
-
-def _check_remote_endpoint() -> None:
-    from aria.config.models import Chat
-
-    try:
-        with _authenticated_request(f"{Chat.api_url}/models", timeout=10) as resp:
-            if resp.status == 200:
-                console.print("[green]✓[/green] Remote OpenAI endpoint reachable")
-                return
-    except (URLError, OSError) as e:
-        error_console.print(
-            f"[red]✗[/red] Remote OpenAI endpoint unreachable: {Chat.api_url}\n  {e}"
-        )
-        raise typer.Exit(1)
-
-
-def _check_cuda_available() -> None:
-    if _has_cuda():
-        return
-    error_console.print(
-        "[red]✗[/red] No CUDA-capable GPU detected. "
-        "Local vLLM requires NVIDIA CUDA drivers.\n"
-        "  Set [bold]ARIA_VLLM_REMOTE=true[/bold] in your .env "
-        "to connect to a remote OpenAI-compatible endpoint."
-    )
-    raise typer.Exit(1)
-
-
-def _is_local_vllm_healthy() -> bool:
-    from aria.config.models import Chat
-
-    port = Chat.get_port()
-    try:
-        with urlopen(f"http://localhost:{port}/health", timeout=3) as resp:
-            return bool(resp.status == 200)
-    except (URLError, OSError):
-        return False
-
-
-def _wait_for_vllm_healthy(timeout: int = 120) -> bool:
-    import time
-
-    from aria.config.models import Chat
-
-    port = Chat.get_port()
-    deadline = time.time() + timeout
-    console.print("[dim]Waiting for vLLM to become healthy...[/dim]")
-    while time.time() < deadline:
-        try:
-            with urlopen(f"http://localhost:{port}/health", timeout=3) as resp:
-                if resp.status == 200:
-                    return True
-        except (URLError, OSError):
-            pass
-        time.sleep(HEALTH_CHECK_INTERVAL)
-    return False
-
-
-def _start_local_vllm() -> None:
-    from aria.server.vllm import VllmServerManager
-
-    console.print("[dim]Starting vLLM server...[/dim]")
-    try:
-        VllmServerManager().start_all()
-    except Exception as e:
-        error_console.print(f"[red]✗[/red] Failed to start vLLM: {e}")
-        raise typer.Exit(1)
-
-
 def _ensure_endpoint_reachable() -> None:
-    """Verify the OpenAI-compatible endpoint is reachable.
+    """Verify the OpenAI-compatible endpoint is reachable before serving.
 
-    This is the final gate before starting the server. If the endpoint
-    is not healthy, the server will not start.
-
-    - Remote mode: test the configured endpoint URL (fail-fast).
-    - Local mode with CUDA: start vLLM if needed, then verify health.
-    - Local mode without CUDA: fail with guidance to use remote mode.
+    Delegates to the shared lifecycle: remote mode validates the
+    configured endpoint (fail-fast); local mode requires CUDA, starts
+    vLLM if unhealthy, and waits for health.
     """
-    from aria.config.api import Vllm as VllmConfig
-
-    if VllmConfig.remote:
-        _check_remote_endpoint()
-        return
-
-    _check_cuda_available()
-
-    if _is_local_vllm_healthy():
-        console.print("[green]✓[/green] OpenAI endpoint already running")
-        return
-
-    _start_local_vllm()
-
-    if _wait_for_vllm_healthy():
-        console.print("[green]✓[/green] OpenAI endpoint healthy")
-        return
-
-    error_console.print(
-        "[red]✗[/red] OpenAI endpoint unhealthy after vLLM startup. "
-        "Check vLLM logs for details."
+    result = ensure_endpoint_reachable(
+        progress=lambda m: console.print(f"[dim]{m}[/dim]")
     )
+    if result.ok:
+        console.print("[green]✓[/green] OpenAI endpoint ready")
+        return
+    error_console.print(f"[red]✗[/red] {result.error}")
     raise typer.Exit(1)
 
 
@@ -635,30 +482,21 @@ def server_stop(
     unless --skip-vllm is specified.
     """
     if skip_vllm:
-        from aria.config.folders import Data as DataConfig
-
-        sentinel = DataConfig.path / "skip_vllm_shutdown"
-        sentinel.touch()
         console.print("[dim]vLLM servers will be left running[/dim]")
 
-    # Snapshot vLLM PIDs BEFORE stopping the web server, because the
-    # Chainlit shutdown handler may clear the PID file during teardown.
-    vllm_pids: dict[str, int] = {}
-    if not skip_vllm:
-        from aria.server.vllm import VllmServerManager
+    result = stop_server(
+        skip_vllm=skip_vllm,
+        progress=lambda m: console.print(f"[dim]{m}[/dim]"),
+    )
 
-        vllm_pids = VllmServerManager()._pids.copy()
-
-    manager = ServerManager()
-    web_stopped = manager.stop()
-    if web_stopped:
+    if result.web_stopped:
         console.print("[green]✓[/green] Server stopped")
     else:
         console.print("[yellow]Server is not running[/yellow]")
 
-    # Always attempt to stop vLLM — even if the web server was already dead,
-    # vLLM may still be alive as an orphan process.
-    if not skip_vllm:
+    if result.vllm_skipped:
+        pass
+    else:
         from aria.config.api import Vllm as VllmConfig
 
         if VllmConfig.remote:
@@ -666,20 +504,9 @@ def server_stop(
                 "[dim]Remote vLLM mode — local server management skipped[/dim]"
             )
         else:
-            from aria.server.vllm import VllmServerManager
-
-            vllm = VllmServerManager()
-            # Merge pre-snapshot PIDs with any currently tracked PIDs
-            live_pids = {**vllm_pids, **vllm._pids}
-            if live_pids:
-                vllm._pids = live_pids
-            # Always call stop_all — it now scans for orphaned
-            # processes even when the PID file is stale or empty.
-            console.print("[dim]Stopping vLLM servers...[/dim]")
-            vllm.stop_all()
             console.print("[green]✓[/green] vLLM servers stopped")
 
-    if not web_stopped and not vllm_pids:
+    if not result.web_stopped and not result.vllm_had_pids:
         raise typer.Exit(1)
 
 

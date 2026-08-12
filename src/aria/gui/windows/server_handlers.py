@@ -18,21 +18,84 @@ from aria.server import ServerManager
 
 
 class _StopWorker(QObject):
-    """Background worker that calls ServerManager.stop() off the GUI thread."""
+    """Background worker that stops the web UI and vLLM off the GUI thread.
+
+    Delegates to ``aria.server.lifecycle.stop_server`` so the GUI mirrors
+    the CLI: snapshot vLLM PIDs, stop the web UI, then clean up vLLM
+    (including orphaned processes).
+    """
 
     finished = Signal()
     failed = Signal(str)
+    progress = Signal(str)
 
-    def __init__(self, server_manager):
+    def run(self):
+        try:
+            from aria.server.lifecycle import stop_server
+
+            stop_server(progress=self.progress.emit)
+            self.finished.emit()
+        except Exception as exc:  # pragma: no cover - defensive UI path
+            self.failed.emit(str(exc))
+
+
+class _StartupWorker(QObject):
+    """Background worker that runs the full startup sequence off the GUI thread.
+
+    Mirrors ``aria cli server start``: ensure the AI endpoint is reachable
+    (remote: validate; local: start vLLM and wait for health), start the
+    Chainlit web UI, wait for it to become healthy, then verify vLLM as a
+    safety net. Progress is reported via ``progress`` so the GUI can show
+    it in the status bar.
+    """
+
+    finished = Signal()
+    failed = Signal(str)
+    progress = Signal(str)
+
+    def __init__(self, server_manager: ServerManager):
         super().__init__()
         self._server_manager = server_manager
 
     def run(self):
         try:
-            self._server_manager.stop()
+            self._run()
             self.finished.emit()
         except Exception as exc:  # pragma: no cover - defensive UI path
             self.failed.emit(str(exc))
+
+    def _run(self) -> None:
+        from aria.server.lifecycle import (
+            ensure_endpoint_reachable,
+            ensure_vllm_running,
+            wait_for_web_health,
+        )
+
+        result = ensure_endpoint_reachable(progress=self.progress.emit)
+        if not result.ok:
+            raise RuntimeError(result.error or "AI endpoint unreachable")
+
+        if self._server_manager.is_running():
+            return
+
+        self.progress.emit("Starting Aria server\u2026")
+        if not self._server_manager.start():
+            raise RuntimeError("Failed to start server process")
+
+        self.progress.emit("Waiting for server to be ready\u2026")
+        if not wait_for_web_health(
+            self._server_manager.host,
+            self._server_manager.port,
+            180,
+            process_alive=self._server_manager.is_running,
+        ):
+            error = ServerManager.get_startup_error() or (
+                "Server failed to become healthy within the startup timeout."
+            )
+            self._server_manager.stop()
+            raise RuntimeError(error)
+
+        ensure_vllm_running(progress=self.progress.emit)
 
 
 class _EndpointValidationWorker(QObject):
@@ -115,6 +178,7 @@ class ServerHandlersMixin:
         self._server_manager = ServerManager()
         self._preflight_result = None
         self._preflight_running = False
+        self._is_starting = False  # Track starting state for UI feedback
         self._is_stopping = False  # Track stopping state for UI feedback
         self._stopping_since: float = 0.0  # Timestamp for timeout
         self._was_healthy = False  # Track crash detection
@@ -231,46 +295,53 @@ class ServerHandlersMixin:
     def on_start_server(self):
         """Handle Start button click.
 
-        Starts the Chainlit webserver as a background subprocess.
-        The llama-server inference processes are started automatically
-        by the web UI via the Chainlit ``on_app_startup`` lifecycle hook.
-
-        Validates the AI endpoint in a background thread before starting.
+        Runs the full startup sequence in a background worker, mirroring
+        ``aria cli server start``: ensure the AI endpoint is reachable
+        (remote: validate; local: start vLLM and wait for health), start
+        the Chainlit web UI, wait for it to become healthy, then verify
+        vLLM as a safety net. Progress is shown in the status bar.
         """
         self.ui.pushButton_ServiceStart.setEnabled(False)
-        self.statusBar().showMessage("Validating AI endpoint…")
-        self._run_endpoint_validation(self._on_start_validation_result)
-
-    def _on_start_validation_result(self, ok: bool, message: str):
-        """Handle endpoint validation result before starting the server."""
-        if not ok:
-            self.ui.pushButton_ServiceStart.setEnabled(True)
-            QMessageBox.warning(
-                self,
-                "Cannot Start Server",
-                f"AI endpoint validation failed:\n\n{message}\n\n"
-                "Check your connection settings and try again.",
-            )
-            return
-
+        self._is_starting = True
         self.statusBar().showMessage("Starting Aria server\u2026")
 
-        started = self._server_manager.start()
-        if not started:
-            QMessageBox.warning(
-                self,
-                "Already Running",
-                "The server is already running.",
-            )
+        self._startup_thread = QThread()
+        self._startup_worker = _StartupWorker(self._server_manager)
+        self._startup_worker.moveToThread(self._startup_thread)
+        self._startup_thread.started.connect(self._startup_worker.run)
+        self._startup_worker.progress.connect(self._on_startup_progress)
+        self._startup_worker.finished.connect(self._on_startup_finished)
+        self._startup_worker.failed.connect(self._on_startup_failed)
+        self._startup_worker.finished.connect(self._startup_thread.quit)
+        self._startup_worker.failed.connect(self._startup_thread.quit)
+        self._startup_worker.finished.connect(self._startup_worker.deleteLater)
+        self._startup_worker.failed.connect(self._startup_worker.deleteLater)
+        self._startup_thread.finished.connect(self._startup_thread.deleteLater)
+        self._startup_thread.start()
 
+    def _on_startup_progress(self, message: str) -> None:
+        """Show startup progress in the status bar."""
+        self.statusBar().showMessage(message)
+
+    def _on_startup_finished(self) -> None:
+        """Called when the startup worker completes successfully."""
+        self._is_starting = False
+        self.statusBar().clearMessage()
+        self._update_server_status()
+
+    def _on_startup_failed(self, error: str) -> None:
+        """Called when the startup worker encounters an error."""
+        self._is_starting = False
+        self.ui.pushButton_ServiceStart.setEnabled(True)
+        self.statusBar().showMessage(f"Start failed: {error}", 10000)
+        QMessageBox.warning(self, "Start Failed", error)
         self._update_server_status()
 
     def on_stop_server(self):
         """Handle Stop button click.
 
-        Stops the Chainlit webserver off the GUI thread to avoid blocking.
-        The llama-server inference processes are stopped automatically by
-        the web UI via the Chainlit ``on_app_shutdown`` lifecycle hook.
+        Stops the web UI and vLLM (with orphan cleanup) off the GUI thread
+        via the shared lifecycle, mirroring ``aria cli server stop``.
         """
         # Confirm before stopping a healthy server
         status = self._server_manager.get_status()
@@ -294,9 +365,10 @@ class ServerHandlersMixin:
         self.statusBar().showMessage("Stopping Aria server\u2026")
 
         self._stop_thread = QThread()
-        self._stop_worker = _StopWorker(self._server_manager)
+        self._stop_worker = _StopWorker()
         self._stop_worker.moveToThread(self._stop_thread)
         self._stop_thread.started.connect(self._stop_worker.run)
+        self._stop_worker.progress.connect(self._on_stop_progress)
         self._stop_worker.finished.connect(self._stop_thread.quit)
         self._stop_worker.failed.connect(self._stop_thread.quit)
         self._stop_worker.finished.connect(self._stop_worker.deleteLater)
@@ -305,6 +377,10 @@ class ServerHandlersMixin:
         self._stop_thread.finished.connect(self._on_stop_finished)
         self._stop_worker.failed.connect(self._on_stop_failed)
         self._stop_thread.start()
+
+    def _on_stop_progress(self, message: str) -> None:
+        """Show stop progress in the status bar."""
+        self.statusBar().showMessage(message)
 
     def _on_stop_finished(self):
         """Called when the stop worker thread finishes."""
@@ -391,6 +467,9 @@ class ServerHandlersMixin:
             return "\u25cf Starting\u2026", "warning"
 
         # Idle / stopped
+        if self._is_starting:
+            # Worker owns the status bar while starting; don't overwrite it.
+            return "\u25cf Starting\u2026", "warning"
         if self._is_stopping:
             self._is_stopping = False
             self._stopping_since = 0.0
@@ -441,7 +520,7 @@ class ServerHandlersMixin:
             self._is_stopping = False
             self._stopping_since = 0.0
 
-        if self._is_stopping:
+        if self._is_starting or self._is_stopping:
             self.ui.pushButton_ServiceStart.setEnabled(False)
             self.ui.pushButton_ServiceStop.setEnabled(False)
         else:

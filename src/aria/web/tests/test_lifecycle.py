@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from aria.web.lifecycle import on_app_startup_handler
+from aria.web.lifecycle import _init_vllm_servers, on_app_startup_handler
 from aria.web.state import _state
 
 
@@ -43,3 +43,40 @@ async def test_startup_fails_when_vllm_fails(tmp_path: Path) -> None:
     cleanup.assert_awaited_once()
     assert _state.startup_complete is False
     assert _state.startup_event.is_set() is False
+
+
+def test_init_vllm_adopts_after_transient_health_miss() -> None:
+    """A pre-started healthy vLLM must be adopted, not restarted.
+
+    The adopt probe may miss once under GPU load; ``_init_vllm_servers``
+    retries before falling back to ``start_all()``.  A single transient
+    timeout must never trigger a destructive restart (which would SIGTERM
+    a working — possibly D-state — process).
+    """
+    probes = [False, False, True]
+
+    with (
+        patch("aria.web.lifecycle.VllmServerManager") as MockMgr,
+        patch(
+            "aria.web.lifecycle._is_chat_vllm_healthy",
+            side_effect=probes,
+        ),
+        patch("aria.web.lifecycle.time.sleep"),
+    ):
+        _init_vllm_servers()
+
+    mock_manager = MockMgr.return_value
+    mock_manager.start_all.assert_not_called()
+    assert _state.vllm_manager is mock_manager
+
+
+def test_init_vllm_restarts_when_never_healthy() -> None:
+    """A genuinely absent vLLM falls back to ``start_all()`` after retries."""
+    with (
+        patch("aria.web.lifecycle.VllmServerManager") as MockMgr,
+        patch("aria.web.lifecycle._is_chat_vllm_healthy", return_value=False),
+        patch("aria.web.lifecycle.time.sleep"),
+    ):
+        _init_vllm_servers()
+
+    MockMgr.return_value.start_all.assert_called_once()

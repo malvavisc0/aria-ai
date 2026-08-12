@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -186,17 +187,39 @@ def _is_chat_vllm_healthy(timeout: float = 2.0) -> bool:
         return False
 
 
+# A healthy vLLM can briefly miss a 2s /health probe under GPU load (e.g.
+# while the web UI's concurrent embeddings load hammers the device).  Tear-down
+# on a single transient miss would SIGTERM a working server — and if it is
+# mid-GPU-op (uninterruptible D state) the kill fails, orphaning it.  Probe a
+# few times before deciding the pre-started vLLM is actually gone.
+_ADOPT_PROBE_RETRIES = 5
+_ADOPT_PROBE_INTERVAL = 2.0
+
+
+def _wait_for_chat_vllm_healthy() -> bool:
+    """Retry the chat vLLM health probe before falling back to start_all."""
+    for _ in range(_ADOPT_PROBE_RETRIES):
+        if _is_chat_vllm_healthy():
+            return True
+        time.sleep(_ADOPT_PROBE_INTERVAL)
+    return False
+
+
 def _init_vllm_servers() -> None:
     """Start all configured vLLM inference servers.
 
     If the chat vLLM server is already healthy on the configured port
-    (e.g. started by the CLI before launching the web UI), adopt its
+    (e.g. started by the CLI or GUI before launching the web UI), adopt its
     tracked PIDs and skip ``start_all()``. This prevents the preflight
     port check from killing the healthy instance and reloading the
     model a second time (~12s of wasted work + log-file overwrite).
+
+    The adopt decision retries the health probe a few times: a single
+    transient timeout (common under GPU load during startup) must not
+    trigger a destructive restart of a working server.
     """
     _state.vllm_manager = VllmServerManager()
-    if _is_chat_vllm_healthy():
+    if _wait_for_chat_vllm_healthy():
         logger.info(
             "vLLM chat server already healthy on port "
             f"{ChatConfig.get_port()} — adopting existing process, "
