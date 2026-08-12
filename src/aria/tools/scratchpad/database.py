@@ -156,24 +156,6 @@ class ScratchpadDatabase:
             logger.debug(f"Scratchpad cleared {count} items for agent {agent_id}")
             return count
 
-    def cleanup_old_items(self, days: int = 30) -> int:
-        """Permanently delete inactive items older than specified days."""
-        from datetime import timedelta
-
-        from sqlalchemy import delete as sa_delete
-
-        with self.get_session() as session:
-            cutoff = datetime.now(UTC) - timedelta(days=days)
-            stmt = sa_delete(ScratchpadItemModel).where(
-                ScratchpadItemModel.is_active.is_(False),
-                ScratchpadItemModel.updated_at < cutoff,
-            )
-            result: CursorResult = session.execute(stmt)  # type: ignore[assignment]
-            count = result.rowcount
-            session.commit()
-            logger.info(f"Cleaned up {count} old scratchpad items")
-            return count
-
 
 def get_database() -> ScratchpadDatabase:
     """Get the scratchpad database singleton."""

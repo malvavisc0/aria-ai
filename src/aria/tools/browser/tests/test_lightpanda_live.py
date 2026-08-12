@@ -167,21 +167,7 @@ async def test_navigate_then_click(manager: LightpandaManager):
 
 
 # ---------------------------------------------------------------------------
-# 6. get_page_content on current page
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_get_page_content(manager: LightpandaManager):
-    """Navigate, then get page content without re-navigating."""
-    await manager.navigate("https://example.com", tool="visit_url", reason="setup")
-    result = await manager.get_page_content(tool="get_page_content", reason="read")
-    assert "Example Domain" in result
-    print(f"\n✓ get_page_content: {len(result)} chars")
-
-
-# ---------------------------------------------------------------------------
-# 7. Navigate to invalid URL (error handling)
+# 6. Navigate to invalid URL (error handling)
 # ---------------------------------------------------------------------------
 
 

@@ -1,19 +1,21 @@
 """Tests for shell execution functions."""
 
 import json
+import platform
 import tempfile
 from pathlib import Path
 
 import pytest
 
 from aria.tools.shell import shell
-from aria.tools.shell.constants import IS_WINDOWS
 from aria.tools.shell.exceptions import CommandBlockedError
 from aria.tools.shell.validation import (
     _extract_all_command_names,
     _is_blocked_command,
     _validate_command,
 )
+
+IS_WINDOWS = platform.system().lower() == "windows"
 
 
 class TestValidateCommand:

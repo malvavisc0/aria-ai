@@ -17,8 +17,6 @@ import httpx
 from loguru import logger
 
 from aria.tools import (
-    tool_error_response,
-    tool_success_response,
     utc_timestamp,
 )
 from aria.tools.search.constants import (
@@ -254,20 +252,6 @@ def _markitdown(content: str | bytes, content_type: str, url: str) -> str:
             temp_file.write(content)
         result = MarkItDown().convert(temp_file_path).text_content
     return _clean_text(result)
-
-
-def _create_response(tool: str, reason: str, file_path: str, metadata: dict) -> str:
-    """Create a success JSON response."""
-    return tool_success_response(
-        tool,
-        reason,
-        {"file_path": file_path, "metadata": metadata},
-    )
-
-
-def _create_error_response(tool: str, reason: str, error_message: str) -> str:
-    """Create an error JSON response."""
-    return tool_error_response(tool, reason, RuntimeError(error_message))
 
 
 def _filename_and_ext(filename: str, url: str, content_type: str) -> tuple[str, str]:

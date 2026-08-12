@@ -10,7 +10,6 @@ import pytest
 
 from aria.helpers.nvidia import (
     GPUMetadata,
-    check_gpu_memory_usage,
     check_nvidia_smi_available,
     detect_gpu_count,
     detect_gpus_with_details,
@@ -85,27 +84,6 @@ class TestNvidiaIntegration:
             # Total should be divisible by GPU count for identical GPUs
             vram_per_gpu = total_vram // gpu_count
             assert vram_per_gpu > 0
-
-    def test_check_gpu_memory_usage_with_valid_index(self):
-        """Test memory usage check with valid GPU index."""
-        # Test first GPU (index 0)
-        result_low_threshold = check_gpu_memory_usage(0, 100.0)
-        result_high_threshold = check_gpu_memory_usage(0, 0.0)
-
-        # With 100% threshold, should return True (usage < 100%)
-        # unless GPU is completely full
-        assert isinstance(result_low_threshold, bool)
-
-        # With 0% threshold, should return False (usage >= 0%)
-        assert result_high_threshold is False
-
-    def test_check_gpu_memory_usage_with_invalid_index(self):
-        """Test memory usage check with invalid GPU index."""
-        gpu_count = detect_gpu_count()
-
-        # Test with index beyond available GPUs
-        result = check_gpu_memory_usage(gpu_count + 10, 50.0)
-        assert result is False
 
     def test_detect_nvlink_returns_tuple(self):
         """Test NVLink detection returns proper tuple."""
@@ -247,30 +225,6 @@ class TestNvidiaIntegration:
         assert indices == expected_indices
 
 
-class TestNvidiaIntegrationEdgeCases:
-    """Edge case integration tests."""
-
-    def test_input_validation_still_works(self):
-        """Verify input validation works even with real hardware."""
-        # Negative GPU index should still return False
-        assert check_gpu_memory_usage(-1, 50.0) is False
-
-        # Invalid threshold should still return False
-        assert check_gpu_memory_usage(0, -10.0) is False
-        assert check_gpu_memory_usage(0, 150.0) is False
-
-    def test_boundary_thresholds(self):
-        """Test boundary threshold values."""
-        # 0% threshold
-        result_0 = check_gpu_memory_usage(0, 0.0)
-        assert result_0 is False  # Any usage > 0 will fail
-
-        # 100% threshold
-        result_100 = check_gpu_memory_usage(0, 100.0)
-        # Should be True unless GPU is exactly 100% full
-        assert isinstance(result_100, bool)
-
-
 def print_gpu_info():
     """Utility function to print GPU information (not a test)."""
     print("\n" + "=" * 60)
@@ -294,12 +248,6 @@ def print_gpu_info():
     print(f"\nNVLink detected: {has_nvlink}")
     if bond_type:
         print(f"Bond type: {bond_type}")
-
-    print("\nMemory usage check (50% threshold):")
-    for i in range(detect_gpu_count()):
-        below_threshold = check_gpu_memory_usage(i, 50.0)
-        status = "✓ Below" if below_threshold else "✗ Above"
-        print(f"  GPU {i}: {status} 50% threshold")
 
     print("\nDetailed GPU Information:")
     gpus = detect_gpus_with_details()

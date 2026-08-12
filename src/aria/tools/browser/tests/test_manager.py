@@ -184,51 +184,6 @@ async def test_click_returns_recovery_error_after_crash() -> None:
     assert payload["error"]["recoverable"] is True
 
 
-@pytest.mark.asyncio
-async def test_get_page_content_returns_error_json_when_unavailable() -> None:
-    manager = _make_manager()
-    manager._ensure_page = AsyncMock(return_value=False)
-
-    result = await manager.get_page_content(tool="t", reason="i")
-    payload = json.loads(result)
-
-    assert payload["status"] == "error"
-    assert payload["error"]["message"] == "Browser not available"
-
-
-@pytest.mark.asyncio
-async def test_get_page_content_returns_cleaned_text() -> None:
-    manager = _make_manager()
-    page = Mock()
-    page.evaluate = AsyncMock(return_value="  Line 1\n\n   Line 2  ")
-
-    manager._process = Mock()
-    manager._browser = Mock()
-    manager._page = page
-    manager._ensure_page = AsyncMock(return_value=True)
-
-    result = await manager.get_page_content()
-
-    assert result == "Line 1\nLine 2"
-
-
-@pytest.mark.asyncio
-async def test_get_page_content_falls_back_to_html_on_evaluate_error() -> None:
-    manager = _make_manager()
-    page = Mock()
-    page.evaluate = AsyncMock(side_effect=RuntimeError("eval failed"))
-    page.content = AsyncMock(return_value="<html><body>fallback</body></html>")
-
-    manager._process = Mock()
-    manager._browser = Mock()
-    manager._page = page
-    manager._ensure_page = AsyncMock(return_value=True)
-
-    result = await manager.get_page_content()
-
-    assert result == "<html><body>fallback</body></html>"
-
-
 def test_navigation_failed_on_empty_content() -> None:
     assert LightpandaManager._is_navigation_failed("", "https://example.com")
     assert LightpandaManager._is_navigation_failed("   ", "https://example.com")

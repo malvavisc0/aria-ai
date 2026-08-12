@@ -317,51 +317,6 @@ def _capture_execution_output(
     return stdout_path, stderr_path
 
 
-def _execute_without_capture(
-    code: str,
-    safe_globals: dict[str, Any],
-    timeout: int,
-    filename: str = "<string>",
-    argv: list[str] | None = None,
-) -> None:
-    """Execute code without capturing output.
-
-    Args:
-        code: Python code to execute
-        safe_globals: Safe global namespace
-        timeout: Execution timeout in seconds
-        filename: Filename for context (default: "<string>")
-        argv: Custom sys.argv for the script (default: [filename])
-
-    Raises:
-        TimeoutError: If execution exceutes timeout
-        Exception: Any exception raised during execution
-
-    Note:
-        Uses the same dictionary for both global and local namespaces
-        to ensure imports work correctly.
-    """
-    import sys
-
-    # Save original sys.argv and set clean argv for execution
-    original_argv = sys.argv.copy()
-
-    # Set sys.argv to custom value or default to script name only
-    if argv is None:
-        sys.argv = [filename]
-    else:
-        sys.argv = argv.copy()
-
-    try:
-        with _time_limit(timeout):
-            # FIX: Use same dict for global and local namespaces
-            # This ensures imports bind correctly to the namespace
-            exec(code, safe_globals, safe_globals)
-    finally:
-        # Always restore original sys.argv
-        sys.argv = original_argv
-
-
 def _validate_timeout(timeout: int) -> None:
     """Validate timeout parameter.
 

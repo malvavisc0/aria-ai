@@ -109,45 +109,6 @@ class PlannerDatabase:
                 "steps": steps,
             }
 
-    def get_active_plan(self, agent_id: str) -> dict | None:
-        """Get the most recent active plan for an agent."""
-        with self.get_session() as session:
-            stmt = (
-                select(PlanModel)
-                .where(
-                    PlanModel.agent_id == agent_id,
-                    PlanModel.is_active.is_(True),
-                )
-                .order_by(PlanModel.updated_at.desc())
-            )
-            plan_model = session.execute(stmt).scalar_one_or_none()
-
-            if not plan_model:
-                return None
-
-            steps = []
-            for step in plan_model.steps:
-                steps.append(
-                    {
-                        "id": step.step_id,
-                        "description": step.description,
-                        "status": step.status,
-                        "result": step.result,
-                        "created_at": step.created_at.isoformat(),
-                        "updated_at": step.updated_at.isoformat(),
-                    }
-                )
-
-            return {
-                "plan_id": plan_model.id,
-                "agent_id": plan_model.agent_id,
-                "task": plan_model.task,
-                "created_at": plan_model.created_at.isoformat(),
-                "updated_at": plan_model.updated_at.isoformat(),
-                "is_active": plan_model.is_active,
-                "steps": steps,
-            }
-
     def update_step(
         self,
         plan_id: str,

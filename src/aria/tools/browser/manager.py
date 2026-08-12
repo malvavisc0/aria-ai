@@ -540,29 +540,6 @@ class LightpandaManager:
             "close_page", _do_close, tool=tool, reason=reason
         )
 
-    async def get_page_content(
-        self,
-        *,
-        tool: str = "",
-        reason: str = "",
-    ) -> str:
-        """Get current page content as clean text.
-
-        Args:
-            tool: Tool name for the response envelope.
-            reason: Agent reason for the response envelope.
-
-        Returns:
-            Page content as text, or error JSON if unavailable.
-        """
-
-        async def _do_get_content(page: Page) -> str:
-            return await self._get_text_content(page)
-
-        return await self._with_recovery(
-            "get_page_content", _do_get_content, tool=tool, reason=reason
-        )
-
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

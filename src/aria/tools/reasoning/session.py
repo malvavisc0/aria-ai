@@ -167,132 +167,6 @@ class ReasoningSession:
             "timestamp": entry["timestamp"],
         }
 
-    def _scratchpad_set(
-        self, key: str, value: str | None, reason: str, now: str
-    ) -> dict[str, Any]:
-        if value is None:
-            return {
-                "status": "error",
-                "error": {
-                    "code": "VALUE_REQUIRED",
-                    "message": "Value required for set operation",
-                },
-            }
-        self.scratchpad[key] = {"value": value, "updated": now, "reason": reason}
-        self.persist_scratchpad_item(key, self.scratchpad[key])
-        self.persist_tool_event(
-            tool_name="use_scratchpad",
-            reason=reason,
-            timestamp=now,
-            payload={"tool": "set", "key": key},
-        )
-        return {
-            "tool": "set",
-            "key": key,
-            "value": value,
-            "reason": reason,
-            "timestamp": now,
-        }
-
-    def _scratchpad_get(self, key: str, now: str) -> dict[str, Any]:
-        if key in self.scratchpad:
-            return {
-                "tool": "get",
-                "key": key,
-                "value": self.scratchpad[key]["value"],
-                "timestamp": now,
-            }
-        return {
-            "status": "error",
-            "error": {
-                "code": "KEY_NOT_FOUND",
-                "message": f"Key '{key}' not found",
-            },
-        }
-
-    def _scratchpad_list(self, now: str) -> dict[str, Any]:
-        if not self.scratchpad:
-            return {"tool": "list", "items": [], "timestamp": now}
-        return {
-            "tool": "list",
-            "items": [
-                {
-                    "key": k,
-                    "value": v.get("value"),
-                    "updated": v.get("updated"),
-                    "reason": v.get("reason"),
-                }
-                for k, v in self.scratchpad.items()
-            ],
-            "timestamp": now,
-        }
-
-    def _scratchpad_clear(self, key: str, reason: str, now: str) -> dict[str, Any]:
-        if key == "all":
-            self.scratchpad.clear()
-            self.clear_scratchpad_db()
-            self.persist_tool_event(
-                tool_name="use_scratchpad",
-                reason=reason,
-                timestamp=now,
-                payload={"tool": "clear", "key": "all"},
-            )
-            return {"tool": "clear", "key": "all", "timestamp": now}
-        if key not in self.scratchpad:
-            return {
-                "status": "error",
-                "error": {
-                    "code": "KEY_NOT_FOUND",
-                    "message": f"Key '{key}' not found for clear operation",
-                },
-            }
-        self.scratchpad.pop(key, None)
-        self.delete_scratchpad_item_db(key)
-        self.persist_tool_event(
-            tool_name="use_scratchpad",
-            reason=reason,
-            timestamp=now,
-            payload={"tool": "clear", "key": key},
-        )
-        return {"tool": "clear", "key": key, "timestamp": now}
-
-    def scratchpad_operation(
-        self,
-        reason: str,
-        key: str,
-        operation: str = "get",
-        value: str | None = None,
-    ) -> dict[str, Any]:
-        """
-        Simple working memory scratchpad.
-
-        Args:
-            key (str): The key to operate on (or "all" for clear operation)
-            operation (str): One of "get", "set", "list", "clear"
-            value (str): Value to set (required for "set" operation)
-
-        Returns:
-            Dict[str, Any]: JSON-compatible scratchpad operation result
-        """
-        now = datetime.now(UTC).isoformat()
-        match operation:
-            case "set":
-                return self._scratchpad_set(key, value, reason, now)
-            case "get":
-                return self._scratchpad_get(key, now)
-            case "list":
-                return self._scratchpad_list(now)
-            case "clear":
-                return self._scratchpad_clear(key, reason, now)
-            case _:
-                return {
-                    "status": "error",
-                    "error": {
-                        "code": "UNSUPPORTED_OPERATION",
-                        "message": "Supported operations: get, set, list, clear",
-                    },
-                }
-
     def evaluate(self, reason: str) -> dict[str, Any]:
         """
         Quick quality assessment of the reasoning chain.
@@ -368,32 +242,6 @@ class ReasoningSession:
             "timestamp": now,
         }
 
-    def reset(self, reason: str) -> dict[str, Any]:
-        """
-        Clear all reasoning data in this session.
-
-        Returns:
-            Dict[str, Any]: JSON-compatible reset confirmation
-        """
-        self.steps.clear()
-        self.reflections.clear()
-        self.scratchpad.clear()
-        self.confidence_trajectory.clear()
-        # Persist reset to database
-        self.reset_db()
-        now = datetime.now(UTC).isoformat()
-        self.persist_tool_event(
-            tool_name="reset_reasoning",
-            reason=reason,
-            timestamp=now,
-            payload=None,
-        )
-        return {
-            "message": "Reasoning session reset successfully",
-            "reason": reason,
-            "timestamp": now,
-        }
-
     def _detect_biases(self, text: str) -> list[str]:
         """
         Detect potential cognitive biases in text.
@@ -459,17 +307,6 @@ class ReasoningSession:
         if self._db:
             self._db.save_reflection(self.id, reflection)
 
-    def persist_scratchpad_item(self, key: str, value_dict: dict) -> None:
-        """Persist a scratchpad item to database."""
-        if self._db:
-            self._db.save_scratchpad_item(
-                self.id,
-                key,
-                value_dict["value"],
-                value_dict["updated"],
-                value_dict.get("reason"),
-            )
-
     def persist_tool_event(
         self,
         tool_name: str,
@@ -493,18 +330,3 @@ class ReasoningSession:
                 timestamp=timestamp,
                 payload=payload,
             )
-
-    def delete_scratchpad_item_db(self, key: str) -> None:
-        """Delete a scratchpad item from database."""
-        if self._db:
-            self._db.delete_scratchpad_item(self.id, key)
-
-    def clear_scratchpad_db(self) -> None:
-        """Clear scratchpad in database."""
-        if self._db:
-            self._db.clear_scratchpad(self.id)
-
-    def reset_db(self) -> None:
-        """Reset session in database."""
-        if self._db:
-            self._db.reset_session(self.id)

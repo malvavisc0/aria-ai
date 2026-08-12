@@ -229,65 +229,6 @@ def get_per_gpu_vram_mb() -> int:
         return 0
 
 
-def check_gpu_memory_usage(gpu_index: int, usage_threshold: float) -> bool:
-    """
-    Check if a specific GPU's memory usage is below a specified threshold.
-
-    Args:
-        gpu_index: Index of the GPU to check (0-based indexing)
-        usage_threshold: Memory usage threshold in percentage (0.0-100.0)
-
-    Returns:
-        bool: True if GPU memory usage is below threshold, False otherwise.
-              Returns False for invalid inputs or when nvidia-smi fails.
-
-    Raises:
-        None: All exceptions are caught and handled internally
-    """
-    # Input validation
-    if gpu_index < 0:
-        return False
-    if not (0.0 <= usage_threshold <= 100.0):
-        return False
-
-    try:
-        # Query both memory.used and memory.total in a single call
-        result = subprocess.run(
-            [
-                "nvidia-smi",
-                f"--id={gpu_index}",
-                "--query-gpu=memory.used,memory.total",
-                "--format=csv,noheader,nounits",
-            ],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-
-        # Parse the output
-        values = result.stdout.strip().split(",")
-        if len(values) != 2:
-            return False
-
-        used_mb = int(values[0].strip())
-        total_mb = int(values[1].strip())
-
-        # Protect against division by zero
-        if total_mb == 0:
-            return False
-
-        usage_percentage = (used_mb / total_mb) * 100
-        return usage_percentage < usage_threshold
-
-    except (
-        subprocess.CalledProcessError,
-        FileNotFoundError,
-        ValueError,
-        IndexError,
-    ):
-        return False
-
-
 def get_free_vram_per_gpu() -> list[int]:
     """
     Get the free VRAM for each available GPU.

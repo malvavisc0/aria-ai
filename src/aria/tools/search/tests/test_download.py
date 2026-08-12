@@ -21,8 +21,6 @@ from aria.tools.search import download, get_youtube_video_transcription
 from aria.tools.search._download_internals import (
     _auto_detect_format,
     _clean_text,
-    _create_error_response,
-    _create_response,
     _extract_filename_from_response,
     _fetch_file,
     _get_default_headers,
@@ -645,29 +643,6 @@ class TestSaveStrategies:
             )
             assert metadata["parsed"] is False
             assert metadata["parse_error"] == "boom"
-
-
-class TestResponseCreation:
-    """Test JSON response creation."""
-
-    def test_create_response(self):
-        """Test creating success response."""
-        metadata = {"url": "https://example.com", "size": 100}
-        response = _create_response(
-            "download",
-            "test reason",
-            "/path/to/file",
-            metadata,
-        )
-        data = _response_data(response)
-        assert data["file_path"] == "/path/to/file"
-        assert data["metadata"] == metadata
-
-    def test_create_error_response(self):
-        """Test creating error response."""
-        response = _create_error_response("download", "test reason", "Test error")
-        err = _response_error(response)
-        assert err == "Test error"
 
 
 class TestYouTubeTranscription:

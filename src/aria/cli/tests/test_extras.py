@@ -4,7 +4,6 @@ from aria.cli.extras import (
     _EXCLUDED_BINARIES,
     get_venv_extras,
     get_venv_extras_json,
-    get_venv_extras_list,
 )
 
 
@@ -49,34 +48,6 @@ class TestGetVenvExtras:
         """Should return message when filter matches nothing."""
         result = get_venv_extras(filter_term="zzz_nonexistent_tool_zzz")
         assert "No extra CLI tools found" in result or len(result) > 0
-
-
-class TestGetVenvExtrasList:
-    """Tests for get_venv_extras_list()."""
-
-    def test_returns_list(self):
-        """Should return a list."""
-        result = get_venv_extras_list()
-        assert isinstance(result, list)
-
-    def test_no_excluded_items(self):
-        """Returned list should not contain excluded binaries."""
-        result = get_venv_extras_list()
-        for item in result:
-            assert item not in _EXCLUDED_BINARIES
-
-    def test_sorted(self):
-        """Returned list should be sorted."""
-        result = get_venv_extras_list()
-        assert result == sorted(result)
-
-    def test_filter(self):
-        """Should filter by term."""
-        full = get_venv_extras_list()
-        filtered = get_venv_extras_list(filter_term="pytest")
-        assert len(filtered) <= len(full)
-        for item in filtered:
-            assert "pytest" in item.lower()
 
 
 class TestGetVenvExtrasJson:

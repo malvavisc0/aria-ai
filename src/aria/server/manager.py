@@ -254,17 +254,6 @@ class ServerManager:
         """
         return self._started_at
 
-    @property
-    def uptime(self) -> float | None:
-        """Get the uptime in seconds.
-
-        Returns:
-            Uptime in seconds, or None if the server is not running.
-        """
-        if self._started_at is None:
-            return None
-        return (datetime.now() - self._started_at).total_seconds()
-
     def _build_command(self) -> list[str]:
         """Build the chainlit run command.
 
@@ -428,26 +417,11 @@ class ServerManager:
         self._clear_state()
         return True
 
-    def restart(self, timeout: float = 10.0) -> bool:
-        """Restart the webserver.
-
-        Args:
-            timeout: Maximum seconds to wait for graceful shutdown.
-
-        Returns:
-            True if the server was restarted successfully.
-        """
-        if self.is_running():
-            self.stop(timeout)
-        return self.start()
-
     def is_running(self) -> bool:
         """Check if the server process is alive.
 
         Returns:
             True if the server process is alive, False otherwise.
-            Note: a running process may still be initializing and not yet
-            ready to serve requests. Use ``is_healthy()`` to confirm readiness.
         """
         # Check if we have an active Popen object
         if self._process is not None:
@@ -459,26 +433,6 @@ class ServerManager:
             return is_process_running(pid)
 
         return False
-
-    def is_healthy(self) -> bool:
-        """Check if the server is responding to HTTP requests.
-
-        Performs a non-blocking HTTP GET on ``/health``. Returns True only
-        when the server is fully initialized and ready to serve requests.
-        This distinguishes between a process that has started but is still
-        initializing (e.g. loading llama-server models) and one that is
-        actually ready.
-
-        Returns:
-            True if ``/health`` returns HTTP 200, False otherwise.
-        """
-        try:
-            host = self._host or "127.0.0.1"
-            url = f"http://{host}:{self._port}/health"
-            with urlopen(url, timeout=1) as resp:
-                return resp.status == 200
-        except (URLError, OSError):
-            return False
 
     def _check_health(self) -> tuple[bool, float | None]:
         """Check health and measure round-trip latency.

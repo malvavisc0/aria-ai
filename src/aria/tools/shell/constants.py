@@ -1,39 +1,13 @@
 """Shell execution constants.
 
-This module provides platform detection, timeout limits, and command
-whitelists for safe shell command execution.
+This module provides timeout limits and command whitelists for safe
+shell command execution.
 """
 
 import os
-import platform
 from pathlib import Path
 
 from aria.config.folders import Workspace
-
-CURRENT_OS = platform.system().lower()  # windows, linux, darwin
-IS_WINDOWS = CURRENT_OS == "windows"
-IS_MACOS = CURRENT_OS == "darwin"
-IS_LINUX = CURRENT_OS == "linux"
-
-
-def detect_shell() -> str:
-    """Detect the default shell for the current platform.
-
-    Returns:
-        The shell name: "powershell", "cmd", "bash", or "zsh".
-    """
-    if IS_WINDOWS:
-        # Check for PowerShell vs CMD
-        if os.environ.get("PSMODULEPATH"):
-            return "powershell"
-        return "cmd"
-    elif IS_MACOS:
-        return os.environ.get("SHELL", "/bin/zsh")
-    else:  # Linux and others
-        return os.environ.get("SHELL", "/bin/bash")
-
-
-SHELL = detect_shell()
 
 MAX_LINE_LENGTH = 10000
 

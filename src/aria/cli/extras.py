@@ -342,23 +342,6 @@ def get_venv_extras(
     return _render_extras(_categorize(available))
 
 
-def get_venv_extras_list(
-    excluded: set[str] | None = None,
-    filter_term: str | None = None,
-) -> list[str]:
-    """Return just the binary names as a sorted list."""
-    bin_dir = _get_venv_bin_dir()
-    if not bin_dir or not bin_dir.exists():
-        return []
-    available = _scan_venv_binaries(
-        bin_dir,
-        _EXCLUDED_BINARIES | (excluded or set()),
-        _EXCLUDED_PATTERNS,
-        filter_term,
-    )
-    return sorted(available)
-
-
 def get_venv_extras_json(
     reason: str = "",
     excluded: set[str] | None = None,

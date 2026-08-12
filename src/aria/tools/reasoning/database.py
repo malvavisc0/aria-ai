@@ -12,7 +12,6 @@ from aria.tools.database import get_tools_database
 
 from .models import (
     ReasoningReflectionModel,
-    ReasoningScratchpadModel,
     ReasoningSessionModel,
     ReasoningStepModel,
     ReasoningToolEventModel,
@@ -211,43 +210,6 @@ class ReasoningDatabase:
             session.commit()
             logger.debug(f"Saved reflection for session {session_internal_id}")
 
-    def save_scratchpad_item(
-        self,
-        session_internal_id: str,
-        key: str,
-        value: str,
-        updated_at: str,
-        reason: str | None = None,
-    ) -> None:
-        """Save or update a scratchpad item."""
-        with self.get_session() as session:
-            # Check if item exists
-            stmt = select(ReasoningScratchpadModel).where(
-                ReasoningScratchpadModel.session_id == session_internal_id,
-                ReasoningScratchpadModel.key == key,
-            )
-            existing = session.execute(stmt).scalar_one_or_none()
-
-            if existing:
-                existing.value = value
-                existing.updated_at = datetime.fromisoformat(updated_at)
-                if reason is not None:
-                    existing.reason = reason
-            else:
-                item = ReasoningScratchpadModel(
-                    session_id=session_internal_id,
-                    key=key,
-                    value=value,
-                    updated_at=datetime.fromisoformat(updated_at),
-                    reason=reason,
-                )
-                session.add(item)
-
-            session.commit()
-            logger.debug(
-                f"Saved scratchpad item {key} for session {session_internal_id}"
-            )
-
     def save_tool_event(
         self,
         session_internal_id: str,
@@ -279,36 +241,6 @@ class ReasoningDatabase:
                 f"Saved tool event {tool_name} for session {session_internal_id}",
             )
 
-    def delete_scratchpad_item(self, session_internal_id: str, key: str) -> None:
-        """Delete a scratchpad item."""
-        with self.get_session() as session:
-            stmt = select(ReasoningScratchpadModel).where(
-                ReasoningScratchpadModel.session_id == session_internal_id,
-                ReasoningScratchpadModel.key == key,
-            )
-            item = session.execute(stmt).scalar_one_or_none()
-
-            if item:
-                session.delete(item)
-                session.commit()
-                logger.debug(
-                    f"Deleted scratchpad item {key} for session {session_internal_id}"
-                )
-
-    def clear_scratchpad(self, session_internal_id: str) -> None:
-        """Clear all scratchpad items for a session."""
-        with self.get_session() as session:
-            stmt = select(ReasoningScratchpadModel).where(
-                ReasoningScratchpadModel.session_id == session_internal_id
-            )
-            items = session.execute(stmt).scalars().all()
-
-            for item in items:
-                session.delete(item)
-
-            session.commit()
-            logger.debug(f"Cleared scratchpad for session {session_internal_id}")
-
     def delete_session(self, session_id: str, agent_id: str) -> bool:
         """Mark session as inactive (soft delete)."""
         with self.get_session() as session:
@@ -325,38 +257,6 @@ class ReasoningDatabase:
                 return True
 
             return False
-
-    def reset_session(self, session_internal_id: str) -> None:
-        """Clear all steps, reflections, and scratchpad for a session."""
-        from sqlalchemy import delete as sa_delete
-
-        with self.get_session() as session:
-            # Bulk delete all related data
-            session.execute(
-                sa_delete(ReasoningStepModel).where(
-                    ReasoningStepModel.session_id == session_internal_id
-                )
-            )
-            session.execute(
-                sa_delete(ReasoningReflectionModel).where(
-                    ReasoningReflectionModel.session_id == session_internal_id
-                )
-            )
-            session.execute(
-                sa_delete(ReasoningScratchpadModel).where(
-                    ReasoningScratchpadModel.session_id == session_internal_id
-                )
-            )
-
-            # Update session timestamp
-            stmt = select(ReasoningSessionModel).where(
-                ReasoningSessionModel.id == session_internal_id
-            )
-            session_model = session.execute(stmt).scalar_one()
-            session_model.updated_at = datetime.now(UTC)
-
-            session.commit()
-            logger.debug(f"Reset session {session_internal_id}")
 
     def list_sessions(self, agent_id: str | None = None) -> list[dict]:
         """List all active sessions, optionally filtered by agent."""

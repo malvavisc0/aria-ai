@@ -8,7 +8,6 @@ import pytest
 from aria.helpers.nvidia import (
     GPUMetadata,
     calculate_gpu_memory_utilization,
-    check_gpu_memory_usage,
     check_nvidia_smi_available,
     detect_gpu_count,
     detect_gpus_with_details,
@@ -49,8 +48,6 @@ MOCK_VRAM_TOTAL_QUAD = """24576
 
 MOCK_VRAM_FREE_DUAL = """20480
 22528"""
-
-MOCK_VRAM_MEMORY_USED_TOTAL = "12288, 24576"
 
 MOCK_NVLINK_TOPOLOGY_WITH_NVLINK = """    GPU0    GPU1
 GPU0     X      NV4
@@ -273,137 +270,6 @@ class TestGetTotalVramMb:
         with patch("subprocess.run") as mock_run:
             mock_run.return_value = Mock(returncode=0, stdout="24576\n\n24576\n")
             assert get_total_vram_mb() == 49152
-
-
-# ============================================================================
-# Tests for check_gpu_memory_usage()
-# ============================================================================
-
-
-class TestCheckGpuMemoryUsage:
-    """Test suite for check_gpu_memory_usage function."""
-
-    def test_usage_below_threshold(self):
-        """Test when memory usage is below threshold."""
-        with patch("subprocess.run") as mock_run:
-            # 12288 MB used out of 24576 MB = 50% usage
-            mock_run.return_value = Mock(
-                returncode=0, stdout=MOCK_VRAM_MEMORY_USED_TOTAL
-            )
-            # 50% < 75% threshold
-            assert check_gpu_memory_usage(0, 75.0) is True
-
-    def test_usage_above_threshold(self):
-        """Test when memory usage is above threshold."""
-        with patch("subprocess.run") as mock_run:
-            # 12288 MB used out of 24576 MB = 50% usage
-            mock_run.return_value = Mock(
-                returncode=0, stdout=MOCK_VRAM_MEMORY_USED_TOTAL
-            )
-            # 50% > 25% threshold
-            assert check_gpu_memory_usage(0, 25.0) is False
-
-    def test_usage_exactly_at_threshold(self):
-        """Test when memory usage equals threshold."""
-        with patch("subprocess.run") as mock_run:
-            # 12288 MB used out of 24576 MB = 50% usage
-            mock_run.return_value = Mock(
-                returncode=0, stdout=MOCK_VRAM_MEMORY_USED_TOTAL
-            )
-            # 50% == 50% threshold, should return False (not below)
-            assert check_gpu_memory_usage(0, 50.0) is False
-
-    def test_negative_gpu_index(self):
-        """Test input validation for negative GPU index."""
-        assert check_gpu_memory_usage(-1, 50.0) is False
-
-    def test_negative_threshold(self):
-        """Test input validation for negative threshold."""
-        assert check_gpu_memory_usage(0, -10.0) is False
-
-    def test_threshold_above_100(self):
-        """Test input validation for threshold > 100."""
-        assert check_gpu_memory_usage(0, 150.0) is False
-
-    def test_threshold_zero(self):
-        """Test edge case with threshold of 0."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(
-                returncode=0, stdout=MOCK_VRAM_MEMORY_USED_TOTAL
-            )
-            # Any usage > 0% will be above 0% threshold
-            assert check_gpu_memory_usage(0, 0.0) is False
-
-    def test_threshold_100(self):
-        """Test edge case with threshold of 100."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(
-                returncode=0, stdout=MOCK_VRAM_MEMORY_USED_TOTAL
-            )
-            # 50% < 100% threshold
-            assert check_gpu_memory_usage(0, 100.0) is True
-
-    def test_zero_total_memory(self):
-        """Test handling of zero total memory (edge case)."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stdout="0, 0")
-            assert check_gpu_memory_usage(0, 50.0) is False
-
-    def test_invalid_gpu_index(self):
-        """Test handling of invalid GPU index."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, "nvidia-smi", "Invalid GPU index"
-            )
-            assert check_gpu_memory_usage(99, 50.0) is False
-
-    def test_nvidia_smi_not_found(self):
-        """Test handling when nvidia-smi is not installed."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = FileNotFoundError("nvidia-smi not found")
-            assert check_gpu_memory_usage(0, 50.0) is False
-
-    def test_nvidia_smi_fails(self):
-        """Test handling when nvidia-smi command fails."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.side_effect = subprocess.CalledProcessError(
-                1, "nvidia-smi", "Error"
-            )
-            assert check_gpu_memory_usage(0, 50.0) is False
-
-    def test_invalid_memory_values(self):
-        """Test handling of non-numeric memory values."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stdout="invalid, data")
-            assert check_gpu_memory_usage(0, 50.0) is False
-
-    def test_malformed_output_single_value(self):
-        """Test handling of malformed output with single value."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stdout="12288")
-            assert check_gpu_memory_usage(0, 50.0) is False
-
-    def test_malformed_output_too_many_values(self):
-        """Test handling of malformed output with too many values."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stdout="12288, 24576, 8192")
-            assert check_gpu_memory_usage(0, 50.0) is False
-
-    def test_full_memory_usage(self):
-        """Test when GPU memory is fully utilized."""
-        with patch("subprocess.run") as mock_run:
-            # 24576 MB used out of 24576 MB = 100% usage
-            mock_run.return_value = Mock(returncode=0, stdout="24576, 24576")
-            assert check_gpu_memory_usage(0, 100.0) is False
-            assert check_gpu_memory_usage(0, 99.0) is False
-
-    def test_minimal_memory_usage(self):
-        """Test when GPU memory usage is minimal."""
-        with patch("subprocess.run") as mock_run:
-            # 100 MB used out of 24576 MB ≈ 0.4% usage
-            mock_run.return_value = Mock(returncode=0, stdout="100, 24576")
-            assert check_gpu_memory_usage(0, 1.0) is True
-            assert check_gpu_memory_usage(0, 0.5) is True
 
 
 # ============================================================================
@@ -1467,6 +1333,5 @@ class TestIntegration:
             assert detect_gpu_count() == 0
             assert get_total_vram_mb() == 0
             assert get_free_vram_per_gpu() == []
-            assert check_gpu_memory_usage(0, 50.0) is False
             assert detect_nvlink() == (False, None)
             assert get_nvidia_smi_version() == ""

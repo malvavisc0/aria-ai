@@ -30,10 +30,6 @@ class _ThinkingBlock:
         self._open = False
         self.parts: list[str] = []
 
-    @property
-    def is_open(self) -> bool:
-        return self._open
-
     async def open(self) -> None:
         if self._open:
             return

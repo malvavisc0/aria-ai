@@ -5,7 +5,6 @@ from datetime import UTC, datetime
 
 from loguru import logger
 from sqlalchemy import select
-from sqlalchemy.engine import CursorResult
 
 from aria.tools.database import get_tools_database
 
@@ -193,24 +192,6 @@ class MemoryDatabase:
             session.commit()
             logger.debug(f"Deleted memory entry {entry_id}")
             return True
-
-    def cleanup_old_entries(self, days: int = 30) -> int:
-        """Permanently delete inactive entries older than specified days."""
-        from datetime import timedelta
-
-        from sqlalchemy import delete as sa_delete
-
-        with self.get_session() as session:
-            cutoff = datetime.now(UTC) - timedelta(days=days)
-            stmt = sa_delete(MemoryEntryModel).where(
-                MemoryEntryModel.is_active.is_(False),
-                MemoryEntryModel.updated_at < cutoff,
-            )
-            result: CursorResult = session.execute(stmt)  # type: ignore[assignment]
-            count = result.rowcount
-            session.commit()
-            logger.info(f"Cleaned up {count} old memory entries")
-            return count
 
 
 def get_database() -> MemoryDatabase:

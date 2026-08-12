@@ -47,57 +47,6 @@ def test_add_reflection():
     assert session.reflections[0]["content"] == "Need to verify assumptions"
 
 
-def test_scratchpad_operations():
-    """Test scratchpad operations."""
-    session = ReasoningSession()
-
-    # Set a value
-    result = session.scratchpad_operation(
-        reason="Store intermediate",
-        key="key1",
-        operation="set",
-        value="value1",
-    )
-    assert result["tool"] == "set"
-    assert result["key"] == "key1"
-    assert result["value"] == "value1"
-
-    # Get the value
-    result = session.scratchpad_operation(
-        reason="Retrieve variable",
-        key="key1",
-        operation="get",
-    )
-    assert result["tool"] == "get"
-    assert result["value"] == "value1"
-
-    # List all
-    result = session.scratchpad_operation(
-        reason="Inspect scratchpad",
-        key="",
-        operation="list",
-    )
-    assert result["tool"] == "list"
-    assert any(item["key"] == "key1" for item in result["items"])
-
-    # Clear one
-    result = session.scratchpad_operation(
-        reason="Remove intermediate",
-        key="key1",
-        operation="clear",
-    )
-    assert result["tool"] == "clear"
-    assert result["key"] == "key1"
-
-    # Verify empty
-    result = session.scratchpad_operation(
-        reason="Check scratchpad empty",
-        key="",
-        operation="list",
-    )
-    assert result["items"] == []
-
-
 def test_evaluate():
     """Test evaluation of reasoning quality."""
     session = ReasoningSession()
@@ -118,39 +67,13 @@ def test_summary():
 
     session.add_step(reason="Add step", content="Step 1")
     session.add_reflection(reason="Reflect", reflection="Reflection 1")
-    session.scratchpad_operation(
-        reason="Store intermediate",
-        key="key1",
-        operation="set",
-        value="value1",
-    )
+    session.scratchpad["key1"] = {"value": "value1"}
 
     result = session.summary(reason="Summarize")
 
     assert result["steps_count"] == 1
     assert result["reflections_count"] == 1
     assert result["scratchpad_items_count"] == 1
-
-
-def test_reset():
-    """Test resetting a session."""
-    session = ReasoningSession()
-
-    session.add_step(reason="Add step", content="Step 1")
-    session.add_reflection(reason="Reflect", reflection="Reflection 1")
-    session.scratchpad_operation(
-        reason="Store intermediate",
-        key="key1",
-        operation="set",
-        value="value1",
-    )
-
-    result = session.reset(reason="Restart")
-
-    assert "reset" in result["message"].lower()
-    assert len(session.steps) == 0
-    assert len(session.reflections) == 0
-    assert len(session.scratchpad) == 0
 
 
 def test_bias_detection():
@@ -213,78 +136,6 @@ def test_add_step_with_invalid_reasoning_type():
 
     assert len(session.steps) == 1
     assert session.steps[0]["reasoning_type"] == "deductive"
-
-
-def test_scratchpad_set_without_value():
-    """Test scratchpad set operation without providing a value."""
-    session = ReasoningSession()
-
-    result = session.scratchpad_operation(
-        reason="Set without value",
-        key="key1",
-        operation="set",
-    )
-
-    assert result["status"] == "error"
-    assert result["error"]["code"] == "VALUE_REQUIRED"
-
-
-def test_scratchpad_get_nonexistent_key():
-    """Test scratchpad get operation for non-existent key."""
-    session = ReasoningSession()
-
-    result = session.scratchpad_operation(
-        reason="Get missing key",
-        key="nonexistent",
-        operation="get",
-    )
-
-    assert result["status"] == "error"
-    assert result["error"]["code"] == "KEY_NOT_FOUND"
-
-
-def test_scratchpad_clear_all():
-    """Test scratchpad clear all operation."""
-    session = ReasoningSession()
-
-    # Add some items
-    session.scratchpad_operation(
-        reason="Add",
-        key="key1",
-        operation="set",
-        value="value1",
-    )
-    session.scratchpad_operation(
-        reason="Add",
-        key="key2",
-        operation="set",
-        value="value2",
-    )
-
-    # Clear all
-    result = session.scratchpad_operation(
-        reason="Clear all",
-        key="all",
-        operation="clear",
-    )
-
-    assert result["tool"] == "clear"
-    assert result["key"] == "all"
-    assert len(session.scratchpad) == 0
-
-
-def test_scratchpad_unsupported_operation():
-    """Test scratchpad with unsupported operation."""
-    session = ReasoningSession()
-
-    result = session.scratchpad_operation(
-        reason="Bad op",
-        key="key1",
-        operation="invalid",
-    )
-
-    assert result["status"] == "error"
-    assert result["error"]["code"] == "UNSUPPORTED_OPERATION"
 
 
 def test_evaluate_with_low_confidence():

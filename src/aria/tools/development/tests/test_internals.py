@@ -21,7 +21,6 @@ from aria.tools.development._internals import (
     _capture_execution_output,
     _create_safe_globals,
     _error_response,
-    _execute_without_capture,
     _read_file_safely,
     _time_limit,
     _validate_inputs,
@@ -432,52 +431,6 @@ class TestCaptureExecutionOutput:
         safe_globals = _create_safe_globals()
         with pytest.raises(ValueError):
             _capture_execution_output(code, safe_globals, 10)
-        assert sys.argv == original_argv
-
-
-class TestExecuteWithoutCapture:
-    """Test execution without output capture"""
-
-    def test_execute_without_capture_success(self):
-        """Test successful execution without capture"""
-        code = "x = 1 + 1"
-        safe_globals = _create_safe_globals()
-        _execute_without_capture(code, safe_globals, 10)
-        # Should complete without error
-
-    def test_execute_without_capture_timeout(self):
-        """Test timeout during execution without capture"""
-        code = "import time\nwhile True: time.sleep(0.1)"
-        safe_globals = _create_safe_globals()
-        with pytest.raises(TimeoutError):
-            _execute_without_capture(code, safe_globals, 1)
-
-    def test_execute_without_capture_with_custom_argv(self):
-        """Test execution without capture with custom argv"""
-        code = "import sys\nassert sys.argv == ['test.py', 'arg1']"
-        safe_globals = _create_safe_globals()
-        _execute_without_capture(code, safe_globals, 10, argv=["test.py", "arg1"])
-        # Should complete without error
-
-    def test_execute_without_capture_restores_argv(self):
-        """Test that sys.argv is restored after execution"""
-        import sys
-
-        original_argv = sys.argv.copy()
-        code = "x = 1"
-        safe_globals = _create_safe_globals()
-        _execute_without_capture(code, safe_globals, 10, argv=["custom.py"])
-        assert sys.argv == original_argv
-
-    def test_execute_without_capture_with_exception(self):
-        """Test that argv is restored even on exception"""
-        import sys
-
-        original_argv = sys.argv.copy()
-        code = "raise RuntimeError('test error')"
-        safe_globals = _create_safe_globals()
-        with pytest.raises(RuntimeError):
-            _execute_without_capture(code, safe_globals, 10)
         assert sys.argv == original_argv
 
 
