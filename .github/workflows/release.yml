@@ -106,6 +106,8 @@ jobs:
           cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build \
             -DGGML_CUDA=ON \
             -DGGML_METAL=OFF \
+            -DGGML_NATIVE=OFF \
+            -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE \
             -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90" \
             -DWHISPER_BUILD_SERVER=ON \
             -DBUILD_SHARED_LIBS=OFF \
