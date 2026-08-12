@@ -13,7 +13,7 @@ class AboutDialog(QDialog):
     @staticmethod
     def _get_version_text() -> str:
         """Return the installed Aria package version for display."""
-        return f"v{version('aria')}"
+        return f"v{version('aria-ai')}"
 
     def __init__(self, parent: QWidget):
         super().__init__(parent=parent)
