@@ -329,6 +329,48 @@ class TestFetchCurrentStockPrice:
             assert result_dict["day_change"] is None
             assert result_dict["day_change_percent"] is None
 
+    def test_nan_price_returns_error_and_valid_json(self):
+        """A NaN price must not succeed and must not emit invalid JSON."""
+        mock_info = {"regularMarketPrice": float("nan"), "currency": "USD"}
+
+        with patch("aria.tools.search.finance._get_ticker") as mock_get_ticker:
+            mock_ticker = Mock()
+            mock_ticker.info = mock_info
+            mock_get_ticker.return_value = mock_ticker
+
+            result = fetch_current_stock_price("Testing stock price", "AAPL")
+
+            # Must be strict JSON (no NaN/Infinity tokens)
+            json.loads(
+                result,
+                parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)),
+            )
+
+            context = _response_context(result)
+            assert context["ticker"] == "AAPL"
+            assert context["error_type"] == "data_error"
+            assert "No price data available" in _response_error(result)
+
+    def test_inf_price_returns_error_and_valid_json(self):
+        """An infinite price must not succeed and must not emit invalid JSON."""
+        mock_info = {"regularMarketPrice": float("inf"), "currency": "USD"}
+
+        with patch("aria.tools.search.finance._get_ticker") as mock_get_ticker:
+            mock_ticker = Mock()
+            mock_ticker.info = mock_info
+            mock_get_ticker.return_value = mock_ticker
+
+            result = fetch_current_stock_price("Testing stock price", "AAPL")
+
+            json.loads(
+                result,
+                parse_constant=lambda x: (_ for _ in ()).throw(ValueError(x)),
+            )
+
+            context = _response_context(result)
+            assert context["ticker"] == "AAPL"
+            assert context["error_type"] == "data_error"
+
 
 # ============================================================================
 # Company Information Tests

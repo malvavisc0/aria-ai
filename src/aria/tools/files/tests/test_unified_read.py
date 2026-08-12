@@ -244,3 +244,23 @@ class TestSearchFiles:
 
         assert data["status"] == "error"
         assert "Invalid regex" in data["error"]["message"]
+
+
+class TestToolDocstrings:
+    """The tool docstrings are the LLM's schema; path args must document
+    that absolute paths are required."""
+
+    def test_read_file_docstring_promises_absolute_paths(self):
+        doc = read_file.__doc__ or ""
+        assert "relative to BASE_DIR" not in doc
+        assert "Absolute file path" in doc
+
+    def test_list_files_docstring_promises_absolute_paths(self):
+        doc = list_files.__doc__ or ""
+        assert "relative to BASE_DIR" not in doc
+        assert "Absolute directory path" in doc
+
+    def test_search_files_docstring_promises_absolute_paths(self):
+        doc = search_files.__doc__ or ""
+        assert "relative to BASE_DIR" not in doc
+        assert "Absolute directory path" in doc

@@ -343,7 +343,7 @@ def read_file(
 
     Args:
         reason: Required. Brief explanation of why you are reading this file.
-        file_name: Path relative to BASE_DIR.
+        file_name: Absolute file path (e.g. /home/user/data/file.txt).
         offset: Start line 0-indexed (default: 0).
         length: Lines to read; 0=all up to max_lines (default: 0).
         max_lines: Max lines per call (default: 200).
@@ -598,7 +598,7 @@ def list_files(
         recursive: Tree view if True (default: False).
         max_depth: Max depth for tree (default: 3).
         max_results: Cap for flat list (default: 100).
-        path: Start dir relative to BASE_DIR (default: ".").
+        path: Absolute directory path (e.g. /home/user/data).
 
     Returns:
         JSON with files (flat) or tree (recursive), plus count.
@@ -830,7 +830,7 @@ def search_files(
         recursive: Search recursively (default: True).
         max_results: Cap results (default: 500).
         context_lines: Context lines around matches (default: 2).
-        path: Start dir relative to BASE_DIR (default: ".").
+        path: Absolute directory path (e.g. /home/user/data).
 
     Returns:
         JSON with matches[] (file, line, context), count.

@@ -1,5 +1,6 @@
 """Yahoo Finance-backed market data tools."""
 
+import math
 import re
 from typing import Any
 
@@ -82,6 +83,7 @@ def fetch_current_stock_price(reason: Reason, ticker: str) -> str:
             or info.get("previousClose")
         )
 
+        current_price = _finite_price(current_price)
         if current_price is None:
             raise YFinanceDataError(f"No price data available for {ticker}")
 
@@ -91,7 +93,7 @@ def fetch_current_stock_price(reason: Reason, ticker: str) -> str:
 
         result = {
             "ticker": ticker,
-            "current_price": round(float(current_price), 2),
+            "current_price": round(current_price, 2),
             "currency": currency,
             "market_state": market_state,
             "timestamp": utc_timestamp(),
@@ -370,6 +372,26 @@ def fetch_ticker_news(reason: Reason, ticker: str, max_articles: int = 10) -> st
             articles=[],
             count=0,
         )
+
+
+def _finite_price(value: Any) -> float | None:
+    """Return value as a finite float, or None if it is not a usable price.
+
+    Rejects None, NaN, and inf, which would otherwise serialise to invalid
+    JSON tokens (``NaN``, ``Infinity``) via ``safe_json``.
+
+    Args:
+        value: The candidate price value from ticker info.
+
+    Returns:
+        Price as a finite float, or None if not usable.
+    """
+    if value is None:
+        return None
+    numeric = float(value)
+    if math.isnan(numeric) or math.isinf(numeric):
+        return None
+    return numeric
 
 
 def _validate_ticker(ticker: Any) -> str:

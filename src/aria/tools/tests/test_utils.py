@@ -155,3 +155,15 @@ class TestSafeJson:
 
         parsed = json.loads(safe_json({"obj": NonSerializable()}))
         assert "NonSerializable" in parsed["obj"]
+
+    def test_nan_returns_error_envelope(self) -> None:
+        """NaN must not serialize to an invalid JSON literal."""
+        result = safe_json({"price": float("nan")})
+        parsed = json.loads(result)
+        assert parsed["error"] == "Serialization failed"
+
+    def test_inf_returns_error_envelope(self) -> None:
+        """Infinity must not serialize to an invalid JSON literal."""
+        result = safe_json({"price": float("inf")})
+        parsed = json.loads(result)
+        assert parsed["error"] == "Serialization failed"

@@ -51,6 +51,7 @@ def safe_json(
             default=default,
             indent=indent,
             ensure_ascii=ensure_ascii,
+            allow_nan=False,
         )
     except (TypeError, ValueError) as exc:
         logger.error(f"JSON serialization failed: {exc}")

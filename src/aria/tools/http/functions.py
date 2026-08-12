@@ -90,6 +90,23 @@ def http_request(
 
         body_file, body_size, content_type = _persist_http_body(response)
 
+        if response.status_code >= 400:
+            return tool_response(
+                tool="http_request",
+                reason=reason,
+                data={
+                    "error": (
+                        f"HTTP {response.status_code}: "
+                        f"{response.reason_phrase or 'error'}"
+                    ),
+                    "status_code": response.status_code,
+                    "url": str(response.url),
+                    "body_file": body_file,
+                    "body_size": body_size,
+                    "content_type": content_type,
+                },
+            )
+
         return tool_response(
             tool="http_request",
             reason=reason,

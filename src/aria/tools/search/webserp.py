@@ -54,11 +54,8 @@ def web_search(
     try:
         output = _run_webserp(query=query, max_results=max_results)
         findings = _parse_output(output)
-    except subprocess.SubprocessError as exc:
-        logger.error(f"webserp subprocess failed: {exc}")
-        return tool_error_response(get_function_name(), reason, exc)
-    except ValueError as exc:
-        logger.error(f"webserp output parsing failed: {exc}")
+    except Exception as exc:
+        logger.error(f"webserp failed: {exc}")
         return tool_error_response(get_function_name(), reason, exc)
 
     return tool_success_response(

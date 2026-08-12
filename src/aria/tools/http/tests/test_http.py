@@ -73,3 +73,26 @@ class TestHttpRequest:
         # Should get a connection error, not a method error
         data = json.loads(result)
         assert "not allowed" not in data["data"].get("error", "")
+
+    @patch("aria.tools.http.functions.httpx.Client")
+    def test_http_error_status_returns_error_field(self, mock_client_cls):
+        """A 4xx/5xx response must include an error signal, not report success."""
+        mock_response = MagicMock()
+        mock_response.status_code = 404
+        mock_response.reason_phrase = "Not Found"
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.text = '{"error": "not found"}'
+        mock_response.url = "http://example.com/missing"
+
+        mock_client = MagicMock()
+        mock_client.request.return_value = mock_response
+        mock_client.__enter__ = MagicMock(return_value=mock_client)
+        mock_client.__exit__ = MagicMock(return_value=False)
+        mock_client_cls.return_value = mock_client
+
+        result = http_request("Fetch", method="GET", url="http://example.com/missing")
+        data = json.loads(result)
+
+        assert "error" in data["data"]
+        assert "HTTP 404" in data["data"]["error"]
+        assert data["data"]["status_code"] == 404
