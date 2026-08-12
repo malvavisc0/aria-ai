@@ -478,8 +478,6 @@ async def _cleanup_on_failure() -> None:
     Mirrors the shutdown order in reverse so that resources are freed
     in the correct dependency order.
     """
-    global _log_sink_id, _tool_call_sink_id
-
     if _state.browser_manager:
         await _stop_safely(_state.browser_manager)
         _state.browser_manager = None
@@ -508,7 +506,6 @@ async def _cleanup_on_failure() -> None:
         _sinks.log_sink_id = None
     if _sinks.tool_call_sink_id is not None:
         logger.remove(_sinks.tool_call_sink_id)
-        _sinks.tool_call_sink_id = None
         _sinks.tool_call_sink_id = None
 
 
@@ -592,12 +589,21 @@ def _warn_low_history_ratio() -> None:
         )
 
 
-async def _finalize_subsystems(embed_task) -> None:
+async def _finalize_subsystems(embed_task) -> bool:
+    """Await the embeddings load, returning True on success.
+
+    Embeddings are required — without them ``AppState.is_initialized()``
+    never returns True and every message fails with a confusing
+    "not fully initialized" error.  Fail fast instead of limping along.
+    """
     try:
         await embed_task
         logger.info("Embeddings model loaded")
+        return True
     except Exception as e:
-        logger.warning(f"Embeddings model failed to load: {e}.")
+        logger.error(f"Embeddings model failed to load: {e}")
+        await _abort_startup(e, "embeddings")
+        return False
 
 
 def _log_reindex_result(task: asyncio.Task[dict[str, object]]) -> None:
@@ -689,7 +695,9 @@ async def on_app_startup_handler() -> None:
         _vllm_ready = await _start_local_vllm_with_embeddings(embed_task)
 
     # Phase 3 – Remaining subsystems
-    await _finalize_subsystems(embed_task)
+    _embeddings_ready = await _finalize_subsystems(embed_task)
+    if not _embeddings_ready:
+        return
 
     _llm_ready = False
     if _vllm_ready:

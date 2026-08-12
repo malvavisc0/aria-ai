@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -80,6 +81,8 @@ class TestWhisperCppManager:
                 voice_mod.httpx, "AsyncClient", return_value=_FakeAsyncClient()
             ),
             patch.object(voice_mod.logger, "info"),
+            patch.object(voice_mod, "_preflight_port"),
+            patch("builtins.open", MagicMock()),
         ):
             assert await mgr.start() is True
         cmd = mock_popen.call_args[0][0]
@@ -102,6 +105,8 @@ class TestWhisperCppManager:
             patch.object(mgr, "_wait_for_health", AsyncMock(return_value=False)),
             patch.object(mgr, "_cleanup_process") as mock_cleanup,
             patch.object(voice_mod.logger, "error"),
+            patch.object(voice_mod, "_preflight_port"),
+            patch("builtins.open", MagicMock()),
         ):
             assert await mgr.start() is False
         mock_popen.assert_called_once()
@@ -117,13 +122,17 @@ class TestWhisperCppManager:
         fake.aclose.assert_awaited_once()
         assert mgr._client is None
 
-    def test_cleanup_process_terminates(self) -> None:
+    def test_cleanup_process_kills_group(self) -> None:
         mgr = self._manager()
-        proc = MagicMock()
+        proc = MagicMock(spec=subprocess.Popen)
+        proc.pid = 12345
         mgr._process = proc
-        mgr._cleanup_process()
-        proc.terminate.assert_called_once()
-        proc.wait.assert_called_once()
+        with (
+            patch("aria.server.voice.os.getpgid", return_value=12345),
+            patch("aria.server.voice.os.killpg") as mock_killpg,
+        ):
+            mgr._cleanup_process()
+        mock_killpg.assert_called_once()
         assert mgr._process is None
 
 
@@ -197,6 +206,8 @@ class TestKokoroManager:
             ),
             patch.object(voice_mod.logger, "info"),
             patch.object(Path, "exists", return_value=True),
+            patch.object(voice_mod, "_preflight_port"),
+            patch("builtins.open", MagicMock()),
         ):
             assert await mgr.start() is True
         cmd = mock_popen.call_args[0][0]
@@ -222,6 +233,8 @@ class TestKokoroManager:
             patch.object(mgr, "_cleanup_process") as mock_cleanup,
             patch.object(voice_mod.logger, "error"),
             patch.object(Path, "exists", return_value=True),
+            patch.object(voice_mod, "_preflight_port"),
+            patch("builtins.open", MagicMock()),
         ):
             assert await mgr.start() is False
         mock_popen.assert_called_once()
@@ -236,3 +249,40 @@ class TestKokoroManager:
         await mgr.stop()
         fake.aclose.assert_awaited_once()
         assert mgr._client is None
+
+
+class TestPortPreflight:
+    """Tests for _preflight_port and _pids_on_port helpers."""
+
+    def test_returns_immediately_when_port_free(self) -> None:
+        with patch.object(voice_mod, "_port_in_use", return_value=False):
+            _preflight_port = voice_mod._preflight_port
+            _preflight_port(9999, "test")  # should not raise
+
+    def test_kills_stale_process_on_port(self) -> None:
+        with (
+            patch.object(voice_mod, "_port_in_use", side_effect=[True, False, False]),
+            patch.object(voice_mod, "_pids_on_port", return_value=[12345]),
+            patch("aria.server.voice.os.kill") as mock_kill,
+            patch("aria.server.voice.time.sleep"),
+        ):
+            voice_mod._preflight_port(9091, "whisper.cpp")
+            mock_kill.assert_called_once_with(12345, voice_mod.signal.SIGTERM)
+
+    def test_raises_when_port_still_in_use_after_kill(self) -> None:
+        with (
+            patch.object(voice_mod, "_port_in_use", return_value=True),
+            patch.object(voice_mod, "_pids_on_port", return_value=[12345]),
+            patch("aria.server.voice.os.kill"),
+            patch("aria.server.voice.time.sleep"),
+            pytest.raises(RuntimeError, match="still in use"),
+        ):
+            voice_mod._preflight_port(9091, "whisper.cpp")
+
+    def test_raises_when_no_pids_found(self) -> None:
+        with (
+            patch.object(voice_mod, "_port_in_use", return_value=True),
+            patch.object(voice_mod, "_pids_on_port", return_value=[]),
+            pytest.raises(RuntimeError, match="unknown process"),
+        ):
+            voice_mod._preflight_port(9091, "whisper.cpp")

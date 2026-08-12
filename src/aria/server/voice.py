@@ -7,18 +7,118 @@ prebuilt server does not expose the OpenAI-compatible route). ``KokoroManager``
 launches a persistent Kokoro HTTP server (``scripts/kokoro_server.py``) under
 the kokoro tool's Python so the 330 MB ONNX model loads once per session,
 reducing per-synthesis latency from ~16 s (per-subprocess reload) to ~300 ms.
+
+Both managers run a port preflight before spawning: if a stale process from
+a crashed aria instance is still holding the port, it is killed automatically
+so the new server can bind cleanly.  stdout/stderr are redirected to log
+files (``logs/whisper.log``, ``logs/kokoro.log``) so startup failures are
+diagnosable without pipe-buffer deadlocks.
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import os
+import signal
+import socket
 import subprocess
+import time
 import urllib.request
 from pathlib import Path
 from typing import Optional
 
 import httpx
 from loguru import logger
+
+from aria.config.folders import Debug as DebugConfig
+
+
+def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """Return True if *port* already has a listener on *host."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.settimeout(0.5)
+    try:
+        return sock.connect_ex((host, port)) == 0
+    finally:
+        sock.close()
+
+
+def _pids_on_port(port: int) -> list[int]:
+    """Return PIDs of processes listening on *port* (via ``lsof``).
+
+    Returns an empty list when ``lsof`` is unavailable or finds nothing.
+    Only works on POSIX systems where ``lsof`` is installed.
+    """
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    return [int(p) for p in result.stdout.strip().split() if p.strip()]
+
+
+def _preflight_port(port: int, name: str) -> None:
+    """Kill any stale process holding *port* before starting *name*.
+
+    When a previous aria instance was killed (SIGKILL, OOM, crash), its
+    voice child processes survive as orphans — holding the target port.
+    Starting a new server alongside produces a confusing bind failure or,
+    worse, the health check passes against the orphan while the new
+    process silently dies.
+
+    This check runs before spawning:
+
+    1. If the port is free, return immediately (the common case).
+    2. If the port is occupied, identify the PID(s) via ``lsof`` and
+       kill them (SIGTERM → SIGKILL).
+    3. If the port is still in use after killing, raise so the caller
+       can log a clear error.
+    """
+    if not _port_in_use(port):
+        return
+
+    pids = _pids_on_port(port)
+    if not pids:
+        raise RuntimeError(
+            f"Port {port} is already in use by an unknown process. "
+            f"Stop it manually before starting {name}:\n"
+            f"  lsof -ti :{port} | xargs kill"
+        )
+
+    logger.warning(
+        f"Port {port} is in use by PID(s) {pids} — "
+        f"killing stale {name} process(es) before starting fresh..."
+    )
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            continue
+
+    time.sleep(1)
+
+    if _port_in_use(port):
+        for pid in pids:
+            try:
+                os.kill(pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                continue
+        time.sleep(1)
+
+    if _port_in_use(port):
+        raise RuntimeError(
+            f"Port {port} is still in use after killing stale {name} "
+            f"process(es) (PID(s) {pids})."
+        )
+
+    logger.info(f"Port {port} is now free after cleaning up stale {name}.")
 
 
 class _VoiceManagerHolder:
@@ -68,10 +168,12 @@ class WhisperCppManager:
         self._process: subprocess.Popen | None = None
         self._base_url = f"http://127.0.0.1:{port}"
         self._client: httpx.AsyncClient | None = None
+        self._log_file: Path | None = None
 
     async def start(self) -> bool:
         """Start the whisper.cpp server and wait for it to become healthy."""
         try:
+            _preflight_port(self._port, "whisper.cpp")
             cmd = [
                 str(self._binary),
                 "--host",
@@ -82,10 +184,17 @@ class WhisperCppManager:
                 str(self._model),
                 "-fa",
             ]
+            self._log_file = DebugConfig.logs_path.parent / "whisper.log"
             logger.debug(f"Starting whisper.cpp: {' '.join(cmd)}")
+            logger.debug(f"  stderr → {self._log_file}")
+            log_fh = open(self._log_file, "w")
             self._process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                cmd,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
+            log_fh.close()
             if not await self._wait_for_health():
                 logger.error("whisper.cpp /health did not become ready")
                 self._cleanup_process()
@@ -122,17 +231,17 @@ class WhisperCppManager:
         logger.info("whisper.cpp stopped")
 
     def _cleanup_process(self) -> None:
-        if self._process:
-            try:
-                self._process.terminate()
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
+        if not isinstance(self._process, subprocess.Popen):
+            self._process = None
+            return
+        try:
+            os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
+            self._process.wait(timeout=5)
+        except (subprocess.TimeoutExpired, ProcessLookupError, OSError):
+            with contextlib.suppress(Exception):
                 self._process.kill()
                 self._process.wait()
-            except Exception as e:
-                logger.warning(f"Error terminating whisper.cpp: {e}")
-            finally:
-                self._process = None
+        self._process = None
 
     async def _wait_for_health(self) -> bool:
         """Poll the /health endpoint until it responds."""
@@ -140,6 +249,8 @@ class WhisperCppManager:
         loop = asyncio.get_running_loop()
         start = loop.time()
         while loop.time() - start < self.HEALTH_TIMEOUT:
+            if self._process is not None and self._process.poll() is not None:
+                return False
             try:
                 await loop.run_in_executor(
                     None, lambda: urllib.request.urlopen(url, timeout=2)
@@ -185,6 +296,7 @@ class KokoroManager:
         self._process: subprocess.Popen | None = None
         self._base_url = f"http://127.0.0.1:{port}"
         self._client: httpx.AsyncClient | None = None
+        self._log_file: Path | None = None
 
     async def start(self) -> bool:
         """Start the kokoro server and wait for it to become healthy.
@@ -200,6 +312,7 @@ class KokoroManager:
             )
             return False
         try:
+            _preflight_port(self._port, "kokoro")
             cmd = [
                 str(self._python),
                 str(self._server_script),
@@ -212,10 +325,17 @@ class KokoroManager:
                 "--voices",
                 str(self._voices_path),
             ]
+            self._log_file = DebugConfig.logs_path.parent / "kokoro.log"
             logger.debug(f"Starting kokoro server: {' '.join(cmd)}")
+            logger.debug(f"  stderr → {self._log_file}")
+            log_fh = open(self._log_file, "w")
             self._process = subprocess.Popen(
-                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+                cmd,
+                stdout=log_fh,
+                stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
+            log_fh.close()
             if not await self._wait_for_health():
                 logger.error("kokoro server /health did not become ready")
                 self._cleanup_process()
@@ -263,17 +383,17 @@ class KokoroManager:
         logger.info("kokoro TTS server stopped")
 
     def _cleanup_process(self) -> None:
-        if self._process:
-            try:
-                self._process.terminate()
-                self._process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
+        if not isinstance(self._process, subprocess.Popen):
+            self._process = None
+            return
+        try:
+            os.killpg(os.getpgid(self._process.pid), signal.SIGTERM)
+            self._process.wait(timeout=5)
+        except (subprocess.TimeoutExpired, ProcessLookupError, OSError):
+            with contextlib.suppress(Exception):
                 self._process.kill()
                 self._process.wait()
-            except Exception as e:
-                logger.warning(f"Error terminating kokoro server: {e}")
-            finally:
-                self._process = None
+        self._process = None
 
     async def _wait_for_health(self) -> bool:
         """Poll the /health endpoint until it responds."""
@@ -281,6 +401,8 @@ class KokoroManager:
         loop = asyncio.get_running_loop()
         start = loop.time()
         while loop.time() - start < self.HEALTH_TIMEOUT:
+            if self._process is not None and self._process.poll() is not None:
+                return False
             try:
                 await loop.run_in_executor(
                     None, lambda: urllib.request.urlopen(url, timeout=2)

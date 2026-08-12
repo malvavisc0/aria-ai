@@ -326,6 +326,27 @@ def _check_voice(checks: list[CheckResult]) -> None:
             )
         )
 
+    whisper_model = Voice.get_whisper_model_path()
+    if whisper_model.is_file():
+        checks.append(
+            CheckResult(
+                name="whisper.cpp model",
+                passed=True,
+                category="binaries",
+                details=f"Found at {whisper_model}",
+            )
+        )
+    else:
+        checks.append(
+            CheckResult(
+                name="whisper.cpp model",
+                passed=False,
+                category="binaries",
+                error=f"Whisper GGUF model not found at {whisper_model}",
+                hint="Run: aria voice download",
+            )
+        )
+
     if Voice.is_kokoro_available():
         checks.append(
             CheckResult(
@@ -342,6 +363,27 @@ def _check_voice(checks: list[CheckResult]) -> None:
                 passed=False,
                 category="binaries",
                 error="kokoro TTS model not installed",
+                hint="Run: aria voice download",
+            )
+        )
+
+    kokoro_voices = Voice.get_kokoro_voices_path()
+    if kokoro_voices.is_file():
+        checks.append(
+            CheckResult(
+                name="kokoro voices",
+                passed=True,
+                category="binaries",
+                details=f"Found at {kokoro_voices}",
+            )
+        )
+    else:
+        checks.append(
+            CheckResult(
+                name="kokoro voices",
+                passed=False,
+                category="binaries",
+                error=f"kokoro voices file not found at {kokoro_voices}",
                 hint="Run: aria voice download",
             )
         )
