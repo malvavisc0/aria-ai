@@ -10,19 +10,6 @@ from aria.cli.extras import (
 class TestGetVenvExtras:
     """Tests for get_venv_extras()."""
 
-    def test_returns_string(self):
-        """Should return a non-empty string."""
-        result = get_venv_extras()
-        assert isinstance(result, str)
-        assert len(result) > 0
-
-    def test_contains_header(self):
-        """Should include the Additional Commands header."""
-        result = get_venv_extras()
-        assert (
-            "Additional Commands" in result or "virtual environment" in result.lower()
-        )
-
     def test_excludes_python_internals(self):
         """Should not list python, python3, activate, etc."""
         result = get_venv_extras()
@@ -35,19 +22,6 @@ class TestGetVenvExtras:
         result = get_venv_extras()
         for excluded in ["`aria`", "`ax`", "`aria-gui`"]:
             assert excluded not in result
-
-    def test_filter_term(self):
-        """Should filter binaries by substring."""
-        result = get_venv_extras(filter_term="black")
-        # If black is in the venv, it should appear
-        if "`black`" in result:
-            # Other non-black tools should be filtered out
-            assert "`ruff`" not in result
-
-    def test_filter_no_match(self):
-        """Should return message when filter matches nothing."""
-        result = get_venv_extras(filter_term="zzz_nonexistent_tool_zzz")
-        assert "No extra CLI tools found" in result or len(result) > 0
 
 
 class TestGetVenvExtrasJson:

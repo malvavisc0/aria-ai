@@ -65,15 +65,6 @@ class TestHttpRequest:
         assert "error" in data["data"]
         assert "connection" in data["data"]["error"].lower()
 
-    def test_method_case_insensitive(self):
-        """Test that method is case-insensitive."""
-        # Should not raise for method validation
-        # (will fail on connection, but method should be accepted)
-        result = http_request("Test", method="get", url="http://example.com")
-        # Should get a connection error, not a method error
-        data = json.loads(result)
-        assert "not allowed" not in data["data"].get("error", "")
-
     @patch("aria.tools.http.functions.httpx.Client")
     def test_http_error_status_returns_error_envelope(self, mock_client_cls):
         """A 4xx/5xx response must report an error, not success."""

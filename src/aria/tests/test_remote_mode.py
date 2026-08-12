@@ -11,19 +11,11 @@ from aria.preflight import (
 )
 
 
-def _make_remote_config():
-    """Return a mock VllmConfig with remote=True."""
-    mock_config = type("VllmConfig", (), {"remote": True})()
-    return mock_config
-
-
 class TestCheckBinariesRemoteMode:
     """_check_binaries should skip vLLM install check in remote mode."""
 
-    @patch("aria.preflight.Vllm", _make_remote_config(), create=True)
     def test_skips_vllm_check_in_remote_mode(self):
         """Should pass with 'remote' details when remote=True."""
-        # Patch the import inside the function
         with patch("aria.config.api.Vllm.remote", True, create=True):
             checks: list[CheckResult] = []
             _check_binaries(checks)

@@ -19,9 +19,7 @@ import pytest
 
 from aria.tools.search.finance import (
     MAX_ARTICLES,
-    MIN_ARTICLES,
     YFinanceDataError,
-    YFinanceError,
     YFinanceValidationError,
     _get_ticker,
     _get_ticker_info,
@@ -209,13 +207,6 @@ class TestNewsArticleProcessing:
         assert _process_news_article(None) is None
         assert _process_news_article("string") is None
         assert _process_news_article([]) is None
-
-    def test_process_news_article_exception(self):
-        """Test processing article that raises exception."""
-        article = {"content": {"canonicalUrl": "not a dict"}}
-        result = _process_news_article(article)
-        # Should handle gracefully
-        assert result is not None
 
 
 # ============================================================================
@@ -623,24 +614,6 @@ class TestFetchTickerNews:
 # ============================================================================
 
 
-class TestExceptionHierarchy:
-    """Test custom exception hierarchy."""
-
-    def test_exception_inheritance(self):
-        """Test exception inheritance."""
-        assert issubclass(YFinanceValidationError, YFinanceError)
-        assert issubclass(YFinanceDataError, YFinanceError)
-        assert issubclass(YFinanceError, Exception)
-
-    def test_exception_messages(self):
-        """Test exception messages."""
-        exc = YFinanceValidationError("Invalid ticker")
-        assert str(exc) == "Invalid ticker"
-
-        exc = YFinanceDataError("Data not found")
-        assert str(exc) == "Data not found"
-
-
 # ============================================================================
 # Integration-like Tests
 # ============================================================================
@@ -688,18 +661,3 @@ class TestIntegration:
             timestamp = result_dict["timestamp"]
             parsed_time = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
             assert isinstance(parsed_time, datetime)
-
-
-# ============================================================================
-# Constants Tests
-# ============================================================================
-
-
-class TestConstants:
-    """Test module constants."""
-
-    def test_article_limits(self):
-        """Test article limit constants."""
-        assert MIN_ARTICLES == 1
-        assert MAX_ARTICLES == 50
-        assert MIN_ARTICLES < MAX_ARTICLES

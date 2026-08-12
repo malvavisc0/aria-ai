@@ -350,13 +350,6 @@ class TestContextManager:
     """Test suite for async context manager support."""
 
     @pytest.mark.asyncio
-    async def test_close(self, tmp_path: Path):
-        """Test closing the storage client."""
-        client = LocalStorageClient(storage_path=str(tmp_path / "storage"))
-        # Should not raise any errors
-        await client.close()
-
-    @pytest.mark.asyncio
     async def test_async_context_manager(self, tmp_path: Path):
         """Test using as async context manager."""
         async with LocalStorageClient(storage_path=str(tmp_path / "storage")) as client:

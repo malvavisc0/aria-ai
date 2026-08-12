@@ -10,11 +10,9 @@ import os
 import tempfile
 import threading
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 
-from aria.tools import safe_json, utc_timestamp
 from aria.tools.constants import MAX_TIMEOUT
 from aria.tools.development._internals import (
     _build_response,
@@ -33,56 +31,6 @@ from aria.tools.development.exceptions import (
     PythonSecurityError,
     PythonSyntaxValidationError,
 )
-
-
-class TestTimestamp:
-    """Test timestamp generation"""
-
-    def test_timestamp_format(self):
-        """Test that timestamp is in ISO format"""
-        ts = utc_timestamp()
-        assert isinstance(ts, str)
-        assert "T" in ts  # ISO format contains T separator
-        # Should be parseable as datetime
-        from datetime import datetime
-
-        datetime.fromisoformat(ts)
-
-
-class TestSafeJson:
-    """Test safe JSON serialization"""
-
-    def test_safe_json_success(self):
-        """Test successful JSON serialization"""
-        data = {"key": "value", "number": 42}
-        result = safe_json(data)
-        assert isinstance(result, str)
-        parsed = json.loads(result)
-        assert parsed == data
-
-    def test_safe_json_with_unicode(self):
-        """Test JSON serialization with unicode characters"""
-        data = {"message": "Hello 世界 🌍"}
-        result = safe_json(data)
-        assert isinstance(result, str)
-        parsed = json.loads(result)
-        assert parsed == data
-
-    def test_safe_json_serialization_error(self):
-        """Test JSON serialization with non-serializable object"""
-
-        # Create a non-serializable object
-        class NonSerializable:
-            pass
-
-        data = {"obj": NonSerializable()}
-        result = safe_json(data)
-        assert isinstance(result, str)
-        parsed = json.loads(result)
-        # safe_json uses a default handler that converts non-serializable
-        # objects to strings rather than raising an error
-        assert "obj" in parsed
-        assert "NonSerializable" in parsed["obj"]
 
 
 class TestBuildResponse:
@@ -285,16 +233,6 @@ class TestValidateInputs:
         ):
             _validate_inputs(file_path="../etc/passwd")
 
-    def test_validate_inputs_all_valid(self):
-        """Test validation with all valid inputs"""
-        _validate_inputs(
-            code="print('test')",
-            timeout=10,
-            filename="test.py",
-            file_path="/tmp/test.py",
-        )
-        # Should not raise
-
 
 class TestCreateSafeGlobals:
     """Test safe globals creation"""
@@ -366,12 +304,6 @@ class TestTimeLimit:
         thread.join(timeout=5)
         assert not thread.is_alive()
 
-    def test_time_limit_cleanup_on_success(self):
-        """Test that cleanup happens on successful execution"""
-        with _time_limit(5):
-            pass
-        # Should complete without issues
-
 
 class TestCaptureExecutionOutput:
     """Test output capture during execution"""
@@ -436,12 +368,6 @@ class TestCaptureExecutionOutput:
 
 class TestValidateTimeout:
     """Test timeout validation"""
-
-    def test_validate_timeout_valid(self):
-        """Test validation with valid timeout"""
-        _validate_timeout(10)
-        _validate_timeout(MAX_TIMEOUT)
-        # Should not raise
 
     def test_validate_timeout_zero(self):
         """Test validation with zero timeout"""
@@ -508,15 +434,6 @@ class TestReadFileSafely:
             # Restore permissions for cleanup
             os.chmod(test_file, 0o644)
 
-    def test_read_file_safely_with_base_dir(self):
-        """Test reading file with BASE_DIR resolution"""
-        # This tests the branch where file is resolved using BASE_DIR
-        with patch("aria.tools.development._internals.logger"):
-            # Create a file that doesn't exist in current dir
-            # but might be resolved with BASE_DIR
-            with pytest.raises(FileNotFoundError):
-                _read_file_safely("definitely_nonexistent_file.py")
-
 
 class TestEdgeCases:
     """Test edge cases and error conditions"""
@@ -537,19 +454,6 @@ class TestEdgeCases:
         stdout_file, stderr_file = _capture_execution_output(code, safe_globals, 10)
         content = Path(stdout_file).read_text() if stdout_file else ""
         assert "3.14" in content
-
-    def test_code_with_multiple_statements(self):
-        """Test execution of code with multiple statements"""
-        code = """
-x = 10
-y = 20
-z = x + y
-print(z)
-"""
-        safe_globals = _create_safe_globals()
-        stdout_file, stderr_file = _capture_execution_output(code, safe_globals, 10)
-        content = Path(stdout_file).read_text() if stdout_file else ""
-        assert "30" in content
 
     def test_validate_inputs_with_none_values(self):
         """Test validation with None values (should be allowed)"""

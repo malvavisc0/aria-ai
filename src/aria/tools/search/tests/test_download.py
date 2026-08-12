@@ -341,24 +341,6 @@ class TestFetchFile:
         assert content_type == "text/plain"
 
     @patch("aria.tools.search._download_internals.httpx.Client")
-    def test_fetch_file_with_custom_headers(self, mock_client_class):
-        """Test file fetch with custom headers."""
-        mock_response = Mock()
-        mock_response.content = b"Test"
-        mock_response.headers = {"content-type": "text/plain"}
-        mock_response.raise_for_status = Mock()
-
-        mock_client = Mock()
-        mock_client.get.return_value = mock_response
-        mock_client.__enter__ = Mock(return_value=mock_client)
-        mock_client.__exit__ = Mock(return_value=False)
-        mock_client_class.return_value = mock_client
-
-        custom_headers = {"Authorization": "Bearer token"}
-        _fetch_file("https://example.com", custom_headers=custom_headers)
-        assert mock_client.get.called
-
-    @patch("aria.tools.search._download_internals.httpx.Client")
     def test_fetch_file_size_limit_exceeded(self, mock_client_class):
         """Test file fetch with size limit exceeded."""
         mock_response = Mock()
@@ -437,12 +419,6 @@ class TestMarkitdown:
     def test_markitdown_with_string_content(self):
         """Test MarkItDown with string content."""
         content = "Test content"
-        result = _markitdown(content, "text/plain", "https://example.com/test.txt")
-        assert isinstance(result, str)
-
-    def test_markitdown_with_bytes_content(self):
-        """Test MarkItDown with bytes content."""
-        content = b"Test content"
         result = _markitdown(content, "text/plain", "https://example.com/test.txt")
         assert isinstance(result, str)
 

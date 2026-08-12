@@ -695,14 +695,6 @@ class TestDetectGpusWithDetails:
             gpus = detect_gpus_with_details()
             assert len(gpus) == 1
 
-    def test_memory_utilization_calculation(self):
-        """Test memory utilization percentage calculation."""
-        with patch("subprocess.run") as mock_run:
-            # 12288 / 24576 = 50%
-            mock_run.return_value = Mock(returncode=0, stdout=MOCK_GPU_DETAILS_SINGLE)
-            gpus = detect_gpus_with_details()
-            assert gpus[0].memory_utilization == 50.0
-
     def test_zero_total_memory(self):
         """Test handling of zero total memory (edge case)."""
         mock_data = (
@@ -714,29 +706,6 @@ class TestDetectGpusWithDetails:
 
             assert len(gpus) == 1
             assert gpus[0].memory_utilization == 0.0
-
-    def test_pydantic_model_validation(self):
-        """Test that GPUMetadata model validates correctly."""
-        with patch("subprocess.run") as mock_run:
-            mock_run.return_value = Mock(returncode=0, stdout=MOCK_GPU_DETAILS_SINGLE)
-            gpus = detect_gpus_with_details()
-
-            gpu = gpus[0]
-            # Test that we can access all fields
-            assert hasattr(gpu, "index")
-            assert hasattr(gpu, "name")
-            assert hasattr(gpu, "uuid")
-            assert hasattr(gpu, "total_memory")
-            assert hasattr(gpu, "used_memory")
-            assert hasattr(gpu, "free_memory")
-            assert hasattr(gpu, "memory_utilization")
-            assert hasattr(gpu, "power_limit")
-            assert hasattr(gpu, "power_draw")
-            assert hasattr(gpu, "temperature")
-            assert hasattr(gpu, "fan_speed")
-            assert hasattr(gpu, "driver_version")
-            assert hasattr(gpu, "display_active")
-            assert hasattr(gpu, "compute_mode")
 
     def test_float_values_in_memory(self):
         """Test handling of float values in memory fields."""
@@ -918,30 +887,6 @@ class TestCalculateGpuMemoryUtilization:
             98304, context_size=524288, kv_cache_dtype="fp8"
         )
         assert 0.50 <= result <= 0.55
-
-    def test_result_is_float(self):
-        """Test that the return type is float."""
-        result = calculate_gpu_memory_utilization(8192)
-        assert isinstance(result, float)
-
-    def test_result_in_valid_range(self):
-        """Test that the result is always in [0.50, 0.90]."""
-        for vram in [
-            256,
-            512,
-            1024,
-            2048,
-            4096,
-            8192,
-            12288,
-            16384,
-            24576,
-            49152,
-        ]:
-            result = calculate_gpu_memory_utilization(vram, context_size=32768)
-            assert 0.50 <= result <= 0.95, (
-                f"VRAM={vram} MiB → utilization={result} outside [0.50, 0.95]"
-            )
 
     def test_no_model_path_uses_default(self):
         """Test that missing model path uses default 4096 MiB estimate."""

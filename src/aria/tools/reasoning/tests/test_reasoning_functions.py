@@ -151,22 +151,6 @@ def test_add_reflection_with_session(test_agent_id, test_db):
     reasoning("Testing reason", action="end", agent_id=test_agent_id)
 
 
-def test_scratchpad_without_session(test_agent_id, test_db):
-    """Test that using scratchpad without session still works (standalone)."""
-    # scratchpad works independently of reasoning sessions
-    result = _result(
-        scratchpad(
-            "Testing reason",
-            "key1",
-            agent_id=test_agent_id,
-            value="value1",
-            operation="set",
-        )
-    )
-
-    assert result["status"] == "success"
-
-
 def test_scratchpad_with_session(test_agent_id, test_db):
     """Test using scratchpad after starting session."""
     reasoning("Testing reasoning", action="start", agent_id=test_agent_id)

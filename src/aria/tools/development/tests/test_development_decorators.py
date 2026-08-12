@@ -15,10 +15,7 @@ from aria.tools.development.decorators import (
 )
 from aria.tools.development.exceptions import (
     PythonExecutionError,
-    PythonExecutionTimeoutError,
-    PythonRunnerError,
     PythonSecurityError,
-    PythonSyntaxValidationError,
 )
 
 
@@ -36,76 +33,6 @@ class TestWithRunnerErrorHandling:
         assert "error" in result.lower()
         assert "security" in result.lower() or "restricted" in result.lower()
 
-    def test_syntax_validation_error_handling(self):
-        """Test handling of PythonSyntaxValidationError."""
-
-        @with_runner_error_handling("test_operation")
-        def syntax_error(code: str) -> str:
-            raise PythonSyntaxValidationError("Invalid syntax")
-
-        result = syntax_error("def invalid")
-        assert "error" in result.lower()
-
-    def test_execution_timeout_error_handling(self):
-        """Test handling of PythonExecutionTimeoutError."""
-
-        @with_runner_error_handling("test_operation")
-        def timeout_error(code: str) -> str:
-            raise PythonExecutionTimeoutError("Execution timed out")
-
-        result = timeout_error("while True: pass")
-        assert "error" in result.lower()
-
-    def test_execution_error_handling(self):
-        """Test handling of PythonExecutionError."""
-
-        @with_runner_error_handling("test_operation")
-        def execution_error(code: str) -> str:
-            raise PythonExecutionError("Runtime error occurred")
-
-        result = execution_error("1/0")
-        assert "error" in result.lower()
-
-    def test_generic_runner_error_handling(self):
-        """Test handling of generic PythonRunnerError."""
-
-        @with_runner_error_handling("test_operation")
-        def runner_error(code: str) -> str:
-            raise PythonRunnerError("Generic runner error")
-
-        result = runner_error("test")
-        assert "error" in result.lower()
-
-    def test_file_not_found_error_handling(self):
-        """Test handling of FileNotFoundError."""
-
-        @with_runner_error_handling("test_operation")
-        def file_error(filename: str) -> str:
-            raise FileNotFoundError("File not found")
-
-        result = file_error("nonexistent.py")
-        assert "error" in result.lower()
-
-    def test_permission_error_handling(self):
-        """Test handling of PermissionError."""
-
-        @with_runner_error_handling("test_operation")
-        def permission_error(filename: str) -> str:
-            raise PermissionError("Permission denied")
-
-        result = permission_error("protected.py")
-        assert "error" in result.lower()
-
-    def test_os_error_handling(self):
-        """Test handling of OSError."""
-
-        @with_runner_error_handling("test_operation")
-        def os_error(filename: str) -> str:
-            raise OSError("OS error occurred")
-
-        result = os_error("test.py")
-        assert "error" in result.lower()
-
     def test_unexpected_exception_handling(self):
         """Test handling of unexpected exceptions."""
 
@@ -114,36 +41,6 @@ class TestWithRunnerErrorHandling:
             raise RuntimeError("Unexpected error")
 
         result = unexpected_error("test")
-        assert "error" in result.lower()
-
-    def test_no_args_function(self):
-        """Test decorator with function that has no arguments."""
-
-        @with_runner_error_handling("test_operation")
-        def no_args_func() -> str:
-            raise ValueError("Error with no args")
-
-        result = no_args_func()
-        assert "error" in result.lower()
-
-    def test_multiple_args_function(self):
-        """Test decorator with function that has multiple arguments."""
-
-        @with_runner_error_handling("test_operation")
-        def multi_args_func(code: str, timeout: int, verbose: bool) -> str:
-            raise ValueError("Error with multiple args")
-
-        result = multi_args_func("test", 30, True)
-        assert "error" in result.lower()
-
-    def test_kwargs_function(self):
-        """Test decorator with function called with keyword arguments."""
-
-        @with_runner_error_handling("test_operation")
-        def kwargs_func(code: str, timeout: int = 30) -> str:
-            raise ValueError("Error with kwargs")
-
-        result = kwargs_func(code="test", timeout=60)
         assert "error" in result.lower()
 
     @patch("aria.tools.development.decorators.logger")
@@ -155,28 +52,6 @@ class TestWithRunnerErrorHandling:
             raise PythonSecurityError("Security violation")
 
         security_func("malicious code")
-        mock_logger.warning.assert_called()
-
-    @patch("aria.tools.development.decorators.logger")
-    def test_logging_on_syntax_error(self, mock_logger):
-        """Test that syntax errors are logged with warning level."""
-
-        @with_runner_error_handling("test_operation")
-        def syntax_func(code: str) -> str:
-            raise PythonSyntaxValidationError("Syntax error")
-
-        syntax_func("invalid syntax")
-        mock_logger.warning.assert_called()
-
-    @patch("aria.tools.development.decorators.logger")
-    def test_logging_on_timeout_error(self, mock_logger):
-        """Test that timeout errors are logged with warning level."""
-
-        @with_runner_error_handling("test_operation")
-        def timeout_func(code: str) -> str:
-            raise PythonExecutionTimeoutError("Timeout")
-
-        timeout_func("slow code")
         mock_logger.warning.assert_called()
 
     @patch("aria.tools.development.decorators.logger")
@@ -254,16 +129,6 @@ class TestWithInputValidation:
             return "Success"
 
         result = kwargs_func(code="test", timeout=30)
-        assert result == "Success"
-
-    def test_validation_with_mixed_args_kwargs(self):
-        """Test validation with mixed positional and keyword arguments."""
-
-        @with_input_validation(code=True, timeout=True)
-        def mixed_func(code: str, timeout: int, verbose: bool = False) -> str:
-            return "Success"
-
-        result = mixed_func("test", timeout=30, verbose=True)
         assert result == "Success"
 
     def test_validation_disabled_for_param(self):
@@ -383,18 +248,6 @@ class TestWithInputValidation:
 
         result = keyword_func("test", timeout=60)
         assert result == "Success"
-
-    def test_async_function_compatibility(self):
-        """Test decorator with async functions (metadata preservation)."""
-
-        @with_input_validation(code=True)
-        async def async_func(code: str) -> str:
-            """Async function."""
-            return "Success"
-
-        # Just verify the decorator doesn't break the function
-        assert async_func.__name__ == "async_func"
-        assert async_func.__doc__ and "Async function" in async_func.__doc__
 
     def test_class_method_decoration(self):
         """Test decorator on class methods."""

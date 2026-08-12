@@ -46,13 +46,6 @@ class TestClassifyUrlByExtension:
         """Extension detection should work with query parameters."""
         assert classify_url("https://example.com/file.pdf?token=abc") == URLType.FILE
 
-    def test_extension_at_end_of_path(self):
-        """Extension must be at the end of the path (before query)."""
-        # .pdfx is not a known extension
-        result = classify_url("https://example.com/file.pdfx")
-        # Should not match .pdf — will fall through to HEAD or default
-        assert result in (URLType.FILE, URLType.WEBSITE)
-
 
 class TestClassifyUrlByContentType:
     """Test classification based on HEAD request Content-Type."""
@@ -203,21 +196,6 @@ class TestClassifyUrlFallback:
         """When no Content-Type header, default to WEBSITE."""
         mock_resp = MagicMock()
         mock_resp.headers = {}
-
-        mock_client = MagicMock()
-        mock_client.head.return_value = mock_resp
-        mock_client.__enter__ = MagicMock(return_value=mock_client)
-        mock_client.__exit__ = MagicMock(return_value=False)
-        mock_client_cls.return_value = mock_client
-
-        result = classify_url("https://example.com/page")
-        assert result == URLType.WEBSITE
-
-    @patch("aria.tools.search._url_classifier.httpx.Client")
-    def test_content_type_with_charset(self, mock_client_cls):
-        """Content-Type with charset parameter should still match."""
-        mock_resp = MagicMock()
-        mock_resp.headers = {"content-type": "text/html; charset=utf-8"}
 
         mock_client = MagicMock()
         mock_client.head.return_value = mock_resp

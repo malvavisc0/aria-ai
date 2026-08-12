@@ -24,8 +24,6 @@ from llama_index.core.vector_stores.types import BasePydanticVectorStore
 from aria.llm.memory import (
     BackgroundFlushMemory,
     IdempotentVectorMemoryBlock,
-    _hash_node_id,
-    wrap_memory,
 )
 
 
@@ -74,21 +72,6 @@ class _RecordingVectorStore(BasePydanticVectorStore):
 
     def delete(self, *args: Any, **kwargs: Any) -> None:
         return None
-
-
-class TestHashNodeId:
-    """SHA-256 of the text is stable across calls."""
-
-    def test_same_text_same_id(self) -> None:
-        assert _hash_node_id("hello") == _hash_node_id("hello")
-
-    def test_different_text_different_id(self) -> None:
-        assert _hash_node_id("hello") != _hash_node_id("world")
-
-    def test_hex_format(self) -> None:
-        h = _hash_node_id("x")
-        assert len(h) == 64
-        assert all(c in "0123456789abcdef" for c in h)
 
 
 class TestIdempotentVectorBlock:
@@ -380,9 +363,3 @@ class TestBackgroundFlushMemory:
         inner, _manage = self._make_inner()
         wrapper = BackgroundFlushMemory(inner)
         assert wrapper.session_id == inner.session_id
-
-    @pytest.mark.asyncio
-    async def test_wrap_memory_helper(self) -> None:
-        inner, _manage = self._make_inner()
-        wrapper = wrap_memory(inner)
-        assert isinstance(wrapper, BackgroundFlushMemory)

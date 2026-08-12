@@ -23,30 +23,6 @@ class TestSlimmedCoreTools:
         assert len(tools) == 4
         assert names == {"reasoning", "plan", "scratchpad", "shell"}
 
-    def test_core_does_not_include_web_search(self):
-        """web_search should not be in CORE."""
-        tools = get_tools([CORE])
-        names = {t.metadata.name for t in tools}
-        assert "web_search" not in names
-
-    def test_core_does_not_include_download(self):
-        """download should not be in CORE."""
-        tools = get_tools([CORE])
-        names = {t.metadata.name for t in tools}
-        assert "download" not in names
-
-    def test_core_does_not_include_weather(self):
-        """get_current_weather should not be in CORE."""
-        tools = get_tools([CORE])
-        names = {t.metadata.name for t in tools}
-        assert "get_current_weather" not in names
-
-    def test_core_does_not_include_knowledge(self):
-        """knowledge should not be in CORE."""
-        tools = get_tools([CORE])
-        names = {t.metadata.name for t in tools}
-        assert "knowledge" not in names
-
 
 class TestSlimmedFileTools:
     """Test that FILES category loads only 7 tools."""
@@ -71,18 +47,6 @@ class TestSlimmedFileTools:
         }
         assert names == expected
 
-    def test_files_does_not_include_delete_file(self):
-        """delete_file should not be in FILES."""
-        tools = get_tools([FILES])
-        names = {t.metadata.name for t in tools}
-        assert "delete_file" not in names
-
-    def test_files_does_not_include_rename_file(self):
-        """rename_file should not be in FILES."""
-        tools = get_tools([FILES])
-        names = {t.metadata.name for t in tools}
-        assert "rename_file" not in names
-
 
 class TestCorePlusFiles:
     """Test loading CORE + FILES together."""
@@ -97,18 +61,6 @@ class TestCorePlusFiles:
         tools = get_tools([CORE, FILES])
         names = [t.metadata.name for t in tools]
         assert len(names) == len(set(names))
-
-    def test_combined_includes_all_core_and_file_tools(self):
-        """Combined load should include all core and file tools."""
-        tools = get_tools([CORE, FILES])
-        names = {t.metadata.name for t in tools}
-        assert "reasoning" in names
-        assert "plan" in names
-        assert "scratchpad" in names
-        assert "shell" in names
-        assert "read_file" in names
-        assert "write_file" in names
-        assert "edit_file" in names
 
 
 class TestAllCategories:

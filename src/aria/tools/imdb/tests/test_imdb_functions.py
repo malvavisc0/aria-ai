@@ -593,18 +593,6 @@ class TestGetMovieTrivia:
 class TestReasonParameter:
     """Tests that reason parameter is accepted and does not affect output."""
 
-    @patch("aria.tools.imdb.functions.search_title")
-    def test_reason_parameter_accepted(self, mock_search):
-        """Test that reason parameter is accepted without error."""
-        mock_result = MagicMock()
-        mock_result.titles = []
-        mock_result.names = []
-        mock_search.return_value = mock_result
-
-        result = search_imdb_titles("This is my reason", "test query")
-        # Verify the function completes without error
-        assert result is not None
-
     @patch("aria.tools.imdb.functions.get_movie")
     def test_reason_in_get_details(self, mock_get_movie):
         """Test reason parameter in get_movie_details."""

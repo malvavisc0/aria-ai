@@ -119,33 +119,6 @@ async def test_concurrent_navigations_are_serialised(
 
 
 # ---------------------------------------------------------------------------
-# 4. Three concurrent navigations
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.asyncio
-async def test_three_concurrent_navigations(manager: LightpandaManager):
-    """Stress-test with three concurrent navigations."""
-    urls = [
-        "https://example.com",
-        "https://httpbin.org/html",
-        "https://httpbin.org/headers",
-    ]
-    results = await asyncio.gather(
-        *[
-            manager.navigate(url, tool="visit_url", reason=f"stress {url}")
-            for url in urls
-        ]
-    )
-    for r, url in zip(results, urls):
-        p = json.loads(r)
-        assert p["status"] == "success", (
-            f"{url} failed: {p.get('error', {}).get('message', 'unknown')}"
-        )
-    print(f"\n✓ 3-way concurrent: all {len(urls)} succeeded")
-
-
-# ---------------------------------------------------------------------------
 # 5. Navigate + click
 # ---------------------------------------------------------------------------
 

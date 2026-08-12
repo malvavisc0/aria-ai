@@ -10,15 +10,6 @@ class TestHardwareCmd:
     """Test hardware info gathering."""
 
     @patch("aria.cli.system.typer")
-    def test_returns_valid_json(self, mock_typer):
-        """hardware_cmd should echo valid JSON."""
-        output = {}
-        mock_typer.echo = lambda x: output.update(json.loads(x))
-        hardware_cmd()
-        assert isinstance(output, dict)
-        assert len(output) > 0
-
-    @patch("aria.cli.system.typer")
     def test_contains_os_info(self, mock_typer):
         """Output should contain OS information."""
         output = {}

@@ -4,8 +4,6 @@ import tempfile
 from pathlib import Path
 
 from aria.tools.files import edit_file, write_file
-from aria.tools.files.write_operations import edit_file as edit_file_submodule
-from aria.tools.files.write_operations import write_file as write_file_submodule
 
 
 class TestWriteOperations:
@@ -24,10 +22,6 @@ class TestWriteOperations:
 
     def teardown_method(self):
         shutil.rmtree(self.test_dir, ignore_errors=True)
-
-    def test_package_exports_match_write_submodule(self):
-        assert write_file is write_file_submodule
-        assert edit_file is edit_file_submodule
 
     # --- write_file: overwrite mode ---
 

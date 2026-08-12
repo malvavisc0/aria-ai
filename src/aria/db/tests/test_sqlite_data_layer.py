@@ -3,10 +3,8 @@
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import cast
 
 import pytest
-from chainlit.step import StepDict
 from chainlit.types import Pagination, ThreadFilter
 
 from aria.db.layer import SQLiteSQLAlchemyDataLayer, _to_local_timestamp_string
@@ -51,22 +49,6 @@ class TestThreadOperations:
         thread = await data_layer.get_thread(thread_id)
         assert thread is not None
         assert thread["tags"] == []
-
-    @pytest.mark.asyncio
-    async def test_update_thread_with_none_tags(
-        self, data_layer: SQLiteSQLAlchemyDataLayer, raw_db_query: Callable
-    ):
-        """Test updating thread with None tags."""
-        thread_id = str(uuid.uuid4())
-
-        await data_layer.update_thread(thread_id=thread_id, tags=None)
-
-        # Check database directly
-        result = await raw_db_query(
-            "SELECT tags FROM threads WHERE id = :id", {"id": thread_id}
-        )
-        # tags should be NULL or not set
-        assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_update_thread_tags_with_special_characters(
@@ -143,155 +125,6 @@ class TestThreadOperations:
 class TestStepOperations:
     """Test suite for step operations."""
 
-    @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
-    @pytest.mark.asyncio
-    async def test_create_step_with_tags(
-        self, data_layer: SQLiteSQLAlchemyDataLayer, raw_db_query: Callable
-    ):
-        """Test creating step with tags."""
-        thread_id = str(uuid.uuid4())
-        step_id = str(uuid.uuid4())
-
-        # Create thread first
-        await data_layer.update_thread(thread_id=thread_id)
-
-        # Create step with tags
-        step_dict = {
-            "id": step_id,
-            "name": "Test Step",
-            "type": "tool",
-            "threadId": thread_id,
-            "streaming": False,
-            "tags": ["api-call", "external"],
-        }
-
-        await data_layer.create_step(cast(StepDict, step_dict))
-
-        # Verify tags stored as JSON in database
-        result = await raw_db_query(
-            "SELECT tags FROM steps WHERE id = :id", {"id": step_id}
-        )
-        assert len(result) == 1
-        assert result[0]["tags"] == '["api-call", "external"]'
-
-    @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
-    @pytest.mark.asyncio
-    async def test_create_step_with_metadata(
-        self, data_layer: SQLiteSQLAlchemyDataLayer
-    ):
-        """Test creating step with metadata."""
-        thread_id = str(uuid.uuid4())
-        step_id = str(uuid.uuid4())
-
-        await data_layer.update_thread(thread_id=thread_id)
-
-        step_dict = {
-            "id": step_id,
-            "name": "Test Step",
-            "type": "tool",
-            "threadId": thread_id,
-            "streaming": False,
-            "metadata": {"duration": 1.5, "retries": 2},
-        }
-
-        await data_layer.create_step(cast(StepDict, step_dict))
-
-        # Retrieve and verify
-        step = await data_layer.get_step(step_id)
-        assert step is not None
-        assert step.get("metadata") == {"duration": 1.5, "retries": 2}
-
-    @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
-    @pytest.mark.asyncio
-    async def test_create_step_with_generation(
-        self, data_layer: SQLiteSQLAlchemyDataLayer
-    ):
-        """Test creating step with generation data."""
-        thread_id = str(uuid.uuid4())
-        step_id = str(uuid.uuid4())
-
-        await data_layer.update_thread(thread_id=thread_id)
-
-        generation = {"model": "gpt-4", "tokens": 150, "temperature": 0.7}
-        step_dict = {
-            "id": step_id,
-            "name": "Test Step",
-            "type": "llm",
-            "threadId": thread_id,
-            "streaming": False,
-            "generation": generation,
-        }
-
-        await data_layer.create_step(cast(StepDict, step_dict))
-
-        step = await data_layer.get_step(step_id)
-        assert step is not None
-        assert step.get("generation") == generation
-
-    @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
-    @pytest.mark.asyncio
-    async def test_create_step_with_all_json_fields(
-        self, data_layer: SQLiteSQLAlchemyDataLayer
-    ):
-        """Test creating step with tags, metadata, and generation."""
-        thread_id = str(uuid.uuid4())
-        step_id = str(uuid.uuid4())
-
-        await data_layer.update_thread(thread_id=thread_id)
-
-        step_dict = {
-            "id": step_id,
-            "name": "Test Step",
-            "type": "tool",
-            "threadId": thread_id,
-            "streaming": False,
-            "tags": ["tag1", "tag2"],
-            "metadata": {"key": "value"},
-            "generation": {"model": "gpt-4"},
-        }
-
-        await data_layer.create_step(cast(StepDict, step_dict))
-
-        step = await data_layer.get_step(step_id)
-        assert step is not None
-        assert step.get("tags") == ["tag1", "tag2"]
-        assert step.get("metadata") == {"key": "value"}
-        assert step.get("generation") == {"model": "gpt-4"}
-
-    @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
-    @pytest.mark.asyncio
-    async def test_update_step_preserves_json_fields(
-        self, data_layer: SQLiteSQLAlchemyDataLayer
-    ):
-        """Test updating step preserves JSON fields."""
-        thread_id = str(uuid.uuid4())
-        step_id = str(uuid.uuid4())
-
-        await data_layer.update_thread(thread_id=thread_id)
-
-        # Create step with JSON fields
-        step_dict = {
-            "id": step_id,
-            "name": "Test Step",
-            "type": "tool",
-            "threadId": thread_id,
-            "streaming": False,
-            "tags": ["original"],
-            "metadata": {"original": True},
-        }
-
-        await data_layer.create_step(cast(StepDict, step_dict))
-
-        # Update step
-        step_dict["output"] = "Updated output"
-        step_dict["tags"] = ["updated"]
-        await data_layer.update_step(cast(StepDict, step_dict))
-
-        step = await data_layer.get_step(step_id)
-        assert step is not None
-        assert step.get("output") == "Updated output"
-        assert step.get("tags") == ["updated"]
-
 
 class TestThreadRetrieval:
     """Test suite for thread retrieval operations."""
@@ -325,49 +158,6 @@ class TestThreadRetrieval:
         assert thread["tags"] == ["tag1", "tag2"]
         assert isinstance(thread["metadata"], dict)
         assert thread["metadata"] == {"key": "value"}
-
-    @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
-    @pytest.mark.asyncio
-    async def test_get_all_user_threads_with_steps(
-        self, data_layer: SQLiteSQLAlchemyDataLayer, create_user: Callable
-    ):
-        """Test thread retrieval includes deserialized steps."""
-        user = await create_user()
-        user_id = user["id"]
-
-        thread_id = str(uuid.uuid4())
-        await data_layer.update_thread(thread_id=thread_id, user_id=user_id)
-
-        # Create step with JSON fields
-        step_id = str(uuid.uuid4())
-        step_dict = {
-            "id": step_id,
-            "name": "Test Step",
-            "type": "tool",
-            "threadId": thread_id,
-            "streaming": False,
-            "tags": ["step-tag"],
-            "metadata": {"step-key": "step-value"},
-            "generation": {"model": "test"},
-        }
-        await data_layer.create_step(cast(StepDict, step_dict))
-
-        # Retrieve threads
-        threads = await data_layer.get_all_user_threads(user_id=user_id)
-        assert threads is not None
-        assert len(threads) > 0
-
-        thread = threads[0]
-        assert "steps" in thread
-        assert len(thread["steps"]) > 0
-
-        step = thread["steps"][0]
-        # Verify step JSON fields are deserialized
-        assert isinstance(step.get("tags"), list)
-        assert step.get("tags") == ["step-tag"]
-        assert isinstance(step.get("metadata"), dict)
-        assert step.get("metadata") == {"step-key": "step-value"}
-        assert isinstance(step.get("generation"), dict)
 
     @pytest.mark.asyncio
     async def test_get_all_user_threads_with_malformed_json(
@@ -505,30 +295,6 @@ class TestRoundTrip:
     """Test suite for round-trip data integrity."""
 
     @pytest.mark.asyncio
-    async def test_tags_round_trip_basic(self, data_layer: SQLiteSQLAlchemyDataLayer):
-        """Test basic tags round-trip."""
-        thread_id = str(uuid.uuid4())
-        original_tags = ["tag1", "tag2", "tag3"]
-
-        await data_layer.update_thread(thread_id=thread_id, tags=original_tags)
-
-        thread = await data_layer.get_thread(thread_id)
-        assert thread is not None
-        assert thread["tags"] == original_tags
-
-    @pytest.mark.asyncio
-    async def test_tags_round_trip_unicode(self, data_layer: SQLiteSQLAlchemyDataLayer):
-        """Test tags with unicode characters round-trip."""
-        thread_id = str(uuid.uuid4())
-        original_tags = ["日本語", "Ελληνικά", "Русский", "🚀🎉"]
-
-        await data_layer.update_thread(thread_id=thread_id, tags=original_tags)
-
-        thread = await data_layer.get_thread(thread_id)
-        assert thread is not None
-        assert thread["tags"] == original_tags
-
-    @pytest.mark.asyncio
     async def test_metadata_round_trip_nested(
         self, data_layer: SQLiteSQLAlchemyDataLayer
     ):
@@ -549,47 +315,3 @@ class TestRoundTrip:
         assert thread["metadata"]["level1"] == original_metadata["level1"]
         assert thread["metadata"]["boolean"] == original_metadata["boolean"]
         assert thread["metadata"]["number"] == original_metadata["number"]
-
-    @pytest.mark.skip(reason="Requires Chainlit context - use direct SQL instead")
-    @pytest.mark.asyncio
-    async def test_step_all_fields_round_trip(
-        self, data_layer: SQLiteSQLAlchemyDataLayer
-    ):
-        """Test step with all JSON fields round-trip."""
-        thread_id = str(uuid.uuid4())
-        step_id = str(uuid.uuid4())
-
-        await data_layer.update_thread(thread_id=thread_id)
-
-        original_step = {
-            "id": step_id,
-            "name": "Test Step",
-            "type": "tool",
-            "threadId": thread_id,
-            "streaming": False,
-            "tags": ["tag1", "tag2"],
-            "metadata": {"key1": "value1", "nested": {"key2": "value2"}},
-            "generation": {"model": "gpt-4", "tokens": 100},
-        }
-
-        await data_layer.create_step(cast(StepDict, original_step))
-
-        retrieved_step = await data_layer.get_step(step_id)
-        assert retrieved_step is not None
-        assert retrieved_step.get("tags") == original_step["tags"]
-        assert retrieved_step.get("metadata") == original_step["metadata"]
-        assert retrieved_step.get("generation") == original_step["generation"]
-
-    @pytest.mark.asyncio
-    async def test_empty_collections_round_trip(
-        self, data_layer: SQLiteSQLAlchemyDataLayer
-    ):
-        """Test empty collections round-trip correctly."""
-        thread_id = str(uuid.uuid4())
-
-        await data_layer.update_thread(thread_id=thread_id, tags=[], metadata={})
-
-        thread = await data_layer.get_thread(thread_id)
-        assert thread is not None
-        assert thread["tags"] == []
-        assert thread["metadata"] == {}

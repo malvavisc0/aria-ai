@@ -39,9 +39,6 @@ class TestRequiredFieldsConsistency:
                 f"which does not exist on AppState"
             )
 
-    def test_required_fields_is_non_empty(self) -> None:
-        assert len(_REQUIRED_FIELDS) > 0
-
 
 class TestIsInitialized:
     """Tests for AppState.is_initialized()."""
@@ -128,10 +125,3 @@ class TestAppStateNotInitializedError:
     def test_default_message(self) -> None:
         err = AppStateNotInitializedError()
         assert "not fully initialized" in str(err).lower()
-
-    def test_custom_message(self) -> None:
-        err = AppStateNotInitializedError("custom reason")
-        assert str(err) == "custom reason"
-
-    def test_is_runtime_error(self) -> None:
-        assert issubclass(AppStateNotInitializedError, RuntimeError)

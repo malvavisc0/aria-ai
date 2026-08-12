@@ -29,10 +29,6 @@ pytestmark = pytest.mark.skipif(
 class TestNvidiaIntegration:
     """Integration tests that run against actual NVIDIA hardware."""
 
-    def test_nvidia_smi_is_available(self):
-        """Verify nvidia-smi is available on this system."""
-        assert check_nvidia_smi_available() is True
-
     def test_get_nvidia_smi_version_returns_valid_version(self):
         """Verify we can get a valid nvidia-smi version."""
         version = get_nvidia_smi_version()

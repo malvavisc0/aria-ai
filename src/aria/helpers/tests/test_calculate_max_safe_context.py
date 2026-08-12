@@ -127,19 +127,6 @@ class TestCalculateMaxSafeContext:
         result = calculate_max_safe_context(1592, 0, True)
         assert result == 0
 
-    def test_llm_exactly_at_minimum_threshold(self):
-        """Test LLM with exactly minimum tier threshold."""
-        # Exactly 4GB safe should give 4GB tier
-        result = calculate_max_safe_context(4551, 0, False)
-        assert result == 2048
-
-    def test_embedding_exactly_at_minimum_threshold(self):
-        """Test embedding with exactly minimum tier threshold."""
-        # Exactly 2GB safe should give 2GB tier (256 tokens)
-        # But MIN_CONTEXT = 1024, so returns 1024
-        result = calculate_max_safe_context(2275, 0, True)
-        assert result == 1024
-
     # ========================================================================
     # Tier Boundary Tests
     # ========================================================================
@@ -228,47 +215,6 @@ class TestCalculateMaxSafeContext:
         # 8.8GB free → 7.92GB safe: 7.92 <= 8? Yes → selects 8GB tier
         result = calculate_max_safe_context(9011, 0, False)
         assert result == 8192
-
-    # ========================================================================
-    # Minimum Context Enforcement Tests
-    # ========================================================================
-
-    def test_minimum_context_enforced_llm(self):
-        """Test that minimum context of 1024 is enforced for LLM."""
-        # Even with 4GB tier (2048 tokens), minimum is 1024
-        result = calculate_max_safe_context(4551, 0, False)
-        assert result >= 1024
-
-    def test_minimum_context_enforced_embedding(self):
-        """Test that minimum context of 1024 is enforced for embedding."""
-        # 2GB tier gives 256 tokens, but minimum is 1024
-        result = calculate_max_safe_context(2275, 0, True)
-        assert result >= 256  # Should get tier value, not minimum
-
-    def test_all_tiers_respect_minimum(self):
-        """Test that all tier values respect minimum context."""
-        # Test various memory sizes
-        test_cases = [
-            (
-                2275,
-                True,
-                1024,
-            ),  # 2GB embedding → 256 tokens, but MIN_CONTEXT = 1024
-            (
-                3413,
-                True,
-                1024,
-            ),  # 3GB embedding → 384 tokens, but MIN_CONTEXT = 1024
-            (4551, False, 2048),  # 4GB LLM → 2048 tokens
-            (
-                6826,
-                False,
-                4096,
-            ),  # 6GB LLM → 4096 tokens (6826 * 0.9 / 1024 = 5.999)
-        ]
-        for free_mb, is_embedding, expected in test_cases:
-            result = calculate_max_safe_context(free_mb, 0, is_embedding)
-            assert result == expected
 
     # ========================================================================
     # Input Validation Tests

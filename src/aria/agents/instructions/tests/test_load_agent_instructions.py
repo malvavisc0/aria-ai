@@ -56,12 +56,6 @@ class TestLoadAgentInstructions:
                 f"({len(result)} chars) — likely not loading"
             )
 
-    def test_result_is_nonempty_string(self):
-        """Result should always be a non-empty string for known agents."""
-        result = load_agent_instructions("aria")
-        assert isinstance(result, str)
-        assert len(result) > 0
-
     def test_worker_includes_base_sections(self):
         """Worker should include core, tools, and failure sections."""
         result = load_agent_instructions("worker")

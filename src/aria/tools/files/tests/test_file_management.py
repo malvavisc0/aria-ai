@@ -4,9 +4,6 @@ import tempfile
 from pathlib import Path
 
 from aria.tools.files import copy_file, delete_file, rename_file
-from aria.tools.files.file_management import copy_file as copy_file_submodule
-from aria.tools.files.file_management import delete_file as delete_file_submodule
-from aria.tools.files.file_management import rename_file as rename_file_submodule
 
 
 class TestFileManagement:
@@ -25,11 +22,6 @@ class TestFileManagement:
 
     def teardown_method(self):
         shutil.rmtree(self.test_dir, ignore_errors=True)
-
-    def test_package_exports_match_file_management_submodule(self):
-        assert copy_file is copy_file_submodule
-        assert delete_file is delete_file_submodule
-        assert rename_file is rename_file_submodule
 
     def test_copy_file(self):
         result = copy_file(

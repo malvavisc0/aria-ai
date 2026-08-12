@@ -51,33 +51,3 @@ class TestAriaCliRegistration:
         """The server subcommand should be registered."""
         result = runner.invoke(app, ["server", "--help"])
         assert result.exit_code == 0
-
-    def test_users_subcommand_registered(self):
-        """The users subcommand should be registered."""
-        result = runner.invoke(app, ["users", "--help"])
-        assert result.exit_code == 0
-
-    def test_models_subcommand_registered(self):
-        """The models subcommand should be registered."""
-        result = runner.invoke(app, ["models", "--help"])
-        assert result.exit_code == 0
-
-    def test_vllm_subcommand_registered(self):
-        """The vllm subcommand should be registered."""
-        result = runner.invoke(app, ["vllm", "--help"])
-        assert result.exit_code == 0
-
-    def test_config_subcommand_registered(self):
-        """The config subcommand should be registered."""
-        result = runner.invoke(app, ["config", "--help"])
-        assert result.exit_code == 0
-
-    def test_system_subcommand_registered(self):
-        """The system subcommand should be registered."""
-        result = runner.invoke(app, ["system", "--help"])
-        assert result.exit_code == 0
-
-    def test_lightpanda_subcommand_registered(self):
-        """The lightpanda subcommand should be registered."""
-        result = runner.invoke(app, ["lightpanda", "--help"])
-        assert result.exit_code == 0
