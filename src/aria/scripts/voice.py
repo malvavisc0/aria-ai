@@ -30,8 +30,8 @@ _KOKORO_RELEASES = "https://github.com/nazdridoy/kokoro-tts/releases/download/v1
 # Aria's own GitHub releases (where we host the CUDA build).
 _ARIA_RELEASES = "https://github.com/malvavisc0/aria-ai/releases/download"
 
-# CUDA minimum driver version (matches CUDA 12.4 toolkit requirement).
-_MIN_CUDA_VERSION_FOR_GPU = (12, 4)
+# CUDA minimum driver version (matches CUDA 12.6 toolkit requirement).
+_MIN_CUDA_VERSION_FOR_GPU = (12, 6)
 
 
 def download_whisper_cpp(model: str = "base.en") -> Path:
@@ -159,7 +159,7 @@ def _whisper_download_url(target: str) -> str:
     if target == "cuda":
         from aria import __version__
 
-        return f"{_ARIA_RELEASES}/v{__version__}/whisper-server-cuda-12.4-x86_64.tar.gz"
+        return f"{_ARIA_RELEASES}/v{__version__}/whisper-server-cuda-12.6-x86_64.tar.gz"
     # CPU prebuilt from official whisper.cpp releases
     machine = platform.machine().lower()
     if any(tok in machine for tok in ("aarch64", "arm64")):

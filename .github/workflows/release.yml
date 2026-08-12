@@ -124,14 +124,14 @@ jobs:
         run: |
           mkdir -p staging
           cp /tmp/whisper.cpp/build/bin/whisper-server staging/
-          tar -czf whisper-server-cuda-12.4-x86_64.tar.gz \
+          tar -czf whisper-server-cuda-12.6-x86_64.tar.gz \
             -C staging whisper-server
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: whisper-server-cuda-12.4-x86_64.tar.gz
-          path: whisper-server-cuda-12.4-x86_64.tar.gz
+          name: whisper-server-cuda-12.6-x86_64.tar.gz
+          path: whisper-server-cuda-12.6-x86_64.tar.gz
           retention-days: 7
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -347,7 +347,7 @@ jobs:
       - name: Download whisper CUDA artifact
         uses: actions/download-artifact@v4
         with:
-          name: whisper-server-cuda-12.4-x86_64.tar.gz
+          name: whisper-server-cuda-12.6-x86_64.tar.gz
           path: release-assets/
 
       - name: Create GitHub Release
@@ -359,7 +359,7 @@ jobs:
           files: |
             release-assets/Aria-Windows-x86_64.zip
             release-assets/Aria-macOS-arm64.zip
-            release-assets/whisper-server-cuda-12.4-x86_64.tar.gz
+            release-assets/whisper-server-cuda-12.6-x86_64.tar.gz
           body: |
             ## Aria ${{ github.ref_name }}
 
@@ -369,7 +369,7 @@ jobs:
             |----------|------|
             | Windows (x86_64) | `Aria-Windows-x86_64.zip` |
             | macOS (Apple Silicon) | `Aria-macOS-arm64.zip` |
-            | Linux (NVIDIA CUDA) | `whisper-server-cuda-12.4-x86_64.tar.gz` |
+            | Linux (NVIDIA CUDA) | `whisper-server-cuda-12.6-x86_64.tar.gz` |
 
             ### pip
 

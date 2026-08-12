@@ -12,7 +12,7 @@ from aria.scripts.voice import _detect_whisper_target, _whisper_download_url
 class TestDetectWhisperTarget:
     @patch("aria.scripts.voice.platform.system", return_value="Linux")
     @patch("aria.helpers.nvidia.get_total_vram_mb", return_value=16000)
-    @patch("aria.helpers.nvidia.get_cuda_version", return_value="12.4")
+    @patch("aria.helpers.nvidia.get_cuda_version", return_value="12.6")
     def test_returns_cuda_on_nvidia_linux(self, mock_cuda, mock_vram, mock_sys):
         assert _detect_whisper_target() == "cuda"
 
@@ -38,7 +38,7 @@ class TestWhisperDownloadUrl:
         with patch("aria.__version__", "0.3.5"):
             url = _whisper_download_url("cuda")
         assert "malvavisc0/aria-ai" in url
-        assert "whisper-server-cuda-12.4-x86_64.tar.gz" in url
+        assert "whisper-server-cuda-12.6-x86_64.tar.gz" in url
 
     @patch("aria.scripts.voice.platform.machine", return_value="x86_64")
     def test_cpu_url_uses_official_whisper_releases(self, mock_machine):
