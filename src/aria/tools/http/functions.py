@@ -94,17 +94,19 @@ def http_request(
             return tool_response(
                 tool="http_request",
                 reason=reason,
-                data={
-                    "error": (
+                exc=httpx.HTTPStatusError(
+                    (
                         f"HTTP {response.status_code}: "
                         f"{response.reason_phrase or 'error'}"
                     ),
-                    "status_code": response.status_code,
-                    "url": str(response.url),
-                    "body_file": body_file,
-                    "body_size": body_size,
-                    "content_type": content_type,
-                },
+                    request=response.request,
+                    response=response,
+                ),
+                status_code=response.status_code,
+                url=str(response.url),
+                body_file=body_file,
+                body_size=body_size,
+                content_type=content_type,
             )
 
         return tool_response(
