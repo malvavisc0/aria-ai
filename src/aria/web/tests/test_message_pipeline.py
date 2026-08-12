@@ -236,13 +236,13 @@ class TestEditDetection:
         assert reset_called == []
 
     @pytest.mark.asyncio
-    async def test_successful_stream_calls_send_then_update(self, monkeypatch) -> None:
-        """A successful turn must call send() (register the empty message)
-        then update() (persist final content, stop the blinking dot).
+    async def test_successful_stream_calls_send(self, monkeypatch) -> None:
+        """A successful turn must call send() to persist the final message.
 
-        Regression guard for the bug where send() was called before
-        streaming and update() was never called — leaving the assistant
-        step persisted empty with a forever-blinking streaming dot.
+        The placeholder is no longer sent early — the message is created
+        unsent and only appears in the timeline when the first content
+        token streams (via stream_start), after thinking/tool steps.
+        send() at the end persists it.
         """
         from aria.config.models import Chat as ChatConfigCls
 
@@ -291,20 +291,22 @@ class TestEditDetection:
         await pipeline.on_message_handler(message)
 
         output.send.assert_awaited_once()
-        output.update.assert_awaited_once()
+        output.update.assert_not_awaited()
         output.remove.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_failed_stream_calls_remove_not_update(self, monkeypatch) -> None:
-        """A failed turn must remove the placeholder, never update() it.
+    async def test_failed_stream_before_tokens_skips_remove(self, monkeypatch) -> None:
+        """A failed turn where no tokens were streamed must not call remove()
+        (nothing to remove — the message was never sent to the frontend).
 
-        Note: a separate error cl.Message is also sent by _fail_turn; that
-        uses its own mock, so we only assert on the streaming output mock.
+        A separate error cl.Message is sent by _fail_turn; that uses its own
+        mock, so we only assert on the streaming output mock.
         """
         from aria.config.models import Chat as ChatConfigCls
 
         monkeypatch.setattr(ChatConfigCls.__dict__["max_iteration"], "_value", 10)
-        monkeypatch.setattr(pipeline, "_mark_message_processed", AsyncMock())
+        mark_mock = AsyncMock()
+        monkeypatch.setattr(pipeline, "_mark_message_processed", mark_mock)
         monkeypatch.setattr(pipeline, "_rollback_memory", AsyncMock())
         object.__setattr__(pipeline._state, "agents_workflow", MagicMock())
         object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
@@ -338,6 +340,7 @@ class TestEditDetection:
             m.send = AsyncMock()
             m.update = AsyncMock()
             m.remove = AsyncMock()
+            m.streaming = False
             outputs.append(m)
             return m
 
@@ -354,12 +357,79 @@ class TestEditDetection:
 
         await pipeline.on_message_handler(message)
 
-        # First Message is the streaming placeholder; the second (if any) is
-        # the error notice sent by _fail_turn.
+        # First Message is the unsent streaming output; the second is the
+        # error notice sent by _fail_turn.
         streaming_output = outputs[0]
-        streaming_output.send.assert_awaited_once()
-        streaming_output.remove.assert_awaited_once()
+        streaming_output.send.assert_not_awaited()
+        streaming_output.remove.assert_not_awaited()
         streaming_output.update.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_truncated_stream_persists_partial_output(self, monkeypatch) -> None:
+        """When the stream is interrupted after tokens were emitted, the
+        partial output must be persisted via send() so it survives reload.
+        The user message marking is left to _fail_turn.
+        """
+        from aria.config.models import Chat as ChatConfigCls
+
+        monkeypatch.setattr(ChatConfigCls.__dict__["max_iteration"], "_value", 10)
+        monkeypatch.setattr(pipeline, "_mark_message_processed", AsyncMock())
+        monkeypatch.setattr(pipeline, "_rollback_memory", AsyncMock())
+        object.__setattr__(pipeline._state, "agents_workflow", MagicMock())
+        object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
+        monkeypatch.setattr(
+            pipeline,
+            "handle_message",
+            AsyncMock(return_value=("prompt", {})),
+        )
+
+        async def _raise_with_partial(handler, output):
+            output.answer_text = "partial answer"  # type: ignore[attr-defined]
+            raise RuntimeError("max tokens reached")
+
+        monkeypatch.setattr(pipeline, "stream_agent_response", _raise_with_partial)
+        monkeypatch.setattr(
+            pipeline.cl,
+            "user_session",
+            SimpleNamespace(
+                get=lambda k: MagicMock(
+                    session_id="thread-1",
+                    aget=AsyncMock(return_value=[]),
+                    aget_all=AsyncMock(return_value=[]),
+                ),
+                set=lambda k, v: None,
+            ),
+        )
+
+        output = MagicMock()
+        output.send = AsyncMock()
+        output.update = AsyncMock()
+        output.remove = AsyncMock()
+        output.streaming = True
+        output.content = "partial answer"
+        error_msg = MagicMock()
+        error_msg.send = AsyncMock()
+
+        def _make_message(**kw):
+            if kw.get("content") == "":
+                return output
+            return error_msg
+
+        monkeypatch.setattr(pipeline.cl, "Message", _make_message)
+
+        message = _mock_message(
+            id="msg-1",
+            content="Hello",
+            command=None,
+            thread_id="thread-1",
+            elements=[],
+            metadata={},
+        )
+
+        await pipeline.on_message_handler(message)
+
+        output.send.assert_awaited_once()
+        output.remove.assert_not_awaited()
 
 
 class TestOnMessageHandlerReturn:

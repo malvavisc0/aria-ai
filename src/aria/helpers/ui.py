@@ -5,7 +5,19 @@ from __future__ import annotations
 import re
 
 import chainlit as cl
+from chainlit.context import context
 from llama_index.core.agent.workflow import ToolCall
+
+
+def _current_parent_id() -> str | None:
+    """Return the id of the current Chainlit run step (e.g. on_message).
+
+    Nesting thinking/tool steps under this id makes them render above the
+    assistant answer in the timeline instead of as disconnected top-level
+    entries.
+    """
+    parent = context.current_step
+    return parent.id if parent else None
 
 
 async def send_tool_step(event: ToolCall) -> cl.Step:
@@ -18,6 +30,7 @@ async def send_tool_step(event: ToolCall) -> cl.Step:
     label = _step_label_from_tool_call(event)
     tool_name = (event.tool_name or "").strip() or "tool"
     step = _make_tool_step(label, tool_name)
+    step.parent_id = _current_parent_id()
     step.input = event.tool_kwargs or {}
     if event.tool_id:
         step.metadata = {"tool_id": event.tool_id}
@@ -34,6 +47,7 @@ async def send_thinking_step() -> cl.Step:
         auto_collapse=True,
         show_input=False,
     )
+    step.parent_id = _current_parent_id()
     await step.send()
     return step
 

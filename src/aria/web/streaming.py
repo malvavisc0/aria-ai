@@ -217,17 +217,21 @@ async def stream_agent_response(
     handler,
     output: cl.Message,
 ) -> tuple[bool, dict, str]:
-    """Stream agent events to the UI and return (emitted, meta, answer_text).
+    """Stream agent events to the UI.
+
+    Returns ``(emitted, meta, answer_text)``.
 
     ``answer_text`` is the clean answer only (thinking/reasoning tokens
     excluded) — used by the voice pipeline for TTS so Aria never narrates
     its own internal reasoning.
 
+    If the stream is interrupted by an exception after content was
+    emitted, ``answer_text`` is set on ``output`` as the ``answer_text``
+    attribute before re-raising, so the caller can persist the partial
+    response rather than discarding the turn entirely.
+
     Tool steps are persisted (collapsed) and never removed, so the full
     hierarchy — Thinking ▸ tool ▸ Thinking ▸ tool ▸ answer — stays visible.
-    Each tool step is populated with ``input`` (tool kwargs) on the
-    ``ToolCall`` and ``output`` (tool result) on the matching
-    ``ToolCallResult``, following Chainlit's standard step pattern.
     """
     tools_called: list[str] = []
     thinking_step: cl.Step | None = None
@@ -238,27 +242,30 @@ async def stream_agent_response(
     has_thinking = False
     answer_parts: list[str] = []
 
-    async for event in handler.stream_events():
-        thinking_step, tool_step, e, ce, ht = await _process_stream_event(
-            event,
-            thinking_step,
-            tool_step,
-            thinking_parts,
-            tools_called,
-            output,
-            content_emitted,
-            answer_parts,
-        )
-        emitted |= e
-        content_emitted |= ce
-        has_thinking |= ht
-
     try:
+        async for event in handler.stream_events():
+            thinking_step, tool_step, e, ce, ht = await _process_stream_event(
+                event,
+                thinking_step,
+                tool_step,
+                thinking_parts,
+                tools_called,
+                output,
+                content_emitted,
+                answer_parts,
+            )
+            emitted |= e
+            content_emitted |= ce
+            has_thinking |= ht
+
         handler_result = await handler
+
     except Exception:
         await _finalize_thinking_step(thinking_step)
         if tool_step is not None:
             await tool_step.update()
+        if answer_parts:
+            output.answer_text = "".join(answer_parts).strip()  # type: ignore[attr-defined]
         raise
 
     emitted, _content_emitted, has_thinking = await _finalize_stream(

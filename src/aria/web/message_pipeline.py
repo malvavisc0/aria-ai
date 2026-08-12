@@ -114,12 +114,6 @@ async def _workflow_init(
     return memory, prompt, pipeline_meta, is_edit
 
 
-async def _send_empty_placeholder() -> cl.Message:
-    output = cl.Message(content="")
-    await output.send()
-    return output
-
-
 async def _warn_not_initialized() -> None:
     logger.warning("Message received but agents_workflow is not configured")
     await cl.Message(
@@ -149,16 +143,22 @@ async def _stream_and_finalize(
         _, stream_meta, answer_text = await stream_agent_response(handler, output)
         _run_succeeded = True
     finally:
+        partial = getattr(output, "answer_text", "")
         if _run_succeeded:
             output.answer_text = answer_text  # type: ignore[attr-defined]
             elements = create_render_elements(*extract_renderable_items(answer_text))
             if elements:
                 output.elements = elements
-            await output.update()
+            await output.send()
             await _mark_message_processed(
                 message, extra_metadata={**pipeline_meta, **stream_meta}
             )
-        else:
+        elif partial:
+            elements = create_render_elements(*extract_renderable_items(partial))
+            if elements:
+                output.elements = elements
+            await output.send()
+        elif output.streaming:
             await output.remove()
     return stream_meta
 
@@ -254,7 +254,7 @@ async def on_message_handler(message: cl.Message) -> cl.Message | None:
         _state.validate_initialized()
         memory, prompt, pipeline_meta, _is_edit = await _workflow_init(message)
 
-        output = await _send_empty_placeholder()
+        output = cl.Message(content="")
         await _stream_and_finalize(message, output, pipeline_meta, prompt, memory)
 
         _maybe_rename_thread(message, output)
