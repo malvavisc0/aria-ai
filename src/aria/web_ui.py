@@ -23,6 +23,7 @@ from aria.web.hooks import (
 )
 from aria.web.lifecycle import on_app_shutdown_handler, on_app_startup_handler
 from aria.web.message_pipeline import on_message_handler
+from aria.web.starters import set_starters as _set_starters
 
 
 @cl.on_app_startup
@@ -88,3 +89,8 @@ async def on_mcp_connect(connection, client_session) -> None:
 @cl.on_mcp_disconnect
 async def on_mcp_disconnect(name: str, client_session) -> None:
     await on_mcp_disconnect_handler(name, client_session)
+
+
+@cl.set_starters
+async def set_starters(user: cl.User | None, language: str | None) -> list[cl.Starter]:
+    return _set_starters(user, language)

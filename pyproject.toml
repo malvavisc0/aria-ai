@@ -64,6 +64,7 @@ aria = [
     "public/*.json",
     "public/*.png",
     "public/avatars/*.png",
+    "public/icons/*.svg",
 ]
 
 [dependency-groups]

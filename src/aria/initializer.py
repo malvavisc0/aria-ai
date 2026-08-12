@@ -169,22 +169,36 @@ def setup_database() -> None:
     console.print("   [green]✓[/green] Initialized database")
 
 
-def setup_public_assets() -> None:
-    """Copy public/ assets (CSS, logos, theme) from the package to ARIA_HOME.
+def _copy_tree(src: Path, dest: Path) -> int:
+    """Recursively mirror files from *src* into *dest*, skipping existing.
 
-    Chainlit expects a ``public/`` directory in its CWD. When running
-    from a pip-installed package (e.g. Docker), these files aren't present
-    in the filesystem — they live inside the installed package. This
-    function extracts them once into ARIA_HOME so Chainlit can find them.
+    Existing files are left untouched so user customizations (e.g. an edited
+    ``custom.css``) survive upgrades.  Returns the number of files copied.
+    """
+    copied = 0
+    for item in src.iterdir():
+        target = dest / item.name
+        if item.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            copied += _copy_tree(item, target)
+        elif not target.exists():
+            copy2(item, target)
+            copied += 1
+    return copied
+
+
+def setup_public_assets() -> None:
+    """Sync public/ assets (CSS, logos, icons) from the package to ARIA_HOME.
+
+    Chainlit expects a ``public/`` directory in its CWD. When running from a
+    pip-installed package (e.g. Docker), these files live inside the installed
+    package and must be mirrored into ARIA_HOME.  Missing files are copied on
+    every boot so new assets (e.g. starter icons) reach existing installs.
     """
     import os
-    from shutil import copy2
 
     aria_home = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria"))
     public_dest = aria_home / "public"
-
-    if public_dest.exists():
-        return
 
     public_ref = files("aria").joinpath("public")
     with as_file(public_ref) as public_src:
@@ -192,16 +206,13 @@ def setup_public_assets() -> None:
             return
 
         public_dest.mkdir(parents=True, exist_ok=True)
-        for item in public_src.iterdir():
-            if item.is_dir():
-                sub_dest = public_dest / item.name
-                sub_dest.mkdir(exist_ok=True)
-                for child in item.iterdir():
-                    copy2(child, sub_dest / child.name)
-            else:
-                copy2(item, public_dest / item.name)
+        copied = _copy_tree(public_src, public_dest)
 
-    console.print("   [green]✓[/green] Installed public assets (CSS, logos)")
+    if copied:
+        console.print(
+            f"   [green]✓[/green] Installed {copied} new public asset(s) "
+            "(CSS, logos, icons)"
+        )
 
 
 def setup_logs() -> None:

@@ -9,4 +9,5 @@ Modules:
     message_pipeline: User message processing and agent execution
     session: Session management and memory handling
     state: Global application state management
+    starters: Initial chat starter messages
 """

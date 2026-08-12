@@ -152,8 +152,8 @@ img.logo[alt="logo"] {
 
 /* The assistant mark needs more presence than Chainlit's default 20px avatar. */
 span:has(img[alt*="Avatar" i]) {
-  width: 2rem !important;
-  height: 2rem !important;
+  width: 1.5rem !important;
+  height: 1.5rem !important;
 }
 
 span:has(img[alt*="Avatar" i]) img {
@@ -496,4 +496,17 @@ html.light main {
 
 .watermark {
   opacity: 0.72;
+}
+
+/* Login screen: drop the half/half favicon panel and center the form. */
+#root > .grid.min-h-svh {
+  grid-template-columns: 1fr !important;
+}
+
+#root > .grid.min-h-svh > .relative.bg-muted {
+  display: none !important;
+}
+
+#root > .grid.min-h-svh form > .text-center > h1 {
+  display: none !important;
 }
