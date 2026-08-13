@@ -26,7 +26,7 @@ import subprocess
 import time
 import urllib.request
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 from loguru import logger
@@ -62,6 +62,34 @@ def _pids_on_port(port: int) -> list[int]:
     if result.returncode != 0:
         return []
     return [int(p) for p in result.stdout.strip().split() if p.strip()]
+
+
+def stop_voice_servers(progress: Callable[[str], None] | None = None) -> None:
+    """Stop whisper.cpp and kokoro by killing PIDs bound to their ports.
+
+    External safety net mirroring the vLLM pattern in ``stop_server``. Both
+    voice servers are detached (``start_new_session=True``), so they survive
+    the web UI exiting — even when its own ``on_app_shutdown`` teardown is
+    cut short (e.g. by the ``stop`` timeout). Kill anything still bound to
+    the configured voice ports; it is a no-op when nothing is running.
+
+    Args:
+        progress: Optional callback for human-readable progress messages.
+    """
+    from aria.config.api import Voice
+    from aria.server.process_utils import stop_process_group
+
+    for port, name in (
+        (Voice.whisper_port, "whisper.cpp"),
+        (Voice.kokoro_port, "kokoro TTS"),
+    ):
+        pids = _pids_on_port(port)
+        if not pids:
+            continue
+        if progress:
+            progress(f"Stopping {name} servers\u2026")
+        for pid in pids:
+            stop_process_group(pid, timeout=5.0)
 
 
 def _preflight_port(port: int, name: str) -> None:

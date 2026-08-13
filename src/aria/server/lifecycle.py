@@ -247,6 +247,12 @@ def stop_server(
             vllm._pids = live_pids
         vllm.stop_all()
 
+    # Voice servers are detached and can outlive the web UI's own teardown,
+    # so stop them here as an external safety net (same pattern as vLLM).
+    from aria.server.voice import stop_voice_servers
+
+    stop_voice_servers(progress)
+
     return StopResult(
         web_stopped=web_stopped,
         vllm_skipped=skip_vllm,
