@@ -9,7 +9,7 @@
 ################################################################################
 
 from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, QSize, Qt
-from PySide6.QtGui import QAction, QFont, QIcon
+from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import (
     QComboBox,
     QFormLayout,
@@ -57,24 +57,49 @@ class Ui_MainWindow(object):
         self.verticalLayout_main.setSpacing(16)
         self.verticalLayout_main.setObjectName("verticalLayout_main")
         self.verticalLayout_main.setContentsMargins(24, 24, 24, 24)
-        self.horizontalLayout_topbar = QHBoxLayout()
-        self.horizontalLayout_topbar.setObjectName("horizontalLayout_topbar")
-        self.label_title = QLabel(self.centralwidget)
-        self.label_title.setObjectName("label_title")
-        font = QFont()
-        font.setPointSize(18)
-        self.label_title.setFont(font)
-        self.label_title.setTextFormat(Qt.TextFormat.PlainText)
+        self.horizontalLayout_serviceBar = QHBoxLayout()
+        self.horizontalLayout_serviceBar.setSpacing(12)
+        self.horizontalLayout_serviceBar.setObjectName("horizontalLayout_serviceBar")
+        self.label_ServiceStatus = QLabel(self.centralwidget)
+        self.label_ServiceStatus.setObjectName("label_ServiceStatus")
 
-        self.horizontalLayout_topbar.addWidget(self.label_title)
+        self.horizontalLayout_serviceBar.addWidget(self.label_ServiceStatus)
 
-        self.horizontalSpacer_topbar = QSpacerItem(
+        self.label_uptime_lbl = QLabel(self.centralwidget)
+        self.label_uptime_lbl.setObjectName("label_uptime_lbl")
+
+        self.horizontalLayout_serviceBar.addWidget(self.label_uptime_lbl)
+
+        self.label_ServiceUptime = QLabel(self.centralwidget)
+        self.label_ServiceUptime.setObjectName("label_ServiceUptime")
+
+        self.horizontalLayout_serviceBar.addWidget(self.label_ServiceUptime)
+
+        self.horizontalSpacer_serviceBar = QSpacerItem(
             40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
         )
 
-        self.horizontalLayout_topbar.addItem(self.horizontalSpacer_topbar)
+        self.horizontalLayout_serviceBar.addItem(self.horizontalSpacer_serviceBar)
 
-        self.verticalLayout_main.addLayout(self.horizontalLayout_topbar)
+        self.pushButton_ServiceStart = QPushButton(self.centralwidget)
+        self.pushButton_ServiceStart.setObjectName("pushButton_ServiceStart")
+        self.pushButton_ServiceStart.setEnabled(False)
+
+        self.horizontalLayout_serviceBar.addWidget(self.pushButton_ServiceStart)
+
+        self.pushButton_ServiceStop = QPushButton(self.centralwidget)
+        self.pushButton_ServiceStop.setObjectName("pushButton_ServiceStop")
+        self.pushButton_ServiceStop.setEnabled(False)
+
+        self.horizontalLayout_serviceBar.addWidget(self.pushButton_ServiceStop)
+
+        self.pushButton_ServiceOpen = QPushButton(self.centralwidget)
+        self.pushButton_ServiceOpen.setObjectName("pushButton_ServiceOpen")
+        self.pushButton_ServiceOpen.setEnabled(False)
+
+        self.horizontalLayout_serviceBar.addWidget(self.pushButton_ServiceOpen)
+
+        self.verticalLayout_main.addLayout(self.horizontalLayout_serviceBar)
 
         self.tabWidget = QTabWidget(self.centralwidget)
         self.tabWidget.setObjectName("tabWidget")
@@ -89,119 +114,95 @@ class Ui_MainWindow(object):
         self.horizontalLayout_home_top.setObjectName("horizontalLayout_home_top")
         self.groupBox_Service = QGroupBox(self.tab_home)
         self.groupBox_Service.setObjectName("groupBox_Service")
-        self.verticalLayout_service = QVBoxLayout(self.groupBox_Service)
-        self.verticalLayout_service.setSpacing(8)
-        self.verticalLayout_service.setObjectName("verticalLayout_service")
-        self.verticalLayout_service.setContentsMargins(20, 16, 20, 16)
-        self.horizontalLayout_statusRow = QHBoxLayout()
-        self.horizontalLayout_statusRow.setSpacing(12)
-        self.horizontalLayout_statusRow.setObjectName("horizontalLayout_statusRow")
-        self.label_status_lbl = QLabel(self.groupBox_Service)
-        self.label_status_lbl.setObjectName("label_status_lbl")
-        self.label_status_lbl.setMinimumSize(QSize(50, 0))
+        self.groupBox_Service.setMinimumSize(QSize(320, 0))
+        self.formLayout_services = QFormLayout(self.groupBox_Service)
+        self.formLayout_services.setObjectName("formLayout_services")
+        self.formLayout_services.setHorizontalSpacing(16)
+        self.formLayout_services.setVerticalSpacing(10)
+        self.formLayout_services.setContentsMargins(20, 16, 20, 16)
+        self.label_svc_webui_lbl = QLabel(self.groupBox_Service)
+        self.label_svc_webui_lbl.setObjectName("label_svc_webui_lbl")
 
-        self.horizontalLayout_statusRow.addWidget(self.label_status_lbl)
-
-        self.label_ServiceStatus = QLabel(self.groupBox_Service)
-        self.label_ServiceStatus.setObjectName("label_ServiceStatus")
-
-        self.horizontalLayout_statusRow.addWidget(self.label_ServiceStatus)
-
-        self.horizontalSpacer_statusRow = QSpacerItem(
-            40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        self.formLayout_services.setWidget(
+            0, QFormLayout.ItemRole.LabelRole, self.label_svc_webui_lbl
         )
 
-        self.horizontalLayout_statusRow.addItem(self.horizontalSpacer_statusRow)
+        self.label_SvcWebUI = QLabel(self.groupBox_Service)
+        self.label_SvcWebUI.setObjectName("label_SvcWebUI")
 
-        self.pushButton_ServiceStart = QPushButton(self.groupBox_Service)
-        self.pushButton_ServiceStart.setObjectName("pushButton_ServiceStart")
-        self.pushButton_ServiceStart.setEnabled(False)
-
-        self.horizontalLayout_statusRow.addWidget(self.pushButton_ServiceStart)
-
-        self.pushButton_ServiceStop = QPushButton(self.groupBox_Service)
-        self.pushButton_ServiceStop.setObjectName("pushButton_ServiceStop")
-        self.pushButton_ServiceStop.setEnabled(False)
-
-        self.horizontalLayout_statusRow.addWidget(self.pushButton_ServiceStop)
-
-        self.verticalLayout_service.addLayout(self.horizontalLayout_statusRow)
-
-        self.frame_urlRow = QFrame(self.groupBox_Service)
-        self.frame_urlRow.setObjectName("frame_urlRow")
-        self.frame_urlRow.setFrameShape(QFrame.Shape.NoFrame)
-        self.horizontalLayout_urlRow = QHBoxLayout(self.frame_urlRow)
-        self.horizontalLayout_urlRow.setSpacing(12)
-        self.horizontalLayout_urlRow.setObjectName("horizontalLayout_urlRow")
-        self.horizontalLayout_urlRow.setContentsMargins(0, 0, 0, 0)
-        self.label_url_lbl = QLabel(self.frame_urlRow)
-        self.label_url_lbl.setObjectName("label_url_lbl")
-        self.label_url_lbl.setMinimumSize(QSize(50, 0))
-
-        self.horizontalLayout_urlRow.addWidget(self.label_url_lbl)
-
-        self.label_ServiceURL = QLabel(self.frame_urlRow)
-        self.label_ServiceURL.setObjectName("label_ServiceURL")
-        self.label_ServiceURL.setTextFormat(Qt.TextFormat.RichText)
-        self.label_ServiceURL.setOpenExternalLinks(True)
-
-        self.horizontalLayout_urlRow.addWidget(self.label_ServiceURL)
-
-        self.horizontalSpacer_urlRow = QSpacerItem(
-            40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        self.formLayout_services.setWidget(
+            0, QFormLayout.ItemRole.FieldRole, self.label_SvcWebUI
         )
 
-        self.horizontalLayout_urlRow.addItem(self.horizontalSpacer_urlRow)
+        self.label_svc_vllm_lbl = QLabel(self.groupBox_Service)
+        self.label_svc_vllm_lbl.setObjectName("label_svc_vllm_lbl")
 
-        self.pushButton_ServiceOpen = QPushButton(self.frame_urlRow)
-        self.pushButton_ServiceOpen.setObjectName("pushButton_ServiceOpen")
-        self.pushButton_ServiceOpen.setEnabled(False)
-
-        self.horizontalLayout_urlRow.addWidget(self.pushButton_ServiceOpen)
-
-        self.verticalLayout_service.addWidget(self.frame_urlRow)
-
-        self.frame_detailsRow = QFrame(self.groupBox_Service)
-        self.frame_detailsRow.setObjectName("frame_detailsRow")
-        self.frame_detailsRow.setFrameShape(QFrame.Shape.NoFrame)
-        self.horizontalLayout_detailsRow = QHBoxLayout(self.frame_detailsRow)
-        self.horizontalLayout_detailsRow.setSpacing(12)
-        self.horizontalLayout_detailsRow.setObjectName("horizontalLayout_detailsRow")
-        self.horizontalLayout_detailsRow.setContentsMargins(0, 0, 0, 0)
-        self.label_pid_lbl = QLabel(self.frame_detailsRow)
-        self.label_pid_lbl.setObjectName("label_pid_lbl")
-        self.label_pid_lbl.setMinimumSize(QSize(50, 0))
-
-        self.horizontalLayout_detailsRow.addWidget(self.label_pid_lbl)
-
-        self.label_ServicePID = QLabel(self.frame_detailsRow)
-        self.label_ServicePID.setObjectName("label_ServicePID")
-
-        self.horizontalLayout_detailsRow.addWidget(self.label_ServicePID)
-
-        self.horizontalSpacer_detailsMid = QSpacerItem(
-            20, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        self.formLayout_services.setWidget(
+            1, QFormLayout.ItemRole.LabelRole, self.label_svc_vllm_lbl
         )
 
-        self.horizontalLayout_detailsRow.addItem(self.horizontalSpacer_detailsMid)
+        self.label_SvcVllm = QLabel(self.groupBox_Service)
+        self.label_SvcVllm.setObjectName("label_SvcVllm")
 
-        self.label_uptime_lbl = QLabel(self.frame_detailsRow)
-        self.label_uptime_lbl.setObjectName("label_uptime_lbl")
-
-        self.horizontalLayout_detailsRow.addWidget(self.label_uptime_lbl)
-
-        self.label_ServiceUptime = QLabel(self.frame_detailsRow)
-        self.label_ServiceUptime.setObjectName("label_ServiceUptime")
-
-        self.horizontalLayout_detailsRow.addWidget(self.label_ServiceUptime)
-
-        self.horizontalSpacer_detailsEnd = QSpacerItem(
-            40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        self.formLayout_services.setWidget(
+            1, QFormLayout.ItemRole.FieldRole, self.label_SvcVllm
         )
 
-        self.horizontalLayout_detailsRow.addItem(self.horizontalSpacer_detailsEnd)
+        self.label_svc_whisper_lbl = QLabel(self.groupBox_Service)
+        self.label_svc_whisper_lbl.setObjectName("label_svc_whisper_lbl")
 
-        self.verticalLayout_service.addWidget(self.frame_detailsRow)
+        self.formLayout_services.setWidget(
+            2, QFormLayout.ItemRole.LabelRole, self.label_svc_whisper_lbl
+        )
+
+        self.label_SvcWhisper = QLabel(self.groupBox_Service)
+        self.label_SvcWhisper.setObjectName("label_SvcWhisper")
+
+        self.formLayout_services.setWidget(
+            2, QFormLayout.ItemRole.FieldRole, self.label_SvcWhisper
+        )
+
+        self.label_svc_kokoro_lbl = QLabel(self.groupBox_Service)
+        self.label_svc_kokoro_lbl.setObjectName("label_svc_kokoro_lbl")
+
+        self.formLayout_services.setWidget(
+            3, QFormLayout.ItemRole.LabelRole, self.label_svc_kokoro_lbl
+        )
+
+        self.label_SvcKokoro = QLabel(self.groupBox_Service)
+        self.label_SvcKokoro.setObjectName("label_SvcKokoro")
+
+        self.formLayout_services.setWidget(
+            3, QFormLayout.ItemRole.FieldRole, self.label_SvcKokoro
+        )
+
+        self.label_svc_lightpanda_lbl = QLabel(self.groupBox_Service)
+        self.label_svc_lightpanda_lbl.setObjectName("label_svc_lightpanda_lbl")
+
+        self.formLayout_services.setWidget(
+            4, QFormLayout.ItemRole.LabelRole, self.label_svc_lightpanda_lbl
+        )
+
+        self.label_SvcLightpanda = QLabel(self.groupBox_Service)
+        self.label_SvcLightpanda.setObjectName("label_SvcLightpanda")
+
+        self.formLayout_services.setWidget(
+            4, QFormLayout.ItemRole.FieldRole, self.label_SvcLightpanda
+        )
+
+        self.label_svc_docling_lbl = QLabel(self.groupBox_Service)
+        self.label_svc_docling_lbl.setObjectName("label_svc_docling_lbl")
+
+        self.formLayout_services.setWidget(
+            5, QFormLayout.ItemRole.LabelRole, self.label_svc_docling_lbl
+        )
+
+        self.label_SvcDocling = QLabel(self.groupBox_Service)
+        self.label_SvcDocling.setObjectName("label_SvcDocling")
+
+        self.formLayout_services.setWidget(
+            5, QFormLayout.ItemRole.FieldRole, self.label_SvcDocling
+        )
 
         self.horizontalLayout_home_top.addWidget(self.groupBox_Service)
 
@@ -550,14 +551,13 @@ class Ui_MainWindow(object):
             QCoreApplication.translate("MainWindow", "Ctrl+Q", None)
         )
         # endif // QT_CONFIG(shortcut)
-        self.label_title.setText(QCoreApplication.translate("MainWindow", "Aria", None))
-        self.groupBox_Service.setTitle(
-            QCoreApplication.translate("MainWindow", "Service", None)
-        )
-        self.label_status_lbl.setText(
-            QCoreApplication.translate("MainWindow", "Status", None)
-        )
         self.label_ServiceStatus.setText(
+            QCoreApplication.translate("MainWindow", "-", None)
+        )
+        self.label_uptime_lbl.setText(
+            QCoreApplication.translate("MainWindow", "Uptime", None)
+        )
+        self.label_ServiceUptime.setText(
             QCoreApplication.translate("MainWindow", "-", None)
         )
         self.pushButton_ServiceStart.setText(
@@ -566,25 +566,42 @@ class Ui_MainWindow(object):
         self.pushButton_ServiceStop.setText(
             QCoreApplication.translate("MainWindow", "Stop Server", None)
         )
-        self.label_url_lbl.setText(
-            QCoreApplication.translate("MainWindow", "URL", None)
-        )
-        self.label_ServiceURL.setText(
-            QCoreApplication.translate("MainWindow", "-", None)
-        )
         self.pushButton_ServiceOpen.setText(
             QCoreApplication.translate("MainWindow", "Open Chat", None)
         )
-        self.label_pid_lbl.setText(
-            QCoreApplication.translate("MainWindow", "PID", None)
+        self.groupBox_Service.setTitle(
+            QCoreApplication.translate("MainWindow", "Services", None)
         )
-        self.label_ServicePID.setText(
+        self.label_svc_webui_lbl.setText(
+            QCoreApplication.translate("MainWindow", "Web UI", None)
+        )
+        self.label_SvcWebUI.setText(QCoreApplication.translate("MainWindow", "-", None))
+        self.label_svc_vllm_lbl.setText(
+            QCoreApplication.translate("MainWindow", "vLLM", None)
+        )
+        self.label_SvcVllm.setText(QCoreApplication.translate("MainWindow", "-", None))
+        self.label_svc_whisper_lbl.setText(
+            QCoreApplication.translate("MainWindow", "Whisper STT", None)
+        )
+        self.label_SvcWhisper.setText(
             QCoreApplication.translate("MainWindow", "-", None)
         )
-        self.label_uptime_lbl.setText(
-            QCoreApplication.translate("MainWindow", "Uptime", None)
+        self.label_svc_kokoro_lbl.setText(
+            QCoreApplication.translate("MainWindow", "Kokoro TTS", None)
         )
-        self.label_ServiceUptime.setText(
+        self.label_SvcKokoro.setText(
+            QCoreApplication.translate("MainWindow", "-", None)
+        )
+        self.label_svc_lightpanda_lbl.setText(
+            QCoreApplication.translate("MainWindow", "Lightpanda", None)
+        )
+        self.label_SvcLightpanda.setText(
+            QCoreApplication.translate("MainWindow", "-", None)
+        )
+        self.label_svc_docling_lbl.setText(
+            QCoreApplication.translate("MainWindow", "Docling", None)
+        )
+        self.label_SvcDocling.setText(
             QCoreApplication.translate("MainWindow", "-", None)
         )
         self.groupBox_AI_Connection.setTitle(

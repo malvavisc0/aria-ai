@@ -416,24 +416,20 @@ class ServerHandlersMixin:
     def _update_server_status(self):
         """Update server status display and button states (called every second).
 
-        The Service groupBox uses a compact row layout:
-
-        Idle / Stopped:
-          Row 0:  Status  ○ Idle                          [ Start Server ]
-
-        Running:
-          Row 0:  Status  ● Running (92ms)                [ Stop Server  ]
-          Row 1:  URL     http://localhost:9876            [ Open ]
-          Row 2:  PID     18422     Uptime  00:13:47
+        The service bar above the tabs shows the status pill, uptime, and
+        the Start/Stop/Open Chat buttons. The Services groupBox on the Home
+        tab lists the sub-services (Web UI, vLLM, Whisper, Kokoro,
+        Lightpanda, Docling) with a status pill each.
 
         Starting / Stopping transitional states are shown with a warning
-        badge and the URL/detail rows hidden.
+        badge.
         """
         status = self._server_manager.get_status()
         status_text, status_prop = self._render_status_state(status)
         self.ui.label_ServiceStatus.setText(status_text)
         self._refresh_status_style(self.ui.label_ServiceStatus, status_prop)
         self._render_status_rows(status)
+        self._render_services_panel(status)
         self._render_buttons(status)
         self._render_start_tooltip(status)
         self._sync_tray(status)
@@ -485,12 +481,7 @@ class ServerHandlersMixin:
         return "\u25cb Idle", "idle"
 
     def _render_status_rows(self, status) -> None:
-        """Update the URL, PID, and uptime rows from server status."""
-        self.ui.label_ServiceURL.setText(
-            f'<a href="{Server.get_base_url()}">{Server.get_base_url()}</a>'
-        )
-        self.ui.label_ServiceURL.setOpenExternalLinks(True)
-        self.ui.label_ServicePID.setText(str(status.pid) if status.pid else "-")
+        """Update the uptime label in the service bar."""
         if status.uptime_seconds is not None:
             hours, remainder = divmod(int(status.uptime_seconds), 3600)
             minutes, seconds = divmod(remainder, 60)
@@ -499,6 +490,85 @@ class ServerHandlersMixin:
             )
         else:
             self.ui.label_ServiceUptime.setText("-")
+
+    @staticmethod
+    def _port_open(port: int, host: str = "127.0.0.1") -> bool:
+        """Return True if something is listening on *port* (fast TCP probe)."""
+        import socket
+
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(0.3)
+        try:
+            return sock.connect_ex((host, port)) == 0
+        finally:
+            sock.close()
+
+    def _set_service_row(self, label, text: str, prop: str) -> None:
+        """Set a Services panel row's pill text and status property."""
+        label.setText(text)
+        self._refresh_status_style(label, prop)
+
+    def _render_daemon_row(self, label, port: int, installed: bool) -> None:
+        """Render a daemon-style service row from install state + port probe."""
+        if not installed:
+            self._set_service_row(label, "○ Not installed", "idle")
+        elif self._port_open(port):
+            self._set_service_row(label, "● Running", "running")
+        else:
+            self._set_service_row(label, "○ Down", "error")
+
+    def _render_services_panel(self, status) -> None:
+        """Refresh the per-service status pills in the Services panel.
+
+        Sub-services are probed with fast TCP-connect checks on their ports
+        (localhost refuses instantly when down, so the 1s timer never
+        blocks). Docling is an on-demand worker, not a daemon, so it
+        reports install state instead of a port probe.
+        """
+        from aria.config.api import Lightpanda, Vllm, Voice
+        from aria.config.models import Chat
+
+        # Web UI mirrors the main server status.
+        if status.healthy:
+            self._set_service_row(self.ui.label_SvcWebUI, "● Running", "running")
+        elif status.running:
+            self._set_service_row(self.ui.label_SvcWebUI, "● Starting…", "warning")
+        else:
+            self._set_service_row(self.ui.label_SvcWebUI, "○ Stopped", "idle")
+
+        # vLLM is unmanaged in remote mode — report that instead of probing.
+        if Vllm.remote:
+            self._set_service_row(self.ui.label_SvcVllm, "Remote", "idle")
+        else:
+            self._render_daemon_row(self.ui.label_SvcVllm, Chat.get_port(), True)
+
+        if not Voice.enabled:
+            self._set_service_row(self.ui.label_SvcWhisper, "Disabled", "idle")
+            self._set_service_row(self.ui.label_SvcKokoro, "Disabled", "idle")
+        else:
+            self._render_daemon_row(
+                self.ui.label_SvcWhisper,
+                Voice.whisper_port,
+                Voice.get_whisper_binary_path() is not None,
+            )
+            self._render_daemon_row(
+                self.ui.label_SvcKokoro,
+                Voice.kokoro_port,
+                Voice.is_kokoro_available(),
+            )
+
+        self._render_daemon_row(
+            self.ui.label_SvcLightpanda,
+            Lightpanda.port,
+            Lightpanda.is_available(),
+        )
+
+        from aria.scripts.docling import is_installed as docling_installed
+
+        if docling_installed():
+            self._set_service_row(self.ui.label_SvcDocling, "● Installed", "running")
+        else:
+            self._set_service_row(self.ui.label_SvcDocling, "○ Not installed", "idle")
 
     def _render_buttons(self, status) -> None:
         """Enable/disable service buttons based on server and preflight state.

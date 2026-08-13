@@ -27,9 +27,6 @@ class MainWindow(
         self.ui = Ui_MainWindow()
         self.ui.setupUi(self)
 
-        # Hide redundant title label (window title bar shows "Aria")
-        self.ui.label_title.hide()
-
         # Comfortable minimum size (reconciled with mainwindow.ui)
         self.setMinimumSize(940, 660)
 

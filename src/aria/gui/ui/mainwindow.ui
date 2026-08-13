@@ -43,25 +43,33 @@
      <number>24</number>
     </property>
     <item>
-     <layout class="QHBoxLayout" name="horizontalLayout_topbar">
+     <layout class="QHBoxLayout" name="horizontalLayout_serviceBar">
+      <property name="spacing">
+       <number>12</number>
+      </property>
       <item>
-       <widget class="QLabel" name="label_title">
-        <property name="font">
-         <font>
-          <pointsize>18</pointsize>
-          <weight>600</weight>
-         </font>
-        </property>
+       <widget class="QLabel" name="label_ServiceStatus">
         <property name="text">
-         <string>Aria</string>
-        </property>
-        <property name="textFormat">
-         <enum>Qt::TextFormat::PlainText</enum>
+         <string>-</string>
         </property>
        </widget>
       </item>
       <item>
-       <spacer name="horizontalSpacer_topbar">
+       <widget class="QLabel" name="label_uptime_lbl">
+        <property name="text">
+         <string>Uptime</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="label_ServiceUptime">
+        <property name="text">
+         <string>-</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer_serviceBar">
         <property name="orientation">
          <enum>Qt::Orientation::Horizontal</enum>
         </property>
@@ -72,6 +80,36 @@
          </size>
         </property>
        </spacer>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButton_ServiceStart">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Start Server</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButton_ServiceStop">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Stop Server</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="pushButton_ServiceOpen">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
+        <property name="text">
+         <string>Open Chat</string>
+        </property>
+       </widget>
       </item>
      </layout>
     </item>
@@ -105,247 +143,123 @@
         </property>
         <item>
          <layout class="QHBoxLayout" name="horizontalLayout_home_top">
-          <item>
-           <widget class="QGroupBox" name="groupBox_Service">
-           <property name="title">
-            <string>Service</string>
-           </property>
-           <layout class="QVBoxLayout" name="verticalLayout_service">
-            <property name="spacing">
-             <number>8</number>
+           <item>
+            <widget class="QGroupBox" name="groupBox_Service">
+            <property name="title">
+             <string>Services</string>
             </property>
-            <property name="leftMargin">
-             <number>20</number>
+            <property name="minimumSize">
+             <size>
+              <width>320</width>
+              <height>0</height>
+             </size>
             </property>
-            <property name="topMargin">
-             <number>16</number>
-            </property>
-            <property name="rightMargin">
-             <number>20</number>
-            </property>
-            <property name="bottomMargin">
-             <number>16</number>
-            </property>
-            <item>
-             <layout class="QHBoxLayout" name="horizontalLayout_statusRow">
-              <property name="spacing">
-               <number>12</number>
-              </property>
-              <item>
-               <widget class="QLabel" name="label_status_lbl">
-                <property name="text">
-                 <string>Status</string>
-                </property>
-                <property name="minimumSize">
-                 <size>
-                  <width>50</width>
-                  <height>0</height>
-                 </size>
-                </property>
-               </widget>
-              </item>
-              <item>
-               <widget class="QLabel" name="label_ServiceStatus">
-                <property name="text">
-                 <string>-</string>
-                </property>
-               </widget>
-              </item>
-              <item>
-               <spacer name="horizontalSpacer_statusRow">
-                <property name="orientation">
-                 <enum>Qt::Orientation::Horizontal</enum>
-                </property>
-                <property name="sizeHint" stdset="0">
-                 <size>
-                  <width>40</width>
-                  <height>20</height>
-                 </size>
-                </property>
-               </spacer>
-              </item>
-              <item>
-               <widget class="QPushButton" name="pushButton_ServiceStart">
-                <property name="enabled">
-                 <bool>false</bool>
-                </property>
-                <property name="text">
-                 <string>Start Server</string>
-                </property>
-               </widget>
-              </item>
-              <item>
-               <widget class="QPushButton" name="pushButton_ServiceStop">
-                <property name="enabled">
-                 <bool>false</bool>
-                </property>
-                <property name="text">
-                 <string>Stop Server</string>
-                </property>
-               </widget>
-              </item>
-             </layout>
-            </item>
-            <item>
-             <widget class="QFrame" name="frame_urlRow">
-              <property name="frameShape">
-               <enum>QFrame::Shape::NoFrame</enum>
-              </property>
-              <layout class="QHBoxLayout" name="horizontalLayout_urlRow">
-               <property name="spacing">
-                <number>12</number>
+            <layout class="QFormLayout" name="formLayout_services">
+             <property name="horizontalSpacing">
+              <number>16</number>
+             </property>
+             <property name="verticalSpacing">
+              <number>10</number>
+             </property>
+             <property name="leftMargin">
+              <number>20</number>
+             </property>
+             <property name="topMargin">
+              <number>16</number>
+             </property>
+             <property name="rightMargin">
+              <number>20</number>
+             </property>
+             <property name="bottomMargin">
+              <number>16</number>
+             </property>
+             <item row="0" column="0">
+              <widget class="QLabel" name="label_svc_webui_lbl">
+               <property name="text">
+                <string>Web UI</string>
                </property>
-               <property name="leftMargin">
-                <number>0</number>
+              </widget>
+             </item>
+             <item row="0" column="1">
+              <widget class="QLabel" name="label_SvcWebUI">
+               <property name="text">
+                <string>-</string>
                </property>
-               <property name="topMargin">
-                <number>0</number>
+              </widget>
+             </item>
+             <item row="1" column="0">
+              <widget class="QLabel" name="label_svc_vllm_lbl">
+               <property name="text">
+                <string>vLLM</string>
                </property>
-               <property name="rightMargin">
-                <number>0</number>
+              </widget>
+             </item>
+             <item row="1" column="1">
+              <widget class="QLabel" name="label_SvcVllm">
+               <property name="text">
+                <string>-</string>
                </property>
-               <property name="bottomMargin">
-                <number>0</number>
+              </widget>
+             </item>
+             <item row="2" column="0">
+              <widget class="QLabel" name="label_svc_whisper_lbl">
+               <property name="text">
+                <string>Whisper STT</string>
                </property>
-               <item>
-                <widget class="QLabel" name="label_url_lbl">
-                 <property name="text">
-                  <string>URL</string>
-                 </property>
-                 <property name="minimumSize">
-                  <size>
-                   <width>50</width>
-                   <height>0</height>
-                  </size>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <widget class="QLabel" name="label_ServiceURL">
-                 <property name="text">
-                  <string>-</string>
-                 </property>
-                 <property name="textFormat">
-                  <enum>Qt::TextFormat::RichText</enum>
-                 </property>
-                 <property name="openExternalLinks">
-                  <bool>true</bool>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <spacer name="horizontalSpacer_urlRow">
-                 <property name="orientation">
-                  <enum>Qt::Orientation::Horizontal</enum>
-                 </property>
-                 <property name="sizeHint" stdset="0">
-                  <size>
-                   <width>40</width>
-                   <height>20</height>
-                  </size>
-                 </property>
-                </spacer>
-               </item>
-               <item>
-                <widget class="QPushButton" name="pushButton_ServiceOpen">
-                 <property name="enabled">
-                  <bool>false</bool>
-                 </property>
-                 <property name="text">
-                  <string>Open Chat</string>
-                 </property>
-                </widget>
-               </item>
-              </layout>
-             </widget>
-            </item>
-            <item>
-             <widget class="QFrame" name="frame_detailsRow">
-              <property name="frameShape">
-               <enum>QFrame::Shape::NoFrame</enum>
-              </property>
-              <layout class="QHBoxLayout" name="horizontalLayout_detailsRow">
-               <property name="spacing">
-                <number>12</number>
+              </widget>
+             </item>
+             <item row="2" column="1">
+              <widget class="QLabel" name="label_SvcWhisper">
+               <property name="text">
+                <string>-</string>
                </property>
-               <property name="leftMargin">
-                <number>0</number>
+              </widget>
+             </item>
+             <item row="3" column="0">
+              <widget class="QLabel" name="label_svc_kokoro_lbl">
+               <property name="text">
+                <string>Kokoro TTS</string>
                </property>
-               <property name="topMargin">
-                <number>0</number>
+              </widget>
+             </item>
+             <item row="3" column="1">
+              <widget class="QLabel" name="label_SvcKokoro">
+               <property name="text">
+                <string>-</string>
                </property>
-               <property name="rightMargin">
-                <number>0</number>
+              </widget>
+             </item>
+             <item row="4" column="0">
+              <widget class="QLabel" name="label_svc_lightpanda_lbl">
+               <property name="text">
+                <string>Lightpanda</string>
                </property>
-               <property name="bottomMargin">
-                <number>0</number>
+              </widget>
+             </item>
+             <item row="4" column="1">
+              <widget class="QLabel" name="label_SvcLightpanda">
+               <property name="text">
+                <string>-</string>
                </property>
-               <item>
-                <widget class="QLabel" name="label_pid_lbl">
-                 <property name="text">
-                  <string>PID</string>
-                 </property>
-                 <property name="minimumSize">
-                  <size>
-                   <width>50</width>
-                   <height>0</height>
-                  </size>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <widget class="QLabel" name="label_ServicePID">
-                 <property name="text">
-                  <string>-</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <spacer name="horizontalSpacer_detailsMid">
-                 <property name="orientation">
-                  <enum>Qt::Orientation::Horizontal</enum>
-                 </property>
-                 <property name="sizeHint" stdset="0">
-                  <size>
-                   <width>20</width>
-                   <height>20</height>
-                  </size>
-                 </property>
-                </spacer>
-               </item>
-               <item>
-                <widget class="QLabel" name="label_uptime_lbl">
-                 <property name="text">
-                  <string>Uptime</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <widget class="QLabel" name="label_ServiceUptime">
-                 <property name="text">
-                  <string>-</string>
-                 </property>
-                </widget>
-               </item>
-               <item>
-                <spacer name="horizontalSpacer_detailsEnd">
-                 <property name="orientation">
-                  <enum>Qt::Orientation::Horizontal</enum>
-                 </property>
-                 <property name="sizeHint" stdset="0">
-                  <size>
-                   <width>40</width>
-                   <height>20</height>
-                  </size>
-                 </property>
-                </spacer>
-               </item>
-              </layout>
-             </widget>
-            </item>
-           </layout>
-          </widget>
-        </item>
+              </widget>
+             </item>
+             <item row="5" column="0">
+              <widget class="QLabel" name="label_svc_docling_lbl">
+               <property name="text">
+                <string>Docling</string>
+               </property>
+              </widget>
+             </item>
+             <item row="5" column="1">
+              <widget class="QLabel" name="label_SvcDocling">
+               <property name="text">
+                <string>-</string>
+               </property>
+              </widget>
+             </item>
+            </layout>
+           </widget>
+         </item>
         <item>
 <widget class="QGroupBox" name="groupBox_AI_Connection">
            <property name="title">
