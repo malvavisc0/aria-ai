@@ -30,8 +30,8 @@ class MainWindow(
         # Hide redundant title label (window title bar shows "Aria")
         self.ui.label_title.hide()
 
-        # Increase minimum height so content is readable
-        self.setMinimumSize(600, 650)
+        # Comfortable minimum size (reconciled with mainwindow.ui)
+        self.setMinimumSize(940, 660)
 
         # Make form fields expand to fill available width
         from PySide6.QtWidgets import QFormLayout
@@ -55,10 +55,8 @@ class MainWindow(
         self.ui.pushButton_SaveSettings.clicked.connect(self._save_remote_settings)
 
         self.load_overview()
+        self.load_users()
         self._run_preflight()
-
-        # Initialize connection mode based on platform
-        self._init_connection_mode()
 
         self._tray_icon = TrayIcon(self)
         self._force_quit = False
@@ -302,54 +300,43 @@ class MainWindow(
         self._log_filter_active = has_filter
 
     def load_overview(self):
-        """Load overview tab content from the live .env."""
-        from aria.config import get_bool_env, get_optional_env
+        """Load Home tab content from the live .env."""
+        from aria.config import get_optional_env
 
         api_url = get_optional_env("CHAT_OPENAI_API", "")
         ctx_size = get_optional_env("CHAT_CONTEXT_SIZE", "65536")
 
-        # Update local status
-        self.ui.label_LocalEndpointValue.setText(api_url)
-
-        # Populate remote settings
         self.ui.lineEdit_EndpointUrl.setText(api_url)
         self.ui.lineEdit_ApiKey.setText(get_optional_env("ARIA_VLLM_API_KEY", ""))
         self.ui.lineEdit_Model.setText(get_optional_env("CHAT_MODEL", ""))
         self.ui.lineEdit_ContextSize.setText(ctx_size)
 
-        # Reflect the persisted connection mode
-        remote = get_bool_env("ARIA_VLLM_REMOTE", False)
-        self.ui.radioButton_RemoteMode.setChecked(remote)
-        self.ui.radioButton_LocalMode.setChecked(not remote)
-
     def _save_remote_settings(self):
-        """Save connection settings to .env.
+        """Persist the OpenAI API connection fields to .env.
 
-        Persists the selected mode and, in remote mode, the endpoint,
-        API key, model, and context size. TOKEN_LIMIT_RATIO is left
-        untouched — it is configured manually in .env.
+        The local/remote launch flag (``ARIA_VLLM_REMOTE``) is left
+        untouched — it is not exposed in the GUI and is managed in .env
+        or by the first-run wizard.
         """
         from aria.config import reload_env
         from aria.helpers.dotenv import parse_dotenv, write_dotenv
 
         env_path = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria")) / ".env"
 
-        values: dict[str, str] = {}
-        remote = self.ui.radioButton_RemoteMode.isChecked()
-        values["ARIA_VLLM_REMOTE"] = "true" if remote else "false"
+        try:
+            ctx_size = int(self.ui.lineEdit_ContextSize.text().strip())
+        except ValueError:
+            QMessageBox.warning(
+                self, "Invalid Context Size", "Context Size must be an integer."
+            )
+            return
 
-        if remote:
-            try:
-                ctx_size = int(self.ui.lineEdit_ContextSize.text().strip())
-            except ValueError:
-                QMessageBox.warning(
-                    self, "Invalid Context Size", "Context Size must be an integer."
-                )
-                return
-            values["CHAT_OPENAI_API"] = self.ui.lineEdit_EndpointUrl.text().strip()
-            values["ARIA_VLLM_API_KEY"] = self.ui.lineEdit_ApiKey.text().strip()
-            values["CHAT_MODEL"] = self.ui.lineEdit_Model.text().strip()
-            values["CHAT_CONTEXT_SIZE"] = str(ctx_size)
+        values: dict[str, str] = {
+            "CHAT_OPENAI_API": self.ui.lineEdit_EndpointUrl.text().strip(),
+            "ARIA_VLLM_API_KEY": self.ui.lineEdit_ApiKey.text().strip(),
+            "CHAT_MODEL": self.ui.lineEdit_Model.text().strip(),
+            "CHAT_CONTEXT_SIZE": str(ctx_size),
+        }
 
         _, raw_lines = parse_dotenv(env_path)
         write_dotenv(env_path, values, raw_lines)
@@ -358,32 +345,6 @@ class MainWindow(
         self.load_overview()
         self.statusBar().showMessage("Settings saved.", 5000)
 
-    def _init_connection_mode(self):
-        """Connect mode radio signals; on macOS vLLM is unavailable."""
-        import sys
-
-        self.ui.radioButton_RemoteMode.toggled.connect(self._on_connection_mode_toggled)
-        self.ui.radioButton_LocalMode.toggled.connect(self._on_connection_mode_toggled)
-
-        if sys.platform == "darwin":
-            self.ui.radioButton_LocalMode.setEnabled(False)
-            self.ui.radioButton_LocalMode.setToolTip("vLLM is not supported on macOS.")
-            self.ui.radioButton_RemoteMode.setChecked(True)
-
-        self._on_connection_mode_toggled(self.ui.radioButton_RemoteMode.isChecked())
-
-    def _on_connection_mode_toggled(self, _checked: bool):
-        """Handle connection mode radio button toggle.
-
-        The Save Settings button writes remote-mode fields, so it is only
-        reachable in remote mode — in local mode only the mode flag would
-        be persisted, so the button is hidden to avoid a misleading no-op.
-        """
-        remote = self.ui.radioButton_RemoteMode.isChecked()
-        self.ui.frame_RemoteSettings.setVisible(remote)
-        self.ui.pushButton_SaveSettings.setVisible(remote)
-        self.ui.frame_LocalStatus.setVisible(not remote)
-
     def on_tab_changed(self, index: int):
         """Handle tab changes - load content when tabs are selected."""
         match self.ui.tabWidget.widget(index):
@@ -391,11 +352,8 @@ class MainWindow(
                 self._logs_timer.stop()
                 self.statusBar().clearMessage()
                 self.load_overview()
-                self._run_preflight()
-            case self.ui.tab_users:
-                self._logs_timer.stop()
-                self.statusBar().clearMessage()
                 self.load_users()
+                self._run_preflight()
             case self.ui.tab_logs:
                 self.load_logs()
                 self._logs_timer.start(5000)
@@ -416,6 +374,10 @@ class MainWindow(
         When the user closes the window, it is hidden and continues
         running in the system tray. A forced quit (via tray menu or
         Ctrl+Q) sets ``_force_quit`` to True to skip this behaviour.
+
+        Quitting the GUI never stops the running server — the server is
+        an independent process the GUI only controls, not owns. Use the
+        Stop button (or tray menu) to stop it explicitly.
         """
         if not self._force_quit:
             event.ignore()
@@ -427,7 +389,6 @@ class MainWindow(
         if wizard is not None:
             wizard.reject()
 
-        self._server_manager.stop()
         self._server_timer.stop()
         self._tray_icon.hide()
 

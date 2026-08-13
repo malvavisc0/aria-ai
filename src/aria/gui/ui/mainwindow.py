@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QMenu,
     QMenuBar,
     QPushButton,
-    QRadioButton,
     QSizePolicy,
     QSpacerItem,
     QStatusBar,
@@ -38,7 +37,7 @@ class Ui_MainWindow(object):
         if not MainWindow.objectName():
             MainWindow.setObjectName("MainWindow")
         MainWindow.resize(800, 700)
-        MainWindow.setMinimumSize(QSize(600, 450))
+        MainWindow.setMinimumSize(QSize(940, 660))
         MainWindow.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         icon = QIcon(QIcon.fromTheme("emblem-system"))
         MainWindow.setWindowIcon(icon)
@@ -86,6 +85,8 @@ class Ui_MainWindow(object):
         self.verticalLayout_home.setSpacing(16)
         self.verticalLayout_home.setObjectName("verticalLayout_home")
         self.verticalLayout_home.setContentsMargins(20, 20, 20, 20)
+        self.horizontalLayout_home_top = QHBoxLayout()
+        self.horizontalLayout_home_top.setObjectName("horizontalLayout_home_top")
         self.groupBox_Service = QGroupBox(self.tab_home)
         self.groupBox_Service.setObjectName("groupBox_Service")
         self.verticalLayout_service = QVBoxLayout(self.groupBox_Service)
@@ -202,43 +203,15 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_service.addWidget(self.frame_detailsRow)
 
-        self.verticalLayout_home.addWidget(self.groupBox_Service)
+        self.horizontalLayout_home_top.addWidget(self.groupBox_Service)
 
         self.groupBox_AI_Connection = QGroupBox(self.tab_home)
         self.groupBox_AI_Connection.setObjectName("groupBox_AI_Connection")
         self.verticalLayout_ai_connection = QVBoxLayout(self.groupBox_AI_Connection)
         self.verticalLayout_ai_connection.setObjectName("verticalLayout_ai_connection")
         self.verticalLayout_ai_connection.setContentsMargins(20, 16, 20, 16)
-        self.horizontalLayout_connection_mode = QHBoxLayout()
-        self.horizontalLayout_connection_mode.setObjectName(
-            "horizontalLayout_connection_mode"
-        )
-        self.radioButton_LocalMode = QRadioButton(self.groupBox_AI_Connection)
-        self.radioButton_LocalMode.setObjectName("radioButton_LocalMode")
-        self.radioButton_LocalMode.setChecked(True)
-
-        self.horizontalLayout_connection_mode.addWidget(self.radioButton_LocalMode)
-
-        self.radioButton_RemoteMode = QRadioButton(self.groupBox_AI_Connection)
-        self.radioButton_RemoteMode.setObjectName("radioButton_RemoteMode")
-
-        self.horizontalLayout_connection_mode.addWidget(self.radioButton_RemoteMode)
-
-        self.horizontalSpacer_connection_mode = QSpacerItem(
-            40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
-        )
-
-        self.horizontalLayout_connection_mode.addItem(
-            self.horizontalSpacer_connection_mode
-        )
-
-        self.verticalLayout_ai_connection.addLayout(
-            self.horizontalLayout_connection_mode
-        )
-
         self.frame_RemoteSettings = QFrame(self.groupBox_AI_Connection)
         self.frame_RemoteSettings.setObjectName("frame_RemoteSettings")
-        self.frame_RemoteSettings.setVisible(False)
         self.formLayout_remote = QFormLayout(self.frame_RemoteSettings)
         self.formLayout_remote.setObjectName("formLayout_remote")
         self.formLayout_remote.setHorizontalSpacing(16)
@@ -333,44 +306,13 @@ class Ui_MainWindow(object):
             self.horizontalLayout_connection_test
         )
 
-        self.frame_LocalStatus = QFrame(self.groupBox_AI_Connection)
-        self.frame_LocalStatus.setObjectName("frame_LocalStatus")
-        self.formLayout_local_status = QFormLayout(self.frame_LocalStatus)
-        self.formLayout_local_status.setObjectName("formLayout_local_status")
-        self.formLayout_local_status.setHorizontalSpacing(16)
-        self.formLayout_local_status.setVerticalSpacing(12)
-        self.label_LocalEndpoint = QLabel(self.frame_LocalStatus)
-        self.label_LocalEndpoint.setObjectName("label_LocalEndpoint")
+        self.horizontalLayout_home_top.addWidget(self.groupBox_AI_Connection)
 
-        self.formLayout_local_status.setWidget(
-            0, QFormLayout.ItemRole.LabelRole, self.label_LocalEndpoint
-        )
+        self.verticalLayout_home.addLayout(self.horizontalLayout_home_top)
 
-        self.label_LocalEndpointValue = QLabel(self.frame_LocalStatus)
-        self.label_LocalEndpointValue.setObjectName("label_LocalEndpointValue")
-
-        self.formLayout_local_status.setWidget(
-            0, QFormLayout.ItemRole.FieldRole, self.label_LocalEndpointValue
-        )
-
-        self.verticalLayout_ai_connection.addWidget(self.frame_LocalStatus)
-
-        self.verticalLayout_home.addWidget(self.groupBox_AI_Connection)
-
-        self.verticalSpacer_home = QSpacerItem(
-            20, 40, QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Expanding
-        )
-
-        self.verticalLayout_home.addItem(self.verticalSpacer_home)
-
-        self.tabWidget.addTab(self.tab_home, "")
-        self.tab_users = QWidget()
-        self.tab_users.setObjectName("tab_users")
-        self.horizontalLayout_users = QHBoxLayout(self.tab_users)
-        self.horizontalLayout_users.setSpacing(20)
-        self.horizontalLayout_users.setObjectName("horizontalLayout_users")
-        self.horizontalLayout_users.setContentsMargins(20, 20, 20, 20)
-        self.groupBox_CreateUser = QGroupBox(self.tab_users)
+        self.horizontalLayout_home_bottom = QHBoxLayout()
+        self.horizontalLayout_home_bottom.setObjectName("horizontalLayout_home_bottom")
+        self.groupBox_CreateUser = QGroupBox(self.tab_home)
         self.groupBox_CreateUser.setObjectName("groupBox_CreateUser")
         self.formLayout_createUser = QFormLayout(self.groupBox_CreateUser)
         self.formLayout_createUser.setObjectName("formLayout_createUser")
@@ -473,9 +415,9 @@ class Ui_MainWindow(object):
             5, QFormLayout.ItemRole.FieldRole, self.horizontalLayout_createBtn
         )
 
-        self.horizontalLayout_users.addWidget(self.groupBox_CreateUser)
+        self.horizontalLayout_home_bottom.addWidget(self.groupBox_CreateUser)
 
-        self.groupBox_CurrentUsers = QGroupBox(self.tab_users)
+        self.groupBox_CurrentUsers = QGroupBox(self.tab_home)
         self.groupBox_CurrentUsers.setObjectName("groupBox_CurrentUsers")
         self.verticalLayout_userList = QVBoxLayout(self.groupBox_CurrentUsers)
         self.verticalLayout_userList.setObjectName("verticalLayout_userList")
@@ -507,9 +449,11 @@ class Ui_MainWindow(object):
 
         self.verticalLayout_userList.addLayout(self.horizontalLayout_userButtons)
 
-        self.horizontalLayout_users.addWidget(self.groupBox_CurrentUsers)
+        self.horizontalLayout_home_bottom.addWidget(self.groupBox_CurrentUsers)
 
-        self.tabWidget.addTab(self.tab_users, "")
+        self.verticalLayout_home.addLayout(self.horizontalLayout_home_bottom)
+
+        self.tabWidget.addTab(self.tab_home, "")
         self.tab_logs = QWidget()
         self.tab_logs.setObjectName("tab_logs")
         self.verticalLayout_logs = QVBoxLayout(self.tab_logs)
@@ -644,13 +588,7 @@ class Ui_MainWindow(object):
             QCoreApplication.translate("MainWindow", "-", None)
         )
         self.groupBox_AI_Connection.setTitle(
-            QCoreApplication.translate("MainWindow", "AI Connection", None)
-        )
-        self.radioButton_LocalMode.setText(
-            QCoreApplication.translate("MainWindow", "Local (GPU)", None)
-        )
-        self.radioButton_RemoteMode.setText(
-            QCoreApplication.translate("MainWindow", "Remote (API)", None)
+            QCoreApplication.translate("MainWindow", "OpenAI API Connection", None)
         )
         self.label_EndpointUrl.setText(
             QCoreApplication.translate("MainWindow", "Endpoint URL", None)
@@ -683,16 +621,6 @@ class Ui_MainWindow(object):
             QCoreApplication.translate("MainWindow", "Save Settings", None)
         )
         self.label_ConnectionStatus.setText("")
-        self.label_LocalEndpoint.setText(
-            QCoreApplication.translate("MainWindow", "Endpoint", None)
-        )
-        self.label_LocalEndpointValue.setText(
-            QCoreApplication.translate("MainWindow", "-", None)
-        )
-        self.tabWidget.setTabText(
-            self.tabWidget.indexOf(self.tab_home),
-            QCoreApplication.translate("MainWindow", "Home", None),
-        )
         self.groupBox_CreateUser.setTitle(
             QCoreApplication.translate("MainWindow", "New User", None)
         )
@@ -734,8 +662,8 @@ class Ui_MainWindow(object):
             QCoreApplication.translate("MainWindow", "Remove", None)
         )
         self.tabWidget.setTabText(
-            self.tabWidget.indexOf(self.tab_users),
-            QCoreApplication.translate("MainWindow", "Users", None),
+            self.tabWidget.indexOf(self.tab_home),
+            QCoreApplication.translate("MainWindow", "Home", None),
         )
         self.lineEdit_LogSearch.setPlaceholderText(
             QCoreApplication.translate("MainWindow", "Search logs\u2026", None)

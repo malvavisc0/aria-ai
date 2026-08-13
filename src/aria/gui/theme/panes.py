@@ -2,67 +2,69 @@
 
 from __future__ import annotations
 
-QSS = """
+QSS = r"""
 /* --- Plain Text Edit (Log/Output Panes) --- */
 
 QPlainTextEdit {
-    background-color: #F3F0EA;
-    border: 1px solid #C9C5BB;
+    background-color: #F7F9FB;
+    border: 1px solid #DCE1E8;
     border-radius: 8px;
     padding: 12px;
-    font-size: 11px;
-    color: #111318;
-    selection-background-color: #C8E6D8;
+    font-family: "SF Mono", "JetBrains Mono", "Consolas", monospace;
+    font-size: 12px;
+    color: #1D2733;
+    selection-background-color: #CFF0EA;
 }
 
 QPlainTextEdit:focus {
-    border-color: #008457;
+    border-color: #0F766E;
 }
 
 QPlainTextEdit:disabled {
-    background-color: #E8E6E0;
-    color: #95999E;
+    background-color: #EEF1F4;
+    color: #9AA5B1;
 }
 
 /* --- Text Edit (Logs) --- */
 
 QTextEdit {
-    background-color: #F3F0EA;
-    border: 1px solid #C9C5BB;
+    background-color: #F7F9FB;
+    border: 1px solid #DCE1E8;
     border-radius: 8px;
     padding: 12px;
+    font-family: "SF Mono", "JetBrains Mono", "Consolas", monospace;
     font-size: 12px;
-    color: #111318;
-    selection-background-color: #C8E6D8;
+    color: #1D2733;
+    selection-background-color: #CFF0EA;
 }
 
 QTextEdit:focus {
-    border-color: #008457;
+    border-color: #0F766E;
 }
 
 /* --- List Widget --- */
 
 QListWidget {
-    background-color: #FBFAF7;
-    border: 1px solid #C9C5BB;
+    background-color: #FFFFFF;
+    border: 1px solid #DCE1E8;
     border-radius: 8px;
     padding: 4px;
     outline: none;
 }
 
 QListWidget::item {
-    padding: 8px 12px;
-    border-radius: 4px;
+    padding: 9px 12px;
+    border-radius: 6px;
     margin: 1px 0;
 }
 
 QListWidget::item:selected {
-    background-color: #D8EDE4;
-    color: #008457;
+    background-color: #E6F7F5;
+    color: #0F766E;
 }
 
 QListWidget::item:hover:!selected {
-    background-color: #E8E6E0;
+    background-color: #F1F3F6;
 }
 
 /* --- Scroll Area --- */
@@ -79,13 +81,13 @@ QScrollBar:vertical {
 }
 
 QScrollBar::handle:vertical {
-    background: #C9C5BB;
+    background: #C3CBD3;
     border-radius: 4px;
     min-height: 32px;
 }
 
 QScrollBar::handle:vertical:hover {
-    background: #95999E;
+    background: #94A3B8;
 }
 
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical,
@@ -101,13 +103,13 @@ QScrollBar:horizontal {
 }
 
 QScrollBar::handle:horizontal {
-    background: #C9C5BB;
+    background: #C3CBD3;
     border-radius: 4px;
     min-width: 32px;
 }
 
 QScrollBar::handle:horizontal:hover {
-    background: #95999E;
+    background: #94A3B8;
 }
 
 QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal,
@@ -120,13 +122,18 @@ QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
 
 QLabel {
     background: transparent;
-    color: #111318;
+    color: #1D2733;
+}
+
+QLabel[href="true"] {
+    color: #0F766E;
+    text-decoration: underline;
 }
 
 /* --- Tooltips --- */
 
 QToolTip {
-    background-color: #111318;
+    background-color: #1F2933;
     color: #FFFFFF;
     border: none;
     border-radius: 6px;
@@ -137,23 +144,23 @@ QToolTip {
 /* --- Dialog --- */
 
 QDialog {
-    background-color: #F7F5F0;
+    background-color: #F4F5F7;
 }
 
 /* --- Message Box --- */
 
 QMessageBox {
-    background-color: #F7F5F0;
+    background-color: #F4F5F7;
 }
 
 /* --- Wizard --- */
 
 QWizard {
-    background-color: #F7F5F0;
+    background-color: #F4F5F7;
 }
 
 QWizardPage {
-    background-color: #F7F5F0;
+    background-color: #F4F5F7;
 }
 
 QWizardPage QLineEdit {

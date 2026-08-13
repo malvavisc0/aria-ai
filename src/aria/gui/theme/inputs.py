@@ -2,44 +2,45 @@
 
 from __future__ import annotations
 
-QSS = """
+QSS = r"""
 /* --- Line Edit --- */
 
 QLineEdit {
-    background-color: #FBFAF7;
-    border: 1px solid #C9C5BB;
-    border-radius: 6px;
+    background-color: #FFFFFF;
+    border: 1px solid #DCE1E8;
+    border-radius: 8px;
     padding: 8px 12px;
     font-size: 13px;
-    color: #111318;
-    selection-background-color: #C8E6D8;
-    selection-color: #111318;
+    color: #1D2733;
+    selection-background-color: #CFF0EA;
+    selection-color: #0B5E57;
     min-width: 200px;
     min-height: 20px;
 }
 
 QLineEdit:focus {
-    border-color: #008457;
+    border-color: #0F766E;
 }
 
 QLineEdit:disabled {
-    background-color: #E8E6E0;
-    color: #95999E;
+    background-color: #EEF1F4;
+    color: #9AA5B1;
 }
 
 /* --- Spin Box --- */
 
 QSpinBox {
-    background-color: #FBFAF7;
-    border: 1px solid #C9C5BB;
-    border-radius: 6px;
+    background-color: #FFFFFF;
+    border: 1px solid #DCE1E8;
+    border-radius: 8px;
     padding: 8px 12px;
     font-size: 13px;
-    color: #111318;
+    color: #1D2733;
+    min-height: 20px;
 }
 
 QSpinBox:focus {
-    border-color: #008457;
+    border-color: #0F766E;
 }
 
 QSpinBox::up-button, QSpinBox::down-button {
@@ -49,14 +50,14 @@ QSpinBox::up-button, QSpinBox::down-button {
 }
 
 QSpinBox::up-button:hover, QSpinBox::down-button:hover {
-    background-color: #D8EDE4;
+    background-color: #E6F7F5;
 }
 
 QSpinBox::up-arrow {
     image: none;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-bottom: 5px solid #62666B;
+    border-bottom: 5px solid #64748B;
     width: 0;
     height: 0;
 }
@@ -65,7 +66,7 @@ QSpinBox::down-arrow {
     image: none;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-top: 5px solid #62666B;
+    border-top: 5px solid #64748B;
     width: 0;
     height: 0;
 }
@@ -73,21 +74,21 @@ QSpinBox::down-arrow {
 /* --- Combo Box --- */
 
 QComboBox {
-    background-color: #FBFAF7;
-    border: 1px solid #C9C5BB;
-    border-radius: 6px;
+    background-color: #FFFFFF;
+    border: 1px solid #DCE1E8;
+    border-radius: 8px;
     padding: 8px 12px;
     font-size: 13px;
-    color: #111318;
+    color: #1D2733;
     min-height: 20px;
 }
 
 QComboBox:focus {
-    border-color: #008457;
+    border-color: #0F766E;
 }
 
 QComboBox:hover {
-    border-color: #008457;
+    border-color: #8CD4CB;
 }
 
 QComboBox::drop-down {
@@ -101,24 +102,24 @@ QComboBox::down-arrow {
     image: none;
     border-left: 4px solid transparent;
     border-right: 4px solid transparent;
-    border-top: 5px solid #62666B;
+    border-top: 5px solid #64748B;
     width: 0;
     height: 0;
 }
 
 QComboBox QAbstractItemView {
-    background-color: #FBFAF7;
-    border: 1px solid #C9C5BB;
-    border-radius: 6px;
+    background-color: #FFFFFF;
+    border: 1px solid #E2E5EA;
+    border-radius: 8px;
     padding: 4px;
-    selection-background-color: #D8EDE4;
-    selection-color: #008457;
+    selection-background-color: #E6F7F5;
+    selection-color: #0F766E;
     outline: none;
 }
 
 QComboBox QAbstractItemView::item {
-    padding: 6px 12px;
-    border-radius: 4px;
+    padding: 7px 12px;
+    border-radius: 6px;
     min-height: 24px;
 }
 
@@ -127,33 +128,30 @@ QComboBox QAbstractItemView::item {
 QCheckBox {
     spacing: 8px;
     font-size: 13px;
-    color: #111318;
+    color: #1D2733;
 }
 
 QCheckBox::indicator {
-    width: 16px;
-    height: 16px;
-    border: 2px solid #C9C5BB;
-    border-radius: 4px;
-    background-color: #FBFAF7;
+    width: 17px;
+    height: 17px;
+    border: 2px solid #C9D1D9;
+    border-radius: 5px;
+    background-color: #FFFFFF;
 }
 
 QCheckBox::indicator:hover {
-    border-color: #008457;
+    border-color: #0F766E;
 }
 
 QCheckBox::indicator:checked {
-    background-color: #008457;
-    border-color: #008457;
-    image: url(none);
-    /* White checkmark via border trick */
-    border: 2px solid #008457;
-    border-radius: 4px;
+    background-color: #0F766E;
+    border: 2px solid #0F766E;
+    border-radius: 5px;
 }
 
 QCheckBox::indicator:disabled {
-    background-color: #E8E6E0;
-    border-color: #D5D1C8;
+    background-color: #EEF1F4;
+    border-color: #DCE1E8;
 }
 
 /* --- Radio Button --- */
@@ -161,26 +159,26 @@ QCheckBox::indicator:disabled {
 QRadioButton {
     spacing: 8px;
     font-size: 13px;
-    color: #111318;
+    color: #1D2733;
 }
 
 QRadioButton::indicator {
-    width: 16px;
-    height: 16px;
-    border: 2px solid #C9C5BB;
+    width: 17px;
+    height: 17px;
+    border: 2px solid #C9D1D9;
     border-radius: 9px;
-    background-color: #FBFAF7;
+    background-color: #FFFFFF;
 }
 
 QRadioButton::indicator:hover {
-    border-color: #008457;
+    border-color: #0F766E;
 }
 
 QRadioButton::indicator:checked {
-    background-color: #FBFAF7;
-    border: 5px solid #008457;
+    background-color: #FFFFFF;
+    border: 5px solid #0F766E;
     border-radius: 9px;
-    width: 8px;
-    height: 8px;
+    width: 9px;
+    height: 9px;
 }
 """

@@ -3,17 +3,12 @@
 ################################################################################
 ## Form generated from reading UI file 'edituserdialog.ui'
 ##
-## Created by: Qt User Interface Compiler version 6.11.0
+## Created by: Qt User Interface Compiler version 6.11.1
 ##
 ## WARNING! All changes made in this file will be lost when recompiling UI file!
 ################################################################################
 
-from PySide6.QtCore import (
-    QCoreApplication,
-    QMetaObject,
-    QRect,
-    QSize,
-)
+from PySide6.QtCore import QCoreApplication, QMetaObject, QRect, QSize
 from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,

@@ -106,16 +106,13 @@ class _EndpointValidationWorker(QObject):
     def run(self):
         import httpx
 
-        from aria.config import get_optional_env
         from aria.config.api import Vllm
         from aria.config.models import Chat
 
         url = Chat.api_url
-        headers = {}
-        if Vllm.remote:
-            api_key = get_optional_env("ARIA_VLLM_API_KEY", "")
-            if api_key:
-                headers["Authorization"] = f"Bearer {api_key}"
+        # Local vLLM is launched with --api-key (default "sk-aria"); remote
+        # expects a provider key. Both require auth, so send unconditionally.
+        headers = {"Authorization": f"Bearer {Vllm.api_key}"}
 
         try:
             r = httpx.get(f"{url}/models", headers=headers, timeout=5)
