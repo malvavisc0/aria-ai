@@ -79,7 +79,7 @@ h4 {
 .message-content {
   width: 100%;
   max-width: none;
-  font-size: 0.84375rem;
+  font-size: 0.9375rem;
   line-height: 1.65;
 }
 
@@ -100,18 +100,18 @@ div.flex.flex-col.mx-auto.w-full.p-4.pt-0:has(#message-composer),
 }
 
 .cl-message-content h1 {
-  font-size: 1.125rem;
+  font-size: 1.25rem;
   margin: 1.5rem 0 0.5rem;
 }
 
 .cl-message-content h2 {
-  font-size: 1rem;
+  font-size: 1.125rem;
   margin: 1.25rem 0 0.5rem;
 }
 
 .cl-message-content h3,
 .cl-message-content h4 {
-  font-size: 0.9375rem;
+  font-size: 1rem;
   margin: 1rem 0 0.375rem;
 }
 
@@ -222,6 +222,27 @@ html[data-theme="dark"] .cl-step {
 html.dark .cl-message:nth-child(even),
 html[data-theme="dark"] .cl-message:nth-child(even) {
   background: hsl(var(--card) / 0.72);
+}
+
+/* Starters: palette-tinted pills instead of Chainlit's muted defaults. */
+#starters button {
+  border-color: hsl(var(--primary) / 0.32) !important;
+  background: hsl(var(--card) / 0.72) !important;
+  box-shadow: none !important;
+}
+
+#starters button p {
+  color: hsl(var(--foreground)) !important;
+}
+
+#starters button:hover {
+  border-color: hsl(var(--primary) / 0.55) !important;
+  background: hsl(var(--primary) / 0.1) !important;
+  transform: translateY(-1px);
+}
+
+#starters button:hover p {
+  color: hsl(var(--primary)) !important;
 }
 
 /* Composer and controls have a predictable, accessible focus treatment. */
@@ -422,7 +443,7 @@ main::-webkit-scrollbar-thumb:hover,
 
   .cl-message-content,
   .message-content {
-    font-size: 0.84375rem;
+    font-size: 0.9375rem;
   }
 }
 
