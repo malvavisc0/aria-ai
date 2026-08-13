@@ -110,8 +110,6 @@ class _EndpointValidationWorker(QObject):
         from aria.config.models import Chat
 
         url = Chat.api_url
-        # Local vLLM is launched with --api-key (default "sk-aria"); remote
-        # expects a provider key. Both require auth, so send unconditionally.
         headers = {"Authorization": f"Bearer {Vllm.api_key}"}
 
         try:
