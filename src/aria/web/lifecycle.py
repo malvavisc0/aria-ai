@@ -857,20 +857,27 @@ async def on_app_shutdown_handler() -> None:
 
     Called by Chainlit when the application is shutting down.
     Performs cleanup of:
-    - vLLM inference servers
     - Lightpanda browser
+    - Voice servers (whisper.cpp, kokoro TTS)
+    - vLLM inference servers
     - Database connections
     - Data layer cache
     - Logging sinks
+
+    Shutdown order matters: the fast child servers (browser, voice) are
+    stopped *before* vLLM. vLLM teardown is slow (large model unload) and
+    can exhaust the external ``stop`` timeout, getting this process
+    SIGKILLed mid-shutdown — anything not yet stopped would leak as an
+    orphan.
     """
     logger.info("Shutting down Aria web UI...")
 
     from aria.web.hooks import reset_data_layer_cache
 
     reset_data_layer_cache()
-    _stop_vllm_servers(_consume_skip_vllm_sentinel())
     await _stop_browser()
     await _stop_voice()
+    _stop_vllm_servers(_consume_skip_vllm_sentinel())
     _reset_app_state()
     logger.info("Aria web UI shutdown complete")
     _remove_log_sinks()

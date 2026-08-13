@@ -247,11 +247,14 @@ def stop_server(
             vllm._pids = live_pids
         vllm.stop_all()
 
-    # Voice servers are detached and can outlive the web UI's own teardown,
-    # so stop them here as an external safety net (same pattern as vLLM).
+    # Detached child servers (voice, browser) can outlive the web UI's own
+    # teardown, so stop them here as an external safety net (same as vLLM).
+    from aria.config.api import Lightpanda
+    from aria.server.process_utils import stop_port_listeners
     from aria.server.voice import stop_voice_servers
 
     stop_voice_servers(progress)
+    stop_port_listeners(Lightpanda.port, "Lightpanda", progress=progress)
 
     return StopResult(
         web_stopped=web_stopped,

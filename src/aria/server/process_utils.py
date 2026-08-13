@@ -7,9 +7,10 @@ including state persistence, process checking, and graceful shutdown.
 import json
 import os
 import signal
+import subprocess
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 def is_process_running(pid: int) -> bool:
@@ -106,6 +107,53 @@ def stop_process(pid: int, timeout: float = 10.0) -> bool:
         return False
     except ProcessLookupError:
         return True  # Process already gone
+
+
+def pids_on_port(port: int) -> list[int]:
+    """Return PIDs of processes listening on *port* (via ``lsof``).
+
+    Returns an empty list when ``lsof`` is unavailable or finds nothing.
+    Only works on POSIX systems where ``lsof`` is installed.
+    """
+    try:
+        result = subprocess.run(
+            ["lsof", "-ti", f":{port}", "-sTCP:LISTEN"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return []
+    if result.returncode != 0:
+        return []
+    return [int(p) for p in result.stdout.strip().split() if p.strip()]
+
+
+def stop_port_listeners(
+    port: int,
+    name: str,
+    progress: Callable[[str], None] | None = None,
+    timeout: float = 5.0,
+) -> None:
+    """Stop any process group listening on *port* (SIGTERM → SIGKILL).
+
+    External safety net for detached child servers that can outlive the
+    parent web UI when its own teardown is cut short. No-op when nothing
+    is listening on the port.
+
+    Args:
+        port: TCP port to inspect.
+        name: Human-readable service name for the progress message.
+        progress: Optional callback for human-readable progress messages.
+        timeout: Maximum seconds to wait for graceful shutdown per process.
+    """
+    pids = pids_on_port(port)
+    if not pids:
+        return
+    if progress:
+        progress(f"Stopping {name} servers…")
+    for pid in pids:
+        stop_process_group(pid, timeout=timeout)
 
 
 def stop_process_group(pid: int, timeout: float = 10.0) -> bool:

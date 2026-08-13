@@ -32,6 +32,7 @@ import httpx
 from loguru import logger
 
 from aria.config.folders import Debug as DebugConfig
+from aria.server.process_utils import pids_on_port, stop_port_listeners
 
 
 def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
@@ -42,26 +43,6 @@ def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
         return sock.connect_ex((host, port)) == 0
     finally:
         sock.close()
-
-
-def _pids_on_port(port: int) -> list[int]:
-    """Return PIDs of processes listening on *port* (via ``lsof``).
-
-    Returns an empty list when ``lsof`` is unavailable or finds nothing.
-    Only works on POSIX systems where ``lsof`` is installed.
-    """
-    try:
-        result = subprocess.run(
-            ["lsof", "-ti", f":{port}", "-sTCP:LISTEN"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return []
-    if result.returncode != 0:
-        return []
-    return [int(p) for p in result.stdout.strip().split() if p.strip()]
 
 
 def stop_voice_servers(progress: Callable[[str], None] | None = None) -> None:
@@ -77,19 +58,12 @@ def stop_voice_servers(progress: Callable[[str], None] | None = None) -> None:
         progress: Optional callback for human-readable progress messages.
     """
     from aria.config.api import Voice
-    from aria.server.process_utils import stop_process_group
 
     for port, name in (
         (Voice.whisper_port, "whisper.cpp"),
         (Voice.kokoro_port, "kokoro TTS"),
     ):
-        pids = _pids_on_port(port)
-        if not pids:
-            continue
-        if progress:
-            progress(f"Stopping {name} servers\u2026")
-        for pid in pids:
-            stop_process_group(pid, timeout=5.0)
+        stop_port_listeners(port, name, progress=progress)
 
 
 def _preflight_port(port: int, name: str) -> None:
@@ -112,7 +86,7 @@ def _preflight_port(port: int, name: str) -> None:
     if not _port_in_use(port):
         return
 
-    pids = _pids_on_port(port)
+    pids = pids_on_port(port)
     if not pids:
         raise RuntimeError(
             f"Port {port} is already in use by an unknown process. "

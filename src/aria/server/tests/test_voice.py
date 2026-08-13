@@ -252,7 +252,7 @@ class TestKokoroManager:
 
 
 class TestPortPreflight:
-    """Tests for _preflight_port and _pids_on_port helpers."""
+    """Tests for _preflight_port and pids_on_port helpers."""
 
     def test_returns_immediately_when_port_free(self) -> None:
         with patch.object(voice_mod, "_port_in_use", return_value=False):
@@ -262,7 +262,7 @@ class TestPortPreflight:
     def test_kills_stale_process_on_port(self) -> None:
         with (
             patch.object(voice_mod, "_port_in_use", side_effect=[True, False, False]),
-            patch.object(voice_mod, "_pids_on_port", return_value=[12345]),
+            patch.object(voice_mod, "pids_on_port", return_value=[12345]),
             patch("aria.server.voice.os.kill") as mock_kill,
             patch("aria.server.voice.time.sleep"),
         ):
@@ -272,7 +272,7 @@ class TestPortPreflight:
     def test_raises_when_port_still_in_use_after_kill(self) -> None:
         with (
             patch.object(voice_mod, "_port_in_use", return_value=True),
-            patch.object(voice_mod, "_pids_on_port", return_value=[12345]),
+            patch.object(voice_mod, "pids_on_port", return_value=[12345]),
             patch("aria.server.voice.os.kill"),
             patch("aria.server.voice.time.sleep"),
             pytest.raises(RuntimeError, match="still in use"),
@@ -282,7 +282,7 @@ class TestPortPreflight:
     def test_raises_when_no_pids_found(self) -> None:
         with (
             patch.object(voice_mod, "_port_in_use", return_value=True),
-            patch.object(voice_mod, "_pids_on_port", return_value=[]),
+            patch.object(voice_mod, "pids_on_port", return_value=[]),
             pytest.raises(RuntimeError, match="unknown process"),
         ):
             voice_mod._preflight_port(9091, "whisper.cpp")

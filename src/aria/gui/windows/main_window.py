@@ -12,12 +12,14 @@ from aria.gui.dialogs import AboutDialog
 from aria.gui.tray import TrayIcon
 from aria.gui.ui.mainwindow import Ui_MainWindow
 from aria.gui.windows.server_handlers import ServerHandlersMixin
+from aria.gui.windows.services_panel import ServicesPanelMixin
 from aria.gui.windows.user_handlers import UserHandlersMixin
 
 
 class MainWindow(
     UserHandlersMixin,
     ServerHandlersMixin,
+    ServicesPanelMixin,
     QMainWindow,
 ):
     """Main application window with user management and logs."""
