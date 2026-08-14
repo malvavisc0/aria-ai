@@ -31,19 +31,26 @@ async def _handle_tool_call_event(
     event: ToolCall,
     thinking_step: cl.Step | None,
     tools_called: list[str],
-) -> tuple[cl.Step | None, cl.Step | None]:
+    pending_tool_steps: dict[str, cl.Step],
+) -> cl.Step | None:
     """Finalize any open thinking segment, then emit a persisted tool step.
 
     Tool steps are never removed — each stays visible (collapsed) so the
     full per-turn hierarchy (Thinking ▸ tool ▸ Thinking ▸ tool ▸ answer)
     remains in the UI and in the persisted history. The step's ``input``
     is populated from the tool-call kwargs; its ``output`` is filled later
-    when the matching :class:`ToolCallResult` arrives.
+    when the matching :class:`ToolCallResult` arrives. Steps are tracked
+    per ``tool_id`` in ``pending_tool_steps``: results can arrive late or
+    after another call already started (a single pending reference would
+    finalize the wrong step and drop the real result, leaving a step
+    spinning forever with empty output).
     """
     tools_called.append(event.tool_name or "unknown")
     thinking_step = await _finalize_thinking_step(thinking_step)
     tool_step = await send_tool_step(event)
-    return thinking_step, tool_step
+    key = event.tool_id or f"__no_tool_id_{len(pending_tool_steps)}"
+    pending_tool_steps[key] = tool_step
+    return thinking_step
 
 
 def _tool_output(tool_output: Any) -> str | dict:
@@ -70,29 +77,27 @@ def _tool_output(tool_output: Any) -> str | dict:
 
 async def _handle_tool_call_result_event(
     event: ToolCallResult,
-    tool_step: cl.Step | None,
-) -> cl.Step | None:
-    """Populate a tool step's output from its result and finalize it.
+    pending_tool_steps: dict[str, cl.Step],
+) -> None:
+    """Populate the matching tool step's output and finalize it.
 
-    Matches the pending tool step by ``tool_id``; if the IDs align, sets
-    ``step.output`` to the tool result text and persists via ``update()``.
-    Returns ``None`` either way (the step is now complete).
+    Looks the step up by ``tool_id`` instead of assuming a single pending
+    step. An id-less result settles the oldest pending step (best-effort
+    FIFO); a result for an unknown id is dropped with a log — it must not
+    finalize an unrelated pending step.
     """
-    if tool_step is None:
-        return None
-    if (
-        event.tool_id
-        and getattr(tool_step, "metadata", {}).get("tool_id") != event.tool_id
-    ):
+    if event.tool_id and event.tool_id in pending_tool_steps:
+        tool_step = pending_tool_steps.pop(event.tool_id)
+    elif not event.tool_id and pending_tool_steps:
+        tool_step = pending_tool_steps.pop(next(iter(pending_tool_steps)))
+    else:
         logger.debug(
-            f"ToolCallResult tool_id {event.tool_id} does not match pending "
-            f"step; finalizing step without output."
+            f"ToolCallResult tool_id {event.tool_id} has no pending step; "
+            "dropping result."
         )
-        await tool_step.update()
-        return None
+        return
     tool_step.output = _tool_output(event.tool_output)
     await tool_step.update()
-    return None
 
 
 async def _handle_agent_stream_event(
@@ -140,32 +145,32 @@ async def _handle_agent_output_event(
 async def _process_stream_event(
     event,
     thinking_step: cl.Step | None,
-    tool_step: cl.Step | None,
+    pending_tool_steps: dict[str, cl.Step],
     thinking_parts: list[str],
     tools_called: list[str],
     output: cl.Message,
     content_emitted: bool,
     answer_parts: list[str],
-) -> tuple[cl.Step | None, cl.Step | None, bool, bool, bool]:
+) -> tuple[cl.Step | None, bool, bool, bool]:
     """Process a single event.
 
-    Returns (thinking_step, tool_step, emitted, content_emitted, has_thinking).
+    Returns (thinking_step, emitted, content_emitted, has_thinking).
     """
     if isinstance(event, ToolCall):
-        thinking_step, new_tool_step = await _handle_tool_call_event(
-            event, thinking_step, tools_called
+        thinking_step = await _handle_tool_call_event(
+            event, thinking_step, tools_called, pending_tool_steps
         )
-        return thinking_step, new_tool_step, False, False, False
+        return thinking_step, False, False, False
 
     if isinstance(event, ToolCallResult):
-        tool_step = await _handle_tool_call_result_event(event, tool_step)
-        return thinking_step, tool_step, False, False, False
+        await _handle_tool_call_result_event(event, pending_tool_steps)
+        return thinking_step, False, False, False
 
     if isinstance(event, AgentStream):
         thinking_step, emitted, ce = await _handle_agent_stream_event(
             event, thinking_step, thinking_parts, output, answer_parts
         )
-        return thinking_step, tool_step, emitted, ce, bool(event.thinking_delta)
+        return thinking_step, emitted, ce, bool(event.thinking_delta)
 
     if isinstance(event, AgentOutput):
         thinking_step, emitted = await _handle_agent_output_event(
@@ -176,15 +181,15 @@ async def _process_stream_event(
             content_emitted,
             answer_parts,
         )
-        return thinking_step, tool_step, emitted, emitted, False
+        return thinking_step, emitted, emitted, False
 
-    return thinking_step, tool_step, False, False, False
+    return thinking_step, False, False, False
 
 
 async def _finalize_stream(
     output: cl.Message,
     thinking_step: cl.Step | None,
-    tool_step: cl.Step | None,
+    pending_tool_steps: dict[str, cl.Step],
     thinking_parts: list[str],
     handler_result,
     emitted: bool,
@@ -193,8 +198,9 @@ async def _finalize_stream(
     answer_parts: list[str],
 ) -> tuple[bool, bool, bool]:
     await _finalize_thinking_step(thinking_step)
-    if tool_step is not None:
+    for tool_step in pending_tool_steps.values():
         await tool_step.update()
+    pending_tool_steps.clear()
     if not content_emitted:
         final = getattr(handler_result.response, "content", None) or ""
         if final.strip() and final.strip() != "".join(thinking_parts).strip():
@@ -235,7 +241,7 @@ async def stream_agent_response(
     """
     tools_called: list[str] = []
     thinking_step: cl.Step | None = None
-    tool_step: cl.Step | None = None
+    pending_tool_steps: dict[str, cl.Step] = {}
     thinking_parts: list[str] = []
     emitted = False
     content_emitted = False
@@ -244,10 +250,10 @@ async def stream_agent_response(
 
     try:
         async for event in handler.stream_events():
-            thinking_step, tool_step, e, ce, ht = await _process_stream_event(
+            thinking_step, e, ce, ht = await _process_stream_event(
                 event,
                 thinking_step,
-                tool_step,
+                pending_tool_steps,
                 thinking_parts,
                 tools_called,
                 output,
@@ -262,7 +268,7 @@ async def stream_agent_response(
 
     except Exception:
         await _finalize_thinking_step(thinking_step)
-        if tool_step is not None:
+        for tool_step in pending_tool_steps.values():
             await tool_step.update()
         if answer_parts:
             output.answer_text = "".join(answer_parts).strip()  # type: ignore[attr-defined]
@@ -271,7 +277,7 @@ async def stream_agent_response(
     emitted, _content_emitted, has_thinking = await _finalize_stream(
         output,
         thinking_step,
-        tool_step,
+        pending_tool_steps,
         thinking_parts,
         handler_result,
         emitted,

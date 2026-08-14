@@ -64,6 +64,10 @@ def _step_label_from_tool_call(event: ToolCall) -> str:
 
     if isinstance(label, str):
         label = label.strip()
+        # Models sometimes wrap the whole reason in quotes — a
+        # serialization artifact, never intentional labeling.
+        if len(label) >= 2 and label.startswith('"') and label.endswith('"'):
+            label = label[1:-1].strip()
     else:
         label = tool_name
 

@@ -236,6 +236,67 @@ class TestEditDetection:
         assert reset_called == []
 
     @pytest.mark.asyncio
+    async def test_sources_footer_goes_to_content_not_answer_text(
+        self, monkeypatch
+    ) -> None:
+        """The Sources footer must land in output.content (what send() ships),
+        while answer_text stays clean for the TTS side-channel."""
+        from aria.config.models import Chat as ChatConfigCls
+
+        monkeypatch.setattr(ChatConfigCls.__dict__["max_iteration"], "_value", 10)
+        monkeypatch.setattr(pipeline, "_mark_message_processed", AsyncMock())
+        object.__setattr__(pipeline._state, "agents_workflow", MagicMock())
+        object.__setattr__(pipeline._state, "validate_initialized", lambda: None)
+        monkeypatch.setattr(
+            pipeline,
+            "handle_message",
+            AsyncMock(return_value=("prompt", {})),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "stream_agent_response",
+            AsyncMock(return_value=(True, {}, "The company is Inferact.")),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "create_render_elements",
+            AsyncMock(return_value=([SimpleNamespace(name="Inferact")], ["Inferact"])),
+        )
+        monkeypatch.setattr(
+            pipeline.cl,
+            "user_session",
+            SimpleNamespace(
+                get=lambda k: MagicMock(
+                    session_id="thread-1",
+                    aget=AsyncMock(return_value=[]),
+                    aget_all=AsyncMock(return_value=[]),
+                ),
+                set=lambda k, v: None,
+            ),
+        )
+
+        output = MagicMock()
+        output.send = AsyncMock()
+        output.update = AsyncMock()
+        output.remove = AsyncMock()
+        monkeypatch.setattr(pipeline.cl, "Message", lambda **kw: output)
+
+        message = _mock_message(
+            id="msg-1",
+            content="who built vllm",
+            command=None,
+            thread_id="thread-1",
+            elements=[],
+            metadata={},
+        )
+
+        await pipeline.on_message_handler(message)
+
+        assert output.content.endswith("**Sources:** Inferact")
+        assert output.content.startswith("The company is Inferact.")
+        assert "Sources" not in output.answer_text
+
+    @pytest.mark.asyncio
     async def test_successful_stream_calls_send(self, monkeypatch) -> None:
         """A successful turn must call send() to persist the final message.
 

@@ -24,7 +24,11 @@ from aria.config.models import Chat as ChatConfig
 from aria.llm.memory import BackgroundFlushMemory
 from aria.web.hooks import get_data_layer_handler
 from aria.web.prompt_builder import handle_message
-from aria.web.rendering import create_render_elements, extract_renderable_items
+from aria.web.rendering import (
+    create_render_elements,
+    extract_renderable_items,
+    sources_footer,
+)
 from aria.web.session import (
     _EditThreadMissingError,
     _reset_memory_for_edit,
@@ -146,7 +150,13 @@ async def _stream_and_finalize(
         partial = getattr(output, "answer_text", "")
         if _run_succeeded:
             output.answer_text = answer_text  # type: ignore[attr-defined]
-            elements = create_render_elements(*extract_renderable_items(answer_text))
+            elements, sources = await create_render_elements(
+                *extract_renderable_items(answer_text)
+            )
+            if sources:
+                # Footer goes into content (what send() ships); answer_text
+                # stays clean for the TTS side-channel.
+                output.content = answer_text + sources_footer(sources)
             if elements:
                 output.elements = elements
             await output.send()
@@ -154,7 +164,11 @@ async def _stream_and_finalize(
                 message, extra_metadata={**pipeline_meta, **stream_meta}
             )
         elif partial:
-            elements = create_render_elements(*extract_renderable_items(partial))
+            elements, sources = await create_render_elements(
+                *extract_renderable_items(partial)
+            )
+            if sources:
+                output.content = partial + sources_footer(sources)
             if elements:
                 output.elements = elements
             await output.send()

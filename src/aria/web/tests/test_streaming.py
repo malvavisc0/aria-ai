@@ -227,6 +227,82 @@ class TestStreamAgentResponse:
         sent_step.update.assert_awaited()
 
     @pytest.mark.asyncio
+    async def test_late_result_fills_its_own_step(self, monkeypatch) -> None:
+        """A result for call A arriving while call B is pending must fill A,
+        never finalize B early (the real-world ax spin-forever case)."""
+        import json
+
+        from llama_index.core.agent.workflow import ToolCall, ToolCallResult
+        from llama_index.core.tools import ToolOutput
+
+        def _call(tid: str) -> ToolCall:
+            return ToolCall(tool_name="ax", tool_kwargs={}, tool_id=tid)
+
+        def _result(tid: str, marker: str) -> ToolCallResult:
+            out = ToolOutput(
+                tool_name="ax",
+                content=json.dumps({"m": marker}),
+                raw_input={},
+                raw_output=json.dumps({"m": marker}),
+            )
+            return ToolCallResult(
+                tool_name="ax",
+                tool_kwargs={},
+                tool_id=tid,
+                tool_output=out,
+                return_direct=False,
+            )
+
+        steps: dict[str, MagicMock] = {}
+
+        async def _send(ev):
+            step = MagicMock()
+            step.update = AsyncMock()
+            step.metadata = {"tool_id": ev.tool_id}
+            steps[ev.tool_id] = step
+            return step
+
+        monkeypatch.setattr(pipeline, "send_tool_step", _send)
+
+        handler = self._make_handler(
+            _call("a"), _call("b"), _result("a", "A"), _result("b", "B")
+        )
+        await pipeline.stream_agent_response(handler, self._make_output())
+
+        assert steps["a"].output == {"m": "A"}
+        assert steps["b"].output == {"m": "B"}
+        steps["a"].update.assert_awaited_once()
+        steps["b"].update.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_unknown_result_leaves_pending_step_alone(self, monkeypatch) -> None:
+        """A result with an unknown id is dropped; the pending step is
+        finalized without output at end of stream, not mid-stream."""
+        from llama_index.core.agent.workflow import ToolCall, ToolCallResult
+        from llama_index.core.tools import ToolOutput
+
+        call = ToolCall(tool_name="ax", tool_kwargs={}, tool_id="t1")
+        unknown = ToolCallResult(
+            tool_name="ax",
+            tool_kwargs={},
+            tool_id="nope",
+            tool_output=ToolOutput(
+                tool_name="ax", content="x", raw_input={}, raw_output="x"
+            ),
+            return_direct=False,
+        )
+
+        step = SimpleNamespace(update=AsyncMock(), metadata={"tool_id": "t1"})
+        monkeypatch.setattr(pipeline, "send_tool_step", AsyncMock(return_value=step))
+
+        handler = self._make_handler(call, unknown)
+        await pipeline.stream_agent_response(handler, self._make_output())
+
+        # Not finalized mid-stream by the foreign result…
+        assert step.update.await_count == 1  # …only at end of stream.
+        assert not hasattr(step, "output")
+
+    @pytest.mark.asyncio
     async def test_streams_text_delta(self) -> None:
         from llama_index.core.agent.workflow import AgentStream
 
