@@ -18,7 +18,6 @@ from aria.tools.files._internals import (
     _secure_resolve_dir,
     _secure_resolve_path,
     _validate_inputs,
-    validate_and_resolve_file,
     validate_and_resolve_two_files,
 )
 from aria.tools.files.exceptions import FileOperationError, FileSecurityError
@@ -566,33 +565,6 @@ class TestFormatPermissionsSymbolic:
         mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP
         result = _format_permissions_symbolic(mode)
         assert result == "rw-r-----"
-
-
-class TestValidateAndResolveFile:
-    """Test suite for validate_and_resolve_file function."""
-
-    @staticmethod
-    def _workspace():
-        from aria.tools.constants import BASE_DIR
-
-        return BASE_DIR
-
-    def test_validate_and_resolve_success(self):
-        """Test successful validation and resolution."""
-        file_path = self._workspace() / f"test_validate_{id(self)}.txt"
-        file_path.write_text("content")
-
-        try:
-            result = validate_and_resolve_file(str(file_path))
-            assert result.exists()
-        finally:
-            file_path.unlink()
-
-    def test_validate_and_resolve_invalid_input(self):
-        """Test validation with invalid input."""
-        # Test with a non-absolute path (should fail)
-        with pytest.raises(FileOperationError, match="Path must be absolute"):
-            validate_and_resolve_file("relative/path.txt")
 
 
 class TestValidateAndResolveTwoFiles:

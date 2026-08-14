@@ -107,7 +107,7 @@ Tools are organized into **7 categories** (33 tools) managed by a centralized re
 | Category | Loading | Tools |
 |:---------|:--------|:------|
 | 🧠 **Core** | Always | reasoning, plan, knowledge, scratchpad, web_search, download, weather, shell |
-| 📁 **Files** | Always | read_file, write_file, edit_file, file_info, list_files, search_files, copy_file, delete_file, rename_file |
+| 📁 **Files** | Always | read_file, write_file, edit_file, file_info, list_files, search_files, copy_file |
 | 🌍 **Browser** | On-demand | open_url, browser_click |
 | 🐍 **Development** | On-demand | python |
 | 📊 **Finance** | On-demand | fetch_current_stock_price, fetch_company_information, fetch_ticker_news |

@@ -3,7 +3,7 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from aria.tools.files import copy_file, delete_file, rename_file
+from aria.tools.files import copy_file
 
 
 class TestFileManagement:
@@ -34,23 +34,3 @@ class TestFileManagement:
         assert data["tool"] == "copy_file"
         assert data["data"]["source"] == str(self.base_dir / "test.txt")
         assert data["data"]["destination"] == str(self.base_dir / "copied.txt")
-
-    def test_delete_file(self):
-        result = delete_file("Testing delete", str(self.base_dir / "test.txt"))
-        data = json.loads(result)
-
-        assert data["tool"] == "delete_file"
-        assert data["data"]["file_name"] == str(self.base_dir / "test.txt")
-        assert data["data"]["deleted"] is True
-
-    def test_rename_file(self):
-        result = rename_file(
-            "Testing rename",
-            str(self.base_dir / "test.txt"),
-            str(self.base_dir / "renamed.txt"),
-        )
-        data = json.loads(result)
-
-        assert data["tool"] == "rename_file"
-        assert data["data"]["old_name"] == str(self.base_dir / "test.txt")
-        assert data["data"]["new_name"] == str(self.base_dir / "renamed.txt")

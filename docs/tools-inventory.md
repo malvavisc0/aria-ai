@@ -1,6 +1,6 @@
 # Aria Tools Inventory
 
-A comprehensive guide to all tools available in the `src/aria/tools` package. Each tool returns JSON-formatted responses. Tools are organized into **categories** managed by a centralized registry, plus a unified `ax` dispatcher that routes to domain tools (web, knowledge, finance, IMDb, HTTP, dev, processes, worker).
+A comprehensive guide to all tools available in the `src/aria/tools` package. Each tool returns JSON-formatted responses. Tools are organized into **categories** managed by a centralized registry, plus a unified `ax` dispatcher that routes to domain tools (web, memory, knowledge, finance, IMDb, HTTP, dev, processes, documents, worker, mcp).
 
 ## Docstring Convention
 
@@ -26,7 +26,7 @@ This format is consumed by LlamaIndex's `FunctionTool.from_defaults()` which ext
 5. [File Operations](#5-file-operations)
 6. [HTTP Tools](#6-http-tools)
 7. [IMDb Tools](#7-imdb-tools)
-8. [Knowledge Tools](#8-knowledge-tools)
+8. [Memory Tools](#8-memory-tools)
 9. [Planner Tools](#9-planner-tools)
 10. [Process Tools](#10-process-tools)
 11. [Reasoning Tools](#11-reasoning-tools)
@@ -53,8 +53,8 @@ Shared utilities, decorators, constants, error handling, and retry mechanisms us
 | `DOWNLOADS_DIR` | `BASE_DIR / "downloads"` | Directory for downloads |
 | `REPORTS_DIR` | `BASE_DIR / "reports"` | Directory for reports |
 | `MAX_FILE_SIZE` | `5 * 1024 * 1024` | Maximum file size for processing (5 MB) |
-| `DEFAULT_TIMEOUT` | `30` | Default timeout for operations (seconds) |
-| `MAX_TIMEOUT` | `300` | Maximum timeout limit (seconds) |
+| `DEFAULT_TIMEOUT` | `30` | Default timeout for operations (env: `ARIA_DEFAULT_TIMEOUT`) |
+| `MAX_TIMEOUT` | `600` | Maximum timeout limit (env: `ARIA_MAX_TIMEOUT`) |
 | `NETWORK_TIMEOUT` | `10` | Network request timeout (seconds) |
 
 ### Decorators (`aria.tools.decorators`)
@@ -225,7 +225,7 @@ Execute or validate Python code. Provide **exactly one** of `code` or `file`.
 | `code` | `str` | One of code/file | `None` | Python code string |
 | `file` | `str` | One of code/file | `None` | Path to Python file |
 | `args` | `List[str]` | No | `None` | CLI arguments for `sys.argv` |
-| `timeout` | `int` | No | `30` | Max seconds (max: 300) |
+| `timeout` | `int` | No | `30` | Max seconds (capped at `MAX_TIMEOUT`, default 600, env: `ARIA_MAX_TIMEOUT`) |
 | `check_only` | `bool` | No | `False` | Validate syntax only |
 
 **Returns (check_only):** `{ "valid": true, "message": "Syntax is valid" }`
@@ -251,7 +251,7 @@ python("Validating module", file="module.py", check_only=True)
 |--------|-------|
 | `unified_read` | `read_file`, `file_info`, `list_files`, `search_files` |
 | `write_operations` | `write_file`, `edit_file` |
-| `file_management` | `copy_file` (`delete_file` and `rename_file` exist in the module but are **not** registered as agent tools) |
+| `file_management` | `copy_file` |
 
 All paths resolved relative to `BASE_DIR` with security validation.
 
@@ -324,8 +324,6 @@ edit_file("Removing code", "module.py", offset=2, length=3)
 
 Copy a file. Returns `source`, `destination`, `bytes_copied`, `success`. (Worker-only; not in `FILES_LITE`.)
 
-> `delete_file(reason, file_name)` and `rename_file(reason, old_name, new_name)` are implemented in `aria.tools.files.file_management` but are **not** exposed as registered agent tools.
-
 ---
 
 ## 6. HTTP Tools
@@ -343,7 +341,7 @@ General-purpose HTTP requests via `httpx` with redirect following.
 | `url` | `str` | -- | URL to request |
 | `headers` | `Dict[str, str]` | `None` | Request headers |
 | `body` | `str` | `None` | Request body |
-| `timeout` | `int` | `30` | Timeout seconds (max: 300) |
+| `timeout` | `int` | `30` | Timeout seconds (capped at `MAX_TIMEOUT`, default 600, env: `ARIA_MAX_TIMEOUT`) |
 
 **Returns:** `status_code`, `headers`, `url`, `body_file`, `body_size`, `content_type`. The body is persisted to disk and returned as a file path. Never raises -- returns error data on failure.
 
@@ -396,29 +394,22 @@ User reviews for a title.
 
 Trivia for a title.
 
-### `get_youtube_video_transcription(reason, url, languages?)` -- routed via `ax web youtube`
-
-Download YouTube captions to disk.
-
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `reason` | `str` | -- | Why you need this transcript |
-| `url` | `str` | -- | Full YouTube video URL |
-| `languages` | `List[str]` | `None` | Preferred languages in order (e.g. `["en", "es"]`). Default: English |
-
-**Returns:** `file_path`, `metadata` (with `video_id`, `transcript_segments`, `estimated_duration`).
-
-> Persistence-first: writes to disk, returns file metadata (not content).
-
 ---
 
-## 8. Knowledge Tools
+## 8. Memory Tools
 
-**Package:** `aria.tools.knowledge` -- **Routed via:** `ax` (family `knowledge`)
+**Package:** `aria.tools.memory` -- **Routed via:** `ax` (family `memory`, `inject_action` enabled)
 
-Persistent key-value store across conversations. SQLite-backed.
+Persistent key-value store across conversations. SQLite-backed. This is the
+long-term memory store (entries survive restarts and conversation
+boundaries). For ephemeral working memory within a task use `scratchpad`
+(`CORE`); for structured execution plans use `plan` (`CORE`).
 
-### `knowledge(reason, action, key?, value?, tags?, entry_id?, query?, max_results=10, agent_id="aria")`
+> **Renamed family.** This store used to be exposed under the `ax knowledge`
+> family. The `knowledge` family now serves a **different** purpose — see
+> the Knowledge Hub section below.
+
+### `memory(reason, action, key?, value?, tags?, entry_id?, query?, max_results=10, agent_id="aria")`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -441,13 +432,30 @@ Persistent key-value store across conversations. SQLite-backed.
 | `update` | `entry_id`, `value` | `entry_id`, message |
 | `delete` | `entry_id` | `entry_id`, message |
 
-> `action` is injected automatically by the `ax` dispatcher (do not pass it in `args`).
+> `action` is injected automatically by the `ax` dispatcher from the
+> `command` argument (do not pass it in `args`).
 
 ```python
-knowledge("Storing pref", action="store", key="lang", value="Python", tags=["prefs"])
-knowledge("Checking pref", action="recall", key="lang")
-knowledge("Searching", action="search", query="Python")
+ax(reason="Save preference", family="memory", command="store", args={"key": "lang", "value": "Python", "tags": ["prefs"]})
+ax(reason="Check preference", family="memory", command="recall", args={"key": "lang"})
+ax(reason="Search memory", family="memory", command="search", args={"query": "Python"})
 ```
+
+### Knowledge Hub (`ax knowledge`) -- on-demand document indexing
+
+**Routed via:** `ax` (family `knowledge`) -- **Requires:** `KnowledgeHub.enabled` (`ARIA_KNOWLEDGE_ENABLED=true`)
+
+A separate, optional subsystem that indexes a configured documents directory
+into the vector store for grounded answers. It is **not** the key-value
+memory store. Only two commands:
+
+| Command | Description |
+|---------|-------------|
+| `status` | Report indexing state (counts, indexed/skipped files) |
+| `reindex` | Re-scan the configured directory and index new/changed documents |
+
+The background reindex also runs automatically at startup when enabled
+(see the Web UI initialization docs).
 
 ---
 
@@ -706,6 +714,20 @@ Company fundamentals. Returns `basic_info`, `financial_metrics`, `price_data`, `
 
 Recent news. Returns `articles[{title, publisher, link, publish_time}]`. Max 50 articles.
 
+### YouTube Transcription -- routed via `ax web youtube`
+
+**Function:** `get_youtube_video_transcription` -- downloads YouTube captions to disk.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `reason` | `str` | -- | Why you need this transcript |
+| `url` | `str` | -- | Full YouTube video URL |
+| `languages` | `List[str]` | `None` | Preferred languages in order (e.g. `["en", "es"]`). Default: English |
+
+**Returns:** `file_path`, `metadata` (with `video_id`, `transcript_segments`, `estimated_duration`).
+
+> Persistence-first: writes to disk, returns file metadata (not content).
+
 ---
 
 ## 13. Shell Tools
@@ -721,7 +743,7 @@ Execute shell commands with timeout handling, output capture, and security const
 | `reason` | `str` | -- | Why |
 | `commands` | `str`, `List[str]`, `Dict`, or `List[Dict]` | -- | Command(s) to execute |
 | `stop_on_error` | `bool` | `True` | Stop batch on failure |
-| `timeout` | `int` | `30` | Default timeout (max: 300) |
+| `timeout` | `int` | `30` | Default timeout (capped at `MAX_TIMEOUT`, default 600, env: `ARIA_MAX_TIMEOUT`) |
 | `working_dir` | `str` | `BASE_DIR` | Default working directory |
 | `env` | `Dict[str, str]` | `None` | Additional environment variables |
 
@@ -795,7 +817,7 @@ shell(
 
 **Module:** `aria.tools.ax` -- **Category:** `AX` (loaded by both Aria and Worker agents)
 
-Unified dispatcher that routes `family`/`command` pairs to native Python functions. Replaces shell-based `ax <family> <command>` calls with direct function dispatch -- same structured JSON responses, zero subprocess overhead.
+Unified dispatcher that routes `family`/`command` pairs to native Python functions. Replaces shell-based `ax <family> <command>` calls with direct function dispatch -- same structured JSON responses, zero subprocess overhead. Use `family="help"` to list families, and `family="help"`, `command="lookup"` with `args={"topic": "<family>"}` to fetch a family's detailed on-demand reference.
 
 ### `ax(reason, family, command, args?)`
 
@@ -806,21 +828,25 @@ Unified dispatcher that routes `family`/`command` pairs to native Python functio
 | `command` | `str` | Yes | Subcommand within the family. Use `"help"` to list available commands |
 | `args` | `Dict[str, Any]` | No | Keyword arguments for the target function (excluding `reason`) |
 
-> `reason` is always required and passed by the caller. For families with `inject_action` enabled (`knowledge`, `processes`, `worker`), `action` is set automatically from `command` -- do not pass it in `args`. The dispatcher strips unknown kwargs that the target function does not accept.
+> `reason` is always required and passed by the caller. For families with `inject_action` enabled (`memory`, `processes`, `documents`, `worker`), `action` is set automatically from `command` -- do not pass it in `args`. The dispatcher strips unknown kwargs that the target function does not accept.
 
 ### Command Matrix
 
 | Family | Commands | Description |
 |--------|----------|-------------|
 | `web` | `search`, `fetch`, `visit`, `click`, `close`, `weather`, `youtube` | Web search, page visiting, content download, weather, YouTube transcripts |
-| `knowledge` | `store`, `recall`, `search`, `list`, `update`, `delete` | Persistent key-value memory across sessions (SQLite-backed) |
+| `memory` | `store`, `recall`, `search`, `list`, `update`, `delete` | Persistent key-value memory across sessions (SQLite-backed) |
+| `knowledge` | `status`, `reindex` | Knowledge hub document indexing (requires `ARIA_KNOWLEDGE_ENABLED`) |
 | `finance` | `stock`, `company`, `news` | Stock/crypto prices, company fundamentals, ticker news |
 | `imdb` | `search`, `movie`, `person`, `filmography`, `episodes`, `reviews`, `trivia` | Movies, shows, people via IMDb |
 | `http` | `request` | REST API calls (GET/POST/PUT/DELETE/PATCH). Responses persisted to disk |
 | `dev` | `run` | Execute Python code or file in a sandboxed subprocess |
 | `processes` | `start`, `stop`, `status`, `logs`, `list`, `restart`, `signal` | Manage background processes (dev servers, build watchers, pipelines) |
+| `documents` | `convert`, `status` | Convert office/PDF/HTML to markdown; check the Granite-Docling worker status |
 | `check` | `extras` | Discover additional CLI tools available in the virtual environment |
 | `worker` | `spawn`, `list`, `status`, `logs`, `cancel`, `clean` | Manage background worker agents |
+| `mcp` | `list`, `call` | Discover and invoke Model Context Protocol servers |
+| `help` | *(any)*, `lookup` | List families/commands; `lookup` fetches a family's detailed reference |
 
 ### Web command arguments
 
@@ -861,10 +887,10 @@ ax(
     args={"ticker": "AAPL"},
 )
 
-# Knowledge store
+# Memory store
 ax(
     reason="Save preference",
-    family="knowledge",
+    family="memory",
     command="store",
     args={"key": "lang", "value": "Python", "tags": ["prefs"]},
 )
@@ -890,6 +916,7 @@ ax(reason="Check available tools", family="check", command="extras")
 
 # Help
 ax(reason="List web commands", family="web", command="help")
+ax(reason="Detailed web reference", family="help", command="lookup", args={"topic": "web"})
 ```
 
 ### Error Handling
@@ -958,6 +985,11 @@ The `aria` CLI mirrors several `ax` families as `aria web ...` subcommands:
 | Get series episodes | `ax imdb episodes` |
 | Get movie reviews | `ax imdb reviews` |
 | Get movie trivia | `ax imdb trivia` |
-| Persistent memory | `ax knowledge <action>` |
+| Persistent memory | `ax memory <action>` |
+| Reindex knowledge hub | `ax knowledge reindex` |
 | Spawn a background worker | `ax worker spawn` |
 | Discover extra CLI tools | `ax check extras` |
+| Convert office/PDF to markdown | `ax documents convert` |
+| Check Granite-Docling worker | `ax documents status` |
+| List MCP servers | `ax mcp list` |
+| Call an MCP tool | `ax mcp call` |

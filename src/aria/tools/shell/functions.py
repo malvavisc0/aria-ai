@@ -256,22 +256,13 @@ def shell(
 ) -> str:
     """Execute shell commands with timeout and security constraints.
 
-    When to use:
-        - Run shell commands.
-        - Batch multiple commands with per-command timeout and error handling.
-
-    Args:
-        reason: Required. Brief explanation of why you are executing this command.
-        commands: str | list[str] | dict | list[dict].
-            Dict keys: command, timeout, working_dir, env, continue_on_error.
-        stop_on_error: Stop on first failure (default: True).
-        timeout: Default timeout seconds (default: 30, max: configurable).
-        working_dir: Default working directory.
-        env: Additional environment variables for all commands.
+    ``commands`` accepts a string, a list of strings, a JSON-array string, or a
+    list of dicts (per-command keys: command, timeout, working_dir, env,
+    continue_on_error). A single command returns a flat response; a batch
+    returns a ``results`` array.
 
     Returns:
-        JSON with command output. Single commands return flat response;
-        batch commands return results array.
+        JSON with command output (stdout, stderr, return_code, execution_time).
     """
     normalized = _normalize_commands(commands)
 

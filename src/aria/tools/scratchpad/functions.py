@@ -26,13 +26,6 @@ def scratchpad(
 
     Use this to store or retrieve short intermediate data across steps.
 
-    Args:
-        reason: Required. Brief explanation of why you are calling this tool.
-        key: Key to operate on (ignored for ``list``).
-        value: Value to store for ``set``.
-        operation: ``get`` | ``set`` | ``delete`` | ``list``.
-        agent_id: Auto-set, do not provide.
-
     Returns:
         JSON string with operation result and stored or retrieved value.
     """

@@ -8,6 +8,9 @@ from pathlib import Path
 import pytest
 
 from aria.tools.files.unified_read import (
+    ListFilesSchema,
+    ReadFileSchema,
+    SearchFilesSchema,
     file_info,
     list_files,
     read_file,
@@ -247,20 +250,22 @@ class TestSearchFiles:
 
 
 class TestToolDocstrings:
-    """The tool docstrings are the LLM's schema; path args must document
-    that absolute paths are required."""
+    """Path parameters must tell the LLM that absolute paths are required.
 
-    def test_read_file_docstring_promises_absolute_paths(self):
-        doc = read_file.__doc__ or ""
-        assert "relative to BASE_DIR" not in doc
-        assert "Absolute file path" in doc
+    The requirement lives in the Pydantic ``Field`` descriptions (the LLM's
+    parameter schema), not the function docstring."""
 
-    def test_list_files_docstring_promises_absolute_paths(self):
-        doc = list_files.__doc__ or ""
-        assert "relative to BASE_DIR" not in doc
-        assert "Absolute directory path" in doc
+    def test_read_file_schema_promises_absolute_paths(self):
+        desc = ReadFileSchema.model_fields["file_name"].description or ""
+        assert "relative to BASE_DIR" not in desc
+        assert "Absolute" in desc
 
-    def test_search_files_docstring_promises_absolute_paths(self):
-        doc = search_files.__doc__ or ""
-        assert "relative to BASE_DIR" not in doc
-        assert "Absolute directory path" in doc
+    def test_list_files_schema_promises_absolute_paths(self):
+        desc = ListFilesSchema.model_fields["path"].description or ""
+        assert "relative to BASE_DIR" not in desc
+        assert "Absolute" in desc
+
+    def test_search_files_schema_promises_absolute_paths(self):
+        desc = SearchFilesSchema.model_fields["path"].description or ""
+        assert "relative to BASE_DIR" not in desc
+        assert "Absolute" in desc

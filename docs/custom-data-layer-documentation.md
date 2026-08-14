@@ -174,22 +174,9 @@ async def get_step(self, step_id: str)
 - Returns `None` if step not found
 - Ensures consistent data format
 
-##### `list_threads()`
-
-```python
-async def list_threads(
-    pagination: Pagination,
-    filters: ThreadFilter
-) -> PaginatedResponse
-```
-
-**Purpose:** Lists threads with pagination and JSON deserialization.
-
-**Implementation Details:**
-- Deserializes JSON fields for all threads
-- Deserializes nested steps and elements
-- Promotes assistant messages to root level
-- Returns paginated response
+> Assistant-message promotion (`_promote_assistant_messages`) is applied in
+> `get_all_user_threads()`. `get_thread()` intentionally bypasses the
+> override to read the raw, unpromoted thread.
 
 #### Helper Functions
 
@@ -447,21 +434,27 @@ SQLAlchemy models that define the database schema for SQLite. These models match
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(String(36), primary_key=True)
-    identifier = Column(Text, nullable=False, unique=True)
-    metadata_ = Column("metadata", Text, nullable=False)
-    createdAt = Column(Text)
-    password = Column(Text, nullable=True)
+    id = mapped_column(String(36), primary_key=True)
+    display_name = mapped_column(Text, nullable=False)
+    identifier = mapped_column(Text, nullable=False, unique=True)
+    metadata_ = mapped_column("metadata", Text)  # JSON string
+    createdAt = mapped_column(Text)
+    password = mapped_column(Text)  # Hashed: PBKDF2-SHA256 `salt$hash`
 
     threads = relationship(
         "Thread", back_populates="user", cascade="all, delete-orphan"
     )
 ```
 
+> The actual models use SQLAlchemy 2.0's typed declarative style
+> (`DeclarativeBase`, `Mapped[...]`, `mapped_column`, `Annotated` type
+> aliases). The snippets above show the equivalent columns for readability.
+
 **Purpose:** Stores user accounts and authentication data.
 
 **Fields:**
 - `id`: Unique user ID (UUID as string)
+- `display_name`: Human-readable display name
 - `identifier`: Unique username/email
 - `metadata_`: User metadata as JSON string
 - `createdAt`: Creation timestamp
@@ -583,6 +576,7 @@ class Step(Base):
 - `language`: Programming language (for code steps)
 - `indent`: Indentation level
 - `defaultOpen`: Whether step is expanded by default
+- `autoCollapse`: Whether step auto-collapses
 
 **Relationships:**
 - Many-to-one with Thread
@@ -1328,7 +1322,7 @@ tags = thread.get("tags", [])  # Will be [] if JSON is malformed
 **Solution:** The data layer automatically promotes assistant messages to root level by clearing `parentId` on read.
 
 ```python
-# This is handled automatically in get_all_user_threads() and list_threads()
+# This is handled automatically in get_all_user_threads()
 if step.get("type") == "assistant_message" and step.get("parentId"):
     step["parentId"] = None  # Promote to root level
 ```

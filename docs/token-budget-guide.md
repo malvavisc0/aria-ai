@@ -92,7 +92,7 @@ into derived facts; the original text is what is retrieved.
 > smaller buffer drives the waterfall to flush on every turn, paying
 > ~18s/batch on the UI critical path. Keep `--chat_history_token_ratio`
 > at 0.50 or higher and rely on the vector block for older context.
-> See `docs/fix-chat-resume-freeze.md` for measurements.
+> (A startup warning is logged when the ratio is set below 0.30.)
 
 ### Why embeddings-first?
 

@@ -266,24 +266,6 @@ def _create_backup(file_path: Path) -> Path | None:
         return None
 
 
-def validate_and_resolve_file(file_name: str, check_exists: bool = True) -> Path:
-    """Validate inputs and resolve file path in one step.
-
-    Args:
-        file_name: File name to validate and resolve
-        check_exists: Whether to verify file exists
-
-    Returns:
-        Resolved Path object
-
-    Raises:
-        FileSecurityError: If validation fails
-        FileOperationError: If file doesn't exist (when check_exists=True)
-    """
-    _validate_inputs(file_name)
-    return _secure_resolve_path(file_name, check_exists=check_exists)
-
-
 def validate_and_resolve_two_files(
     source: str, dest: str, dest_must_exist: bool = False
 ) -> tuple[Path, Path]:

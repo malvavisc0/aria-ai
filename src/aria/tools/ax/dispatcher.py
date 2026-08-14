@@ -605,12 +605,6 @@ async def ax(
     and background-process actions. Use ``command="help"`` to list
     families or subcommands.
 
-    Args:
-        reason: Required. Brief explanation of why you are calling this.
-        family: Tool family name.
-        command: Subcommand within the family.
-        args: Target function arguments as a dict (excluding ``reason``).
-
     Returns:
         Structured JSON response from the target function.
     """

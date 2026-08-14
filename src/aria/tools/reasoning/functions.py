@@ -161,17 +161,6 @@ def reasoning(
 
     Actions: start, step, reflect, evaluate, summary, end.
 
-    Args:
-        reason: Required. Brief explanation of why you are calling this tool (e.g. "Analyze tradeoffs between approach A and B").
-        action: start|step|reflect|evaluate|summary|end.
-        content: Reasoning content (required for step/reflect).
-        cognitive_mode: planning|analysis|evaluation|synthesis|creative|reflection.
-        reasoning_type: deductive|inductive|abductive|causal|probabilistic|analogical.
-        evidence: Supporting evidence list for a step.
-        confidence: 0.0–1.0 (default: 0.65).
-        on_step: Step number for reflect action.
-        agent_id: Auto-set, do not provide.
-
     Returns:
         JSON string with action result and session status.
     """

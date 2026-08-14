@@ -10,16 +10,20 @@ from pydantic import BaseModel, Field
 
 
 class PlanSchema(BaseModel):
-    """Schema exposed to the LLM for the plan tool."""
+    """Schema exposed to the LLM for the plan tool.
+
+    All parameters are optional in JSON so a single schema can serve every
+    action; the descriptions state which action requires each field, and the
+    server validates per action at call time.
+    """
 
     reason: str = Field(
         description="Required. Brief explanation of why you are calling this tool."
     )
     action: str = Field(
         description=(
-            "Action: 'create' (new plan), 'add_step', 'update_step', "
-            "'execute_step', 'complete_step', 'fail_step', "
-            "'skip_step', 'update', 'summary', 'delete', 'list', 'status'."
+            "Action: 'create', 'get', 'update', 'add', 'remove', 'replace', "
+            "'reorder', 'list', 'delete', 'cleanup'."
         )
     )
     task: str | None = Field(
@@ -28,35 +32,46 @@ class PlanSchema(BaseModel):
     )
     steps: list[str] | None = Field(
         default=None,
-        description="List of step descriptions (optional for 'create').",
-    )
-    step_id: str | None = Field(
-        default=None,
-        description="Step ID to target (required for step actions).",
-    )
-    status: str | None = Field(
-        default=None,
-        description="Status to set: 'pending', 'in_progress', 'completed', 'failed', 'skipped'.",
-    )
-    result: str | None = Field(
-        default=None,
-        description="Result text for a step (used with 'update_step').",
-    )
-    description: str | None = Field(
-        default=None,
-        description="Updated description (used with 'update_step').",
-    )
-    after_step_id: str | None = Field(
-        default=None,
-        description="Insert a new step after this step ID (for 'add_step').",
-    )
-    step_ids: list[str] | None = Field(
-        default=None,
-        description="List of step IDs (used with 'execute_step' for batch).",
+        description="Ordered list of step descriptions (required for 'create').",
     )
     execution_id: str | None = Field(
         default=None,
-        description="Execution ID for tracking batch operations.",
+        description=(
+            "Plan ID returned by 'create'. Required for 'get', 'update', 'add', "
+            "'remove', 'replace', 'reorder', 'delete'."
+        ),
+    )
+    step_id: str | None = Field(
+        default=None,
+        description="Step ID to target (required for 'update', 'remove', 'replace').",
+    )
+    status: str | None = Field(
+        default=None,
+        description=(
+            "Step status for 'update': 'pending', 'in_progress', 'completed', 'failed'."
+        ),
+    )
+    result: str | None = Field(
+        default=None,
+        description="Optional result text recorded on a step (used with 'update').",
+    )
+    description: str | None = Field(
+        default=None,
+        description="Step description (required for 'add' and 'replace').",
+    )
+    after_step_id: str | None = Field(
+        default=None,
+        description=(
+            "Insert the new step after this step ID (for 'add'). Omit/null to "
+            "append at the end."
+        ),
+    )
+    step_ids: list[str] | None = Field(
+        default=None,
+        description=(
+            "Full reordered list of every step ID (required for 'reorder'). Must "
+            "contain each current step exactly once."
+        ),
     )
     agent_id: str = Field(
         default="default",
@@ -75,14 +90,11 @@ class ScratchpadSchema(BaseModel):
     )
     value: str | None = Field(
         default=None,
-        description="Value to store (required for 'set' and 'append' operations).",
+        description="Value to store (required for 'set').",
     )
     operation: str = Field(
         default="get",
-        description=(
-            "Operation: 'get' (read), 'set' (create/update), "
-            "'append' (add to existing), 'delete', 'list'."
-        ),
+        description="Operation: 'get' (read), 'set' (create/update), 'delete', 'list'.",
     )
     agent_id: str = Field(
         default="aria",

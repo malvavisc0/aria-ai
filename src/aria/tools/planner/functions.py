@@ -848,7 +848,11 @@ def plan(
     execution_id: str | None = None,
     agent_id: str = "default",
 ) -> str:
-    """Create and manage ordered execution plans."""
+    """Create and manage ordered execution plans.
+
+    Returns:
+        JSON with the plan/step result and metadata (execution_id, action, success).
+    """
     action = action.lower().strip()
 
     if action not in _ACTION_REGISTRY:

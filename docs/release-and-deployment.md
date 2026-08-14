@@ -89,21 +89,21 @@ The push of `vX.Y.Z` triggers `.github/workflows/release.yml`. You can monitor p
 │ validate-version  │  ← fails fast if tag ≠ __version__
 └────────┬──────────┘
          │
-    ┌────┴────┬────────────┬──────────────┐
-    ▼         ▼            ▼              ▼
-┌────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐
-│ Linux  │ │ Windows  │ │  macOS   │ │  PyPI      │
-│AppImage│ │  .exe    │ │  .app    │ │  publish   │
-└───┬────┘ └────┬─────┘ └────┬─────┘ └─────┬──────┘
-    │           │             │             │
-    └───────────┴─────────────┴──────┬──────┘
+   ┌─────┴──────┬───────────┬──────────┬───────────┬──────────────┐
+   ▼            ▼           ▼          ▼           ▼              ▼
+┌────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐
+│ Linux  │ │ Windows  │ │  macOS   │ │  PyPI    │ │build-whisper│ ← CUDA whisper-server tarball
+│AppImage│ │  .exe    │ │  .app    │ │ publish  │ │  (static)   │
+└───┬────┘ └────┬─────┘ └────┬─────┘ └─────┬────┘ └──────┬─────┘
+    │           │             │             │             │
+    └───────────┴─────────────┴──────┬──────┴─────────────┘
                                      │
                               ┌──────┴──────┐
-                              │Docker (×3)  │  ← GHCR: aria + aria-rocm + aria-lite
+                              │Docker (×4)  │  ← needs publish-pypi; GHCR: aria-cuda + aria-rocm + aria-lite + aria-arm64
                               └──────┬──────┘
                                      │
                               ┌──────┴──────┐
-                              │   release   │  ← GitHub Release with all artifacts
+                              │   release   │  ← needs all jobs; GitHub Release with every artifact
                               └─────────────┘
 ```
 
@@ -115,11 +115,17 @@ The push of `vX.Y.Z` triggers `.github/workflows/release.yml`. You can monitor p
 | `build-appimage` | ubuntu-22.04 | PyInstaller → AppImage (Linux x86_64) |
 | `build-windows` | windows-latest | PyInstaller → zipped .exe (Windows x86_64) |
 | `build-macos` | macos-latest | PyInstaller → zipped .app (macOS arm64) |
+| `build-whisper-cuda` | ubuntu-latest | Static CUDA `whisper-server` build → `whisper-server-cuda-12.6-x86_64.tar.gz` (attached to the release, consumed by the Docker images) |
 | `publish-pypi` | ubuntu-latest | `uv build` → `pypa/gh-action-pypi-publish` |
-| `build-docker` | ubuntu-latest | Docker → GHCR (CUDA/CPU + ROCm + Debian lite matrix) |
+| `build-docker` | ubuntu-latest | Docker matrix (×4) → GHCR: CUDA/CPU + ROCm + Debian lite + ARM64 |
 | `release` | ubuntu-latest | Creates GitHub Release, attaches all artifacts |
 
-All build and publish jobs depend on `validate-version` succeeding. `build-docker` depends on `publish-pypi` (so the image gets the freshly published package). The `release` job depends on all build and publish jobs completing.
+All build and publish jobs depend on `validate-version` succeeding.
+`build-whisper-cuda` needs only `validate-version` (runs in parallel with the
+platform builds). `build-docker` depends on `publish-pypi` (so the image gets
+the freshly published package). The `release` job depends on all build and
+publish jobs — including `build-whisper-cuda` (its tarball is a release asset)
+and `build-docker`.
 
 ---
 
@@ -183,15 +189,16 @@ pip install aria-ai[gui]   # with GUI (PySide6) support
 
 ## Docker Images
 
-Three Docker image variants are built and pushed to GitHub Container Registry (`ghcr.io`) on every release:
+Four Docker image variants are built and pushed to GitHub Container Registry (`ghcr.io`) on every release:
 
 | Variant | Base Image | Tag |
 |---------|-----------|-----|
 | CUDA/CPU | `vllm/vllm-openai:latest` | `ghcr.io/malvavisc0/aria-ai-cuda:latest` |
 | ROCm (AMD) | `vllm/vllm-openai-rocm:latest` | `ghcr.io/malvavisc0/aria-ai-rocm:latest` |
 | Debian (lite) | `debian:trixie-slim` | `ghcr.io/malvavisc0/aria-ai-lite:latest` |
+| ARM64 | Debian-based (no GPU) | `ghcr.io/malvavisc0/aria-ai-arm64:latest` |
 
-The **CUDA/CPU** and **ROCm** images include vLLM for local model serving plus Aria's web UI (Chainlit). The **lite** image is a lightweight alternative with no GPU/vLLM — designed for users connecting to a remote LLM endpoint or running CPU-only. Each image is tagged with both `latest` and the version number (e.g. `0.1.0`).
+The **CUDA/CPU** and **ROCm** images include vLLM for local model serving plus Aria's web UI (Chainlit). The **lite** and **ARM64** images are lightweight alternatives with no GPU/vLLM — designed for users connecting to a remote LLM endpoint or running CPU-only (the ARM64 image targets Raspberry Pi and similar boards). Each image is tagged with both `latest` and the version number (e.g. `0.1.0`).
 
 ### Usage
 
@@ -204,6 +211,9 @@ docker run -p 9876:9876 -v ./data:/app/data ghcr.io/malvavisc0/aria-ai-rocm:late
 
 # Lightweight — no GPU (remote LLM or CPU-only)
 docker run -p 9876:9876 -v ./data:/app/data ghcr.io/malvavisc0/aria-ai-lite:latest
+
+# ARM64 (Raspberry Pi etc., remote LLM or CPU-only)
+docker run -p 9876:9876 -v ./data:/app/data ghcr.io/malvavisc0/aria-ai-arm64:latest
 ```
 
 | Flag | Purpose |
@@ -211,7 +221,7 @@ docker run -p 9876:9876 -v ./data:/app/data ghcr.io/malvavisc0/aria-ai-lite:late
 | `-p 9876:9876` | Expose the Chainlit web UI |
 | `-v ./data:/app/data` | Persist databases, models, and config across restarts |
 
-The CUDA/CPU and ROCm images use the same `Dockerfile` with a `BASE_IMAGE` build argument to select the vLLM variant. The lite image uses a separate `Dockerfile.debian`. Authentication to GHCR uses OIDC (`packages: write` permission) — no secrets required.
+The CUDA/CPU and ROCm images use the same `Dockerfile` with a `BASE_IMAGE` build argument to select the vLLM variant. The lite and ARM64 images use separate lightweight Dockerfiles (no vLLM). Authentication to GHCR uses OIDC (`packages: write` permission) — no secrets required.
 
 ### Building Locally
 

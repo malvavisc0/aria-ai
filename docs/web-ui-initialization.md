@@ -1,6 +1,8 @@
-# ARIA Web UI Initialization Process
+# Aria Web UI Initialization Process
 
-This document provides a detailed explanation of the initialization process for the ARIA Web UI, including prerequisites, the startup sequence, and potential points of failure.
+Detailed explanation of the initialization process for the Aria web UI:
+prerequisites, startup sequence, state lifecycle, failure handling, and
+shutdown.
 
 ## Table of Contents
 
@@ -17,9 +19,14 @@ This document provides a detailed explanation of the initialization process for 
 
 ## Overview
 
-The ARIA Web UI is built on the [Chainlit](https://chainlit.io/) framework and provides a web interface for interacting with LLM agents. The initialization process is managed through the [`on_app_startup()`](src/aria/web_ui.py:329) function, which is triggered by Chainlit's `@cl.on_app_startup` decorator.
+The web UI is built on [Chainlit](https://chainlit.io/). Startup is
+orchestrated by [`on_app_startup_handler()`](../src/aria/web/lifecycle.py),
+invoked from the thin [`on_app_startup`](../src/aria/web_ui.py) entry point
+that Chainlit's `@cl.on_app_startup` decorator registers.
 
-The application uses a global state pattern via the [`AppState`](src/aria/web_ui.py:87) dataclass to hold all shared services and resources.
+Shared services and resources live in a global singleton: the
+[`AppState`](../src/aria/web/state.py) Pydantic model (`_state`). The
+matching teardown is [`on_app_shutdown_handler()`](../src/aria/web/lifecycle.py).
 
 ---
 
@@ -27,34 +34,36 @@ The application uses a global state pattern via the [`AppState`](src/aria/web_ui
 
 ```mermaid
 flowchart TB
-    subgraph Startup [on_app_startup]
-        A[1. Initialize Logging] --> B[2. Create Database Engine]
-        B --> C[3. Start vLLM Server]
-        C --> D[4. Initialize LLM and Embeddings]
-        D --> E[5. Initialize Vector Database]
-        E --> F[6. Initialize Agent Workflows]
-        F --> G[Mark Startup Complete]
+    subgraph Startup [on_app_startup_handler]
+        A[1. Critical infra: logging, storage, DB] --> B[2. Start vLLM + load embeddings]
+        B --> C[3. Init chat LLM client]
+        C --> D[4. Init vector DB]
+        D --> E[5. Init agent workflows]
+        E --> F[6. Browser + voice + knowledge hub]
+        F --> G[Mark startup complete]
     end
-    
-    subgraph AppState [Global _state Instance]
+
+    subgraph AppState [Global _state singleton]
         llm[LLM Client]
         embeddings[Embeddings Model]
         vector_db[ChromaDB Client]
         agents_workflow[AgentWorkflow]
         prompt_enhancer[PromptEnhancerAgent]
-        vllm_manager[VLLMServerManager]
+        vllm_manager[VllmServerManager]
+        browser_manager[LightpandaManager]
+        voice_manager[Whisper/Kokoro]
         db_engine[SQLAlchemy Engine]
     end
-    
+
     G --> AppState
-    
+
     subgraph External [External Dependencies]
         sqlite[(SQLite Database)]
         chromadb[(ChromaDB)]
         vllm_server[vLLM Server]
         huggingface[HuggingFace Hub]
     end
-    
+
     AppState --> External
 ```
 
@@ -64,7 +73,8 @@ flowchart TB
 
 ### Environment Variables
 
-The following environment variables must be configured before starting the application:
+Required and optional variables (see `src/aria/config/` for the authoritative
+definitions):
 
 | Variable | Required | Description | Example |
 |----------|----------|-------------|---------|
@@ -92,14 +102,17 @@ The following environment variables must be configured before starting the appli
 
 ### Directory Structure
 
-The application expects the following directory structure under `DATA_FOLDER`:
+Expected under `DATA_FOLDER`:
 
 ```
 data/
 ├── aria.db              # SQLite database (created if not exists)
 ├── chromadb/            # ChromaDB persistence (created automatically)
 ├── storage/             # Local file storage for uploads
-├── debug.logs           # Application logs
+├── logs/
+│   ├── debug.log        # Application logs
+│   ├── tools.log        # Tool-call debug logs
+│   └── startup-error.txt # Written on fatal startup abort
 ├── bin/
 │   └── lightpanda/      # Lightpanda headless browser binary
 └── models/              # Downloaded model files (optional, vLLM uses HF cache)
@@ -107,173 +120,80 @@ data/
 
 ### External Services
 
-The application uses vLLM for LLM inference and in-process HuggingFace for embeddings:
+vLLM serves the chat model; embeddings load in-process via HuggingFace.
 
 | Service | Default Port | Purpose |
 |---------|--------------|---------|
-| vLLM Server | 9090 | Chat LLM inference |
+| vLLM server(s) | configured per model | Chat LLM inference |
 | Embeddings | In-process | Text embeddings (loaded via HuggingFace) |
 
 ---
 
 ## Startup Sequence
 
-The [`on_app_startup()`](src/aria/web_ui.py:329) function executes the following sequence:
+`on_app_startup_handler()` runs three phases. Critical-infra failures are
+fatal (trigger full rollback); later subsystems are best-effort.
 
-### Step 1: Initialize Logging
+### Phase 1 — Critical Infrastructure
 
-```python
-log_path = DebugConfig.logs_path
-logger.add(
-    log_path,
-    rotation="10 MB",
-    level="DEBUG",
-    format=LOG_FORMAT,
-)
-```
+`_init_critical_infra()`:
 
-**What happens:**
-- Configures loguru logger with file output
-- Sets up log rotation at 10 MB
-- Log path: `{DATA_FOLDER}/debug.logs`
+1. **Langfuse** (`_init_langfuse()`) — optional instrumentation if all
+   `LANGFUSE_*` env vars are present; otherwise skipped with a warning.
+2. **Logging** (`_init_logging()`) — loguru file sinks:
+   - Main sink → `logs/debug.log`, rotation 10 MB, level `INFO`
+   - Tool-call sink → `logs/tools.log`, level `DEBUG`, filtered by the
+     `tool_call` extra set by `log_tool_call`
+   - uvicorn access logs filtered to suppress health-check noise
+3. **Storage mount** (`_init_storage_mount()`) — inserts a `/storage/{file_path}`
+   route at the head of Chainlit's router to serve uploaded files before
+   the SPA catch-all.
+4. **Database** (`_init_database()`) — `create_engine(SQLiteConfig.db_url)`
+   and `Base.metadata.create_all(...)`.
+5. **Storage sweep** (`_sweep_orphaned_storage()`) — reclaims element files
+   on disk with no matching DB row; runs off-thread, never fatal.
 
-**Failure conditions:**
-- Insufficient permissions to write log file
-- Invalid log path
+### Phase 2 — vLLM + Embeddings
 
----
+Embeddings loading starts **concurrently** with vLLM startup:
 
-### Step 2: Create Database Engine
+- `embed_task = asyncio.create_task(asyncio.to_thread(_load_embeddings_sync))`
+- `_load_embeddings_sync()` fails fast if the embeddings model is not
+  pre-downloaded locally — it never triggers a HuggingFace download at
+  startup.
+- If `ARIA_VLLM_REMOTE=true`, the remote endpoint is probed via
+  `_probe_remote_vllm()` and local servers are **not** started.
+- Otherwise `_init_vllm_servers()`:
+  - Creates a `VllmServerManager`.
+  - If the chat vLLM is already healthy on its port (probed with retries
+    to tolerate transient GPU-load timeouts), it **adopts** the existing
+    process and skips `start_all()` — preventing a destructive restart.
+  - Otherwise calls `start_all()` to launch all configured servers.
 
-```python
-_state.db_engine = create_engine(SQLiteConfig.db_url)
-Base.metadata.create_all(_state.db_engine)
-```
+### Phase 3 — Remaining Subsystems
 
-**What happens:**
-- Creates SQLAlchemy engine with SQLite connection
-- Creates all database tables defined in [`Base`](src/aria/db/models.py)
-- Database file is created if it does not exist
+1. **Embeddings finalize** (`_finalize_subsystems`) — awaits `embed_task`.
+   Failure here is fatal.
+2. **Chat LLM client** (`_safe_init_chat_llm`) → `get_chat_llm(...)`.
+   Best-effort: a failure logs a warning and the LLM stays `None`.
+3. **Vector DB** (`_safe_init_vector_db`) → `_init_vector_db()`:
+   - Validates the ChromaDB path is writable.
+   - On `ChromaError` (corruption) it resets the directory and retries.
+   - Other errors are **not** wiped (avoids nuking threads' embeddings).
+4. **Orphaned-collection cleanup** (`_cleanup_orphaned_collections`) —
+   removes ChromaDB collections for threads no longer in SQLite.
+5. **Agent workflows** (`_safe_init_agent_workflows`) — `get_agent_workflow`
+   and `get_prompt_enhancer_agent` (only if the LLM initialized).
+6. **Browser** (`_safe_init_browser`) — starts Lightpanda if available.
+7. **Voice** (`_safe_init_voice`) — starts whisper.cpp STT and kokoro TTS.
+8. **Knowledge hub** — if `KnowledgeHub.enabled`, creates the tools DB
+   tables and fires off a background reindex task.
 
-**Configuration used:**
-- [`SQLiteConfig.db_url`](src/aria/config/database.py:11) = `sqlite:///{DATA_FOLDER}/{ARIA_DB_FILENAME}`
+Finally:
 
-**Failure conditions:**
-- Invalid database path
-- Insufficient permissions
-- Corrupted database file
-
----
-
-### Step 3: Start vLLM Server
-
-```python
-_state.vllm_manager = VLLMServerManager()
-_state.vllm_manager.start()
-```
-
-**What happens:**
-- Creates a [`VLLMServerManager`](src/aria/server/vllm.py) instance
-- Starts a single vLLM inference server for the chat model
-- Auto-detects GPU VRAM and calculates optimal memory utilization
-- Applies quantization settings (GPTQ/AWQ) from configuration
-- Waits for health check on the vLLM server (blocking)
-- Default timeout: 120 seconds
-
-**Server startup details:**
-- vLLM is started as a Python subprocess with OpenAI-compatible API
-- Default port: 9090
-- Model is loaded from HuggingFace Hub (or local cache)
-- KV cache dtype is configured (fp8 recommended for 8 GB GPUs)
-
-**Failure conditions:**
-- vLLM not installed (`aria vllm install`)
-- Missing or invalid model path
-- Port already in use
-- Health check timeout
-- Insufficient GPU memory
-
----
-
-### Step 4: Initialize LLM and Embeddings
-
-```python
-_state.llm = get_chat_llm(api_base=ChatConfig.api_url)
-_state.embeddings = get_embeddings_model(api_base=EmbeddingsConfig.api_url)
-```
-
-**What happens:**
-- Creates OpenAI-compatible LLM client pointing to vLLM server
-- Creates HuggingFace embeddings model (loaded in-process)
-
-**Configuration used:**
-- `ChatConfig.api_url` = `CHAT_OPENAI_API` (default: `http://localhost:9090/v1`)
-- Embeddings loaded directly via `llama-index-embeddings-huggingface`
-
-**Failure conditions:**
-- vLLM server not responding
-- Invalid API URL
-- Model not loaded on server
-- Embeddings model download failure
-
----
-
-### Step 5: Initialize Vector Database
-
-```python
-_state.vector_db = ChromaDBPersistentClient(
-    path=ChromaDBConfig.db_path,
-    settings=ChromaDBSettings(
-        is_persistent=True,
-        persist_directory=ChromaDBConfig.db_path.absolute().as_posix(),
-        anonymized_telemetry=False,
-    ),
-)
-```
-
-**What happens:**
-- Creates a persistent ChromaDB client
-- Vector data is stored in `{DATA_FOLDER}/{CHROMADB_PERSISTENT_PATH}`
-
-**Failure conditions:**
-- Invalid path
-- Insufficient permissions
-- ChromaDB corruption
-
----
-
-### Step 6: Initialize Agent Workflows
-
-```python
-from aria.agents import get_prompt_enhancer_agent
-
-_state.agents_workflow = get_agent_workflow(llm=_state.llm)
-_state.prompt_enhancer = get_prompt_enhancer_agent(llm=_state.llm)
-```
-
-**What happens:**
-- Creates the main Aria agent via [`AgentWorkflow`](src/aria/agents/aria.py) with a centralized tool registry:
-  - **Core tools** (always loaded): reasoning, plan, scratchpad, shell
-  - **File tools** (always loaded): read_file, write_file, edit_file, file_info, list_files, search_files, copy_file
-  - **Domain tools** (on-demand): browser, development, finance, entertainment, system
-- Worker agents can be spawned on-demand via `aria worker spawn` for heavy tasks
-- Creates a separate [`PromptEnhancerAgent`](src/aria/agents/prompt_enhancer.py) for prompt enhancement
-
-**Failure conditions:**
-- LLM client not initialized
-- Agent configuration errors
-
----
-
-### Step 7: Mark Startup Complete
-
-```python
-_state._startup_complete = True
-```
-
-**What happens:**
-- Sets the internal flag indicating successful initialization
-- This flag is checked by [`AppState.validate()`](src/aria/web_ui.py:157)
+- `_state.startup_complete = True`
+- `_state.startup_event.set()`
+- `DebugConfig.startup_error_path` is unlinked.
 
 ---
 
@@ -281,244 +201,188 @@ _state._startup_complete = True
 
 ### State Structure
 
+`AppState` is a Pydantic `BaseModel` in `src/aria/web/state.py`:
+
 ```python
-@dataclass
-class AppState:
-    llm: OpenAI | None = None  # Required
-    embeddings: OpenAIEmbedding | None = None  # Required
-    vector_db: ClientAPI | None = None  # Required
-    agents_workflow: AgentWorkflow | None = None  # Required
-    prompt_enhancer: PromptEnhancerAgent | None = None  # Optional
-    vllm_manager: VLLMServerManager | None = None  # Optional
-    db_engine: Engine | None = None  # Required
-    _startup_complete: bool = field(default=False, repr=False)
+class AppState(BaseModel):
+    model_config = {"arbitrary_types": True}
+
+    llm: OpenAILike | None = None
+    embeddings: BaseEmbedding | None = None
+    vector_db: ClientAPI | None = None
+    agents_workflow: AgentWorkflow | None = None
+    prompt_enhancer: PromptEnhancerAgent | None = None
+    vllm_manager: VllmServerManager | None = None
+    browser_manager: Any = None
+    voice_manager: Any = None
+    db_engine: Engine | None = None
+    startup_complete: bool = False
+    startup_event: asyncio.Event = asyncio.Event()
 ```
+
+Required fields (`_REQUIRED_FIELDS`): `llm`, `embeddings`, `vector_db`,
+`agents_workflow`, `db_engine`.
 
 ### Validation
 
-The [`AppState.validate()`](src/aria/web_ui.py:157) method checks that all required attributes are initialized:
+- `is_initialized()` — `True` when all required fields are non-`None` **and**
+  `startup_complete` is `True`.
+- `validate_initialized()` — raises `AppStateNotInitializedError` listing
+  the missing fields otherwise.
 
 ```python
-def validate(self) -> None:
-    missing: list[str] = []
-    if self.llm is None:
-        missing.append("llm")
-    if self.embeddings is None:
-        missing.append("embeddings")
-    if self.vector_db is None:
-        missing.append("vector_db")
-    if self.agents_workflow is None:
-        missing.append("agents_workflow")
-    if self.db_engine is None:
-        missing.append("db_engine")
-    
-    if missing:
-        raise AppStateNotInitializedError(...)
-```
-
-### Usage Pattern
-
-```python
-# Safe attribute access
-_state.validate()
+_state.validate_initialized()       # raises if not ready
 handler = _state.agents_workflow.run(...)
-
-# Conditional access
-if _state.is_initialized():
-    memory = _create_memory(thread_id)
 ```
+
+### Low-ratio warning
+
+`_warn_low_history_ratio()` logs a warning when
+`CHAT_HISTORY_TOKEN_RATIO` is set below `0.30`, since that drives
+per-turn embedding flushes on the UI critical path.
 
 ---
 
 ## Points of Failure
 
-### Critical Failures (App Will Not Start)
+### Critical Failures (app will not start)
 
-| Step | Failure | Symptom | Resolution |
-|------|---------|---------|------------|
-| Logging | Permission denied | Silent failure or crash | Check directory permissions |
+| Phase | Failure | Symptom | Resolution |
+|-------|---------|---------|------------|
+| Logging | Permission denied | Silent failure/crash | Check directory permissions |
 | Database | Cannot create file | Exception at startup | Verify `DATA_FOLDER` exists and is writable |
-| vLLM | Not installed | `ImportError` or startup failure | Run `aria vllm install` |
-| vLLM | Missing model | Model download failure | Verify `CHAT_MODEL_PATH` is valid on HuggingFace |
-| vLLM | Port in use | Health check timeout | Kill existing process on port 9090 |
-| vLLM | GPU OOM | Server crash | Reduce `CHAT_CONTEXT_SIZE` or use smaller model |
-| LLM | Connection refused | API call failure | Ensure vLLM server is healthy |
-| ChromaDB | Permission denied | Exception at startup | Check `CHROMADB_PERSISTENT_PATH` permissions |
+| vLLM (local) | Not installed | startup failure | Run `aria vllm install` |
+| vLLM (local) | Missing model | Model load failure | Verify `CHAT_MODEL_PATH` |
+| vLLM (local) | Port in use | Health-check timeout | Kill the process on the port |
+| vLLM (local) | GPU OOM | Server crash | Reduce `CHAT_CONTEXT_SIZE` or use a smaller model |
+| vLLM (remote) | Endpoint unreachable | startup abort | Check `CHAT_OPENAI_API` and network |
+| Embeddings | Not pre-downloaded | startup abort | `aria models download --model embeddings` |
+| LLM | Connection refused | LLM stays `None` | Ensure vLLM is healthy |
 
-### Non-Critical Failures (Degraded Functionality)
+A failure in critical infra or vLLM/embeddings triggers `_abort_startup`:
+writes a `startup_error_path` marker, logs the exception, calls
+`_cleanup_on_failure()` (reverse-order teardown), then `SystemExit(1)`.
+
+### Non-Critical Failures (degraded functionality)
 
 | Component | Failure | Impact | Fallback |
 |-----------|---------|--------|----------|
 | `prompt_enhancer` | Not initialized | Enhance command unavailable | Original prompt used |
-| `vllm_manager` | Not initialized | No local inference | External API required |
+| `browser_manager` | Lightpanda missing/failed | Browser tools disabled | Other tools work |
+| `voice_manager` | whisper/kokoro failed | Voice features disabled | Text-only mode |
+| `vector_db` | Init failed | Vector memory unavailable | Logged, app continues |
 
 ### Runtime Failures
 
-| Scenario | Error Type | Handling |
-|----------|------------|----------|
-| AppState not initialized | `AppStateNotInitializedError` | User sees "Please wait a moment and try again" |
-| Message processing error | `Exception` | User sees "An error occurred. Please try again." |
+| Scenario | Error | Handling |
+|----------|-------|----------|
+| AppState not initialized | `AppStateNotInitializedError` | Caller shows a "please wait" message |
+| Message processing error | `Exception` | User sees an error notice |
 | Chat history restore failure | `Exception` | Logged, chat continues with empty memory |
-| Authentication failure | `None` return | User sees login error |
 
 ---
 
 ## Shutdown Process
 
-The [`on_app_shutdown()`](src/aria/web_ui.py:411) function handles graceful shutdown:
+`on_app_shutdown_handler()` performs graceful, **order-sensitive** teardown.
+Fast child servers (browser, voice) stop *before* vLLM — vLLM unload is slow
+and can exhaust the external `stop` timeout, getting the process SIGKILLed
+mid-shutdown; anything not yet stopped would leak as an orphan.
 
-```python
-@cl.on_app_shutdown
-async def on_app_shutdown() -> None:
-    logger.info("Shutting down Aria web UI...")
-    
-    # Stop vLLM server
-    if _state.vllm_manager:
-        _state.vllm_manager.stop()
-    
-    # Reset all state
-    _state.vllm_manager = None
-    _state.llm = None
-    _state.embeddings = None
-    _state.vector_db = None
-    _state.agents_workflow = None
-    _state.prompt_enhancer = None
-    _state._startup_complete = False
-    
-    # Dispose database engine
-    if _state.db_engine:
-        _state.db_engine.dispose()
-        _state.db_engine = None
-```
-
-### Shutdown Sequence
+1. `reset_data_layer_cache()` (from `aria.web.hooks`)
+2. `_stop_browser()` — Lightpanda; clears `browser_manager`.
+3. `_stop_voice()` — kokoro TTS then whisper.cpp STT; clears
+   `voice_manager`.
+4. `_stop_vllm_servers(...)` — `vllm_manager.stop_all()`, honoring a
+   `skip_vllm_shutdown` sentinel (left running if present).
+5. `_reset_app_state()` — nulls all state fields, disposes the engine,
+   clears `startup_event`.
+6. `_remove_log_sinks()` — removes the two loguru sinks last so cleanup
+   logging is still captured.
 
 ```mermaid
 flowchart TB
-    A[Shutdown Triggered] --> B{vllm_manager exists?}
-    B -->|Yes| C[Stop vLLM server]
-    B -->|No| D[Skip server shutdown]
-    C --> E[Reset all state attributes to None]
-    D --> E
-    E --> F[Dispose database engine]
-    F --> G[Log shutdown complete]
+    A[Shutdown Triggered] --> B[Reset data layer cache]
+    B --> C[Stop browser]
+    C --> D[Stop voice]
+    D --> E[Stop vLLM servers]
+    E --> F[Reset app state + dispose engine]
+    F --> G[Remove log sinks]
 ```
 
 ---
 
 ## Troubleshooting
 
-### Common Issues
+### 1. AppStateNotInitializedError
 
-#### 1. AppStateNotInitializedError
+Users see "not fully initialized". Causes: startup failed (check the
+`startup_error_path` marker), or a request arrived before startup finished.
 
-**Symptom:** Users see "The application is not fully initialized" message.
-
-**Causes:**
-- Startup failed silently
-- Accessing state before startup completes
-
-**Diagnosis:**
 ```bash
-# Check logs for startup errors
-cat data/debug.logs | grep -i "failed\|error"
+# Look for the startup error marker and logs
+ls data/logs/  # startup-error.txt on fatal abort
+grep -i "failed\|error" data/logs/debug.log
 ```
 
-**Resolution:**
-- Review startup logs
-- Verify all prerequisites are met
-- Restart the application
+### 2. vLLM Server Timeout
 
----
+"Starting vLLM inference servers…" hangs. Causes: missing/invalid model,
+insufficient GPU memory, port in use.
 
-#### 2. vLLM Server Timeout
-
-**Symptom:** "Starting vLLM inference server..." hangs indefinitely.
-
-**Causes:**
-- Model file not found or invalid
-- Insufficient GPU memory
-- Port already in use
-
-**Diagnosis:**
 ```bash
-# Check if port is in use
-lsof -i :9090
-
-# Check GPU memory
-nvidia-smi
-
-# Check vLLM installation
-aria vllm status
+lsof -i :9090     # port conflict
+nvidia-smi        # GPU memory
+aria vllm status   # installation
+aria vllm install  # if missing
 ```
 
-**Resolution:**
-- Kill existing processes on port 9090
-- Free GPU memory
-- Verify model path: `aria vllm info`
-- Install vLLM if missing: `aria vllm install`
+### 3. Database Errors
 
----
+Authentication fails or history doesn't persist.
 
-#### 3. Database Errors
-
-**Symptom:** Authentication fails or chat history not persisting.
-
-**Causes:**
-- Database file corrupted
-- Permission issues
-- Missing tables
-
-**Diagnosis:**
 ```bash
-# Check database file
 ls -la data/aria.db
-
-# Check integrity
 sqlite3 data/aria.db "PRAGMA integrity_check;"
 ```
 
-**Resolution:**
-- Backup and recreate database
-- Fix permissions
-- Run migrations
+### 4. ChromaDB Errors
 
----
+Memory/context not working. Causes: corrupted vector store, permissions.
 
-#### 4. ChromaDB Errors
-
-**Symptom:** Memory/context not working properly.
-
-**Causes:**
-- Corrupted vector store
-- Permission issues
-
-**Diagnosis:**
 ```bash
-# Check ChromaDB directory
 ls -la data/chromadb/
 ```
 
-**Resolution:**
-- Backup and delete ChromaDB directory
-- Restart application to recreate
+Resolution: back up and delete the ChromaDB directory, then restart to
+recreate it.
 
----
+### 5. Embeddings Not Found
+
+Startup aborts with "Embeddings model not found locally". The embeddings
+model must be pre-downloaded; no auto-download happens at startup.
+
+```bash
+aria models download --model embeddings
+```
 
 ### Health Check Endpoints
 
-| Service | Endpoint | Expected Response |
-|---------|----------|-------------------|
-| vLLM Server | `http://localhost:9090/health` | `{"status": "ok"}` |
+| Service | Endpoint | Expected |
+|---------|----------|----------|
+| vLLM server | `http://localhost:<port>/health` | `200` |
 
 ---
 
 ## Related Files
 
-- [`src/aria/web_ui.py`](src/aria/web_ui.py) - Main web UI module
-- [`src/aria/config/api.py`](src/aria/config/api.py) - vLLM and service configuration
-- [`src/aria/config/database.py`](src/aria/config/database.py) - Database configuration
-- [`src/aria/config/models.py`](src/aria/config/models.py) - Model configuration
-- [`src/aria/server/vllm.py`](src/aria/server/vllm.py) - vLLM server manager
-- [`src/aria/llm.py`](src/aria/llm.py) - LLM and agent workflow initialization
-- [`src/aria/db/models.py`](src/aria/db/models.py) - Database models
+- [`src/aria/web_ui.py`](../src/aria/web_ui.py) — Chainlit entry point (thin)
+- [`src/aria/web/lifecycle.py`](../src/aria/web/lifecycle.py) — startup/shutdown handlers
+- [`src/aria/web/state.py`](../src/aria/web/state.py) — `AppState` singleton
+- [`src/aria/config/api.py`](../src/aria/config/api.py) — vLLM/service config
+- [`src/aria/config/database.py`](../src/aria/config/database.py) — DB config
+- [`src/aria/config/models.py`](../src/aria/config/models.py) — model config
+- [`src/aria/config/folders.py`](../src/aria/config/folders.py) — data/log folder config
+- [`src/aria/server/vllm.py`](../src/aria/server/vllm.py) — vLLM server manager
+- [`src/aria/llm/`](../src/aria/llm/) — LLM, embeddings, and agent-workflow factory
+- [`src/aria/db/models.py`](../src/aria/db/models.py) — database models

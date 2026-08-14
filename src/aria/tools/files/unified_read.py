@@ -341,13 +341,6 @@ def read_file(
 
     Output is chunked via offset/length parameters.
 
-    Args:
-        reason: Required. Brief explanation of why you are reading this file.
-        file_name: Absolute file path (e.g. /home/user/data/file.txt).
-        offset: Start line 0-indexed (default: 0).
-        length: Lines to read; 0=all up to max_lines (default: 0).
-        max_lines: Max lines per call (default: 200).
-
     Returns:
         JSON with lines/content, total_lines, has_more, next_offset.
     """
@@ -407,10 +400,6 @@ def read_file(
 )
 def file_info(reason: Reason, file_name: str) -> str:
     """Get metadata for a file or directory (size, type, permissions, timestamps).
-
-    Args:
-        reason: Required. Brief explanation of why you need this file's metadata.
-        file_name: Path to the file or directory.
 
     Returns:
         JSON with exists, is_file, is_directory, size_bytes,
@@ -591,14 +580,6 @@ def list_files(
     path: str | None = ".",
 ) -> str:
     """List files/dirs with optional recursive tree view.
-
-    Args:
-        reason: Required. Brief explanation of why you are listing files.
-        pattern: Glob filter (default: "*").
-        recursive: Tree view if True (default: False).
-        max_depth: Max depth for tree (default: 3).
-        max_results: Cap for flat list (default: 100).
-        path: Absolute directory path (e.g. /home/user/data).
 
     Returns:
         JSON with files (flat) or tree (recursive), plus count.
@@ -821,16 +802,6 @@ def search_files(
     path: str | None = ".",
 ) -> str:
     """Search files by name pattern or content regex.
-
-    Args:
-        reason: Required. Brief explanation of why you are searching files.
-        pattern: Regex to match filenames or content.
-        mode: name|content (default: name).
-        file_pattern: Glob filter for files (default: "**/*").
-        recursive: Search recursively (default: True).
-        max_results: Cap results (default: 500).
-        context_lines: Context lines around matches (default: 2).
-        path: Absolute directory path (e.g. /home/user/data).
 
     Returns:
         JSON with matches[] (file, line, context), count.

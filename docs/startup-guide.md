@@ -70,8 +70,8 @@ aria server stop
 #### Other CLI Commands
 
 ```bash
-# Check system readiness
-aria check
+# Check system readiness (preflight runs automatically on server start)
+ax check preflight
 
 # User management
 aria users list
@@ -88,16 +88,26 @@ aria system gpu
 # Configuration
 aria config show
 
-# Agent tool commands
-aria search web "query"         # Web search
-aria knowledge store "key" "v"  # Store a fact
-aria finance stock TICKER       # Stock price
-aria imdb search "title"        # Search movies/TV
-aria dev run "code"             # Execute Python
-aria vllm install               # Install vLLM
-aria vllm status                # Check vLLM status
-aria worker spawn --prompt "..." # Background worker
-aria self test-tools            # Verify tools
+# Agent-facing commands — use the `ax` CLI (entry point: `ax`)
+ax web search "query"            # Web search
+ax web fetch "url"               # Fetch URL content (auto-detects file vs website)
+ax web visit "url"               # Visit a page in the browser (stays open for click)
+ax web click "selector"          # Click element on the current page
+ax web close                     # Close browser page
+ax web weather "city"            # Weather forecast
+ax web youtube "url"             # YouTube transcript
+ax memory store "key" "value"    # Persistent key-value memory across sessions
+ax memory recall "key"
+ax knowledge status              # Knowledge hub indexing state
+ax knowledge reindex             # Re-scan documents directory
+ax dev run "code"                # Execute Python
+ax processes list                # Manage background processes
+ax worker spawn --prompt "..."   # Background worker
+ax check ...                     # Preflight checks
+
+# aria management CLI (entry point: `aria`)
+aria tools cleanup-sessions      # Tool state maintenance
+aria storage sweep               # Reclaim orphaned element files
 ```
 
 ### GUI Method
@@ -143,7 +153,7 @@ flowchart TD
 | `storage/` | Project root | Uploaded files |
 | `chromadb/` | Project root | Vector database |
 | `aria.db` | `data/` | SQLite database |
-| `logs/aria.log` | `data/` | Application logs |
+| `logs/` | Project root | `debug.log` (app) + `tools.log` (tool calls) + `startup-error.txt` |
 
 ## Server Management
 
@@ -207,7 +217,7 @@ Before starting the server, Aria validates the environment:
 
 ```bash
 # CLI
-aria check
+ax check preflight
 
 # The server commands also run preflight automatically
 aria server run
@@ -236,8 +246,9 @@ Defined in [`pyproject.toml`](../pyproject.toml):
 
 ```toml
 [project.scripts]
-aria = "aria:main"           # CLI entry point
-aria-gui = "aria.gui:main"   # GUI entry point
+aria = "aria:main"              # Management CLI
+ax = "aria.ax_cli:main"         # Agent-facing CLI
+aria-gui = "aria.gui:main"      # GUI entry point
 ```
 
 ### Component Flow
@@ -284,25 +295,27 @@ flowchart TD
 
 | File | Purpose |
 |------|---------|
-| [`src/aria/__init__.py`](../src/aria/__init__.py) | CLI entry point |
-| [`src/aria/gui/__init__.py`](../src/aria/gui/__init__.py) | GUI entry point |
+| [`src/aria/__init__.py`](../src/aria/__init__.py) | CLI entry point (`aria`) |
+| [`src/aria/gui/__init__.py`](../src/aria/gui/__init__.py) | GUI entry point (`aria-gui`) |
+| [`src/aria/ax_cli/app.py`](../src/aria/ax_cli/app.py) | Agent-facing `ax` CLI |
 | [`src/aria/initializer.py`](../src/aria/initializer.py) | First-run setup |
 | [`src/aria/preflight.py`](../src/aria/preflight.py) | Environment validation |
-| [`src/aria/cli/main.py`](../src/aria/cli/main.py) | CLI commands |
+| [`src/aria/cli/main.py`](../src/aria/cli/main.py) | Management CLI commands |
 | [`src/aria/cli/server.py`](../src/aria/cli/server.py) | Server CLI commands |
 | [`src/aria/server/manager.py`](../src/aria/server/manager.py) | Server lifecycle |
-| [`src/aria/web_ui.py`](../src/aria/web_ui.py) | Chainlit application |
+| [`src/aria/web_ui.py`](../src/aria/web_ui.py) | Chainlit application (thin entry) |
+| [`src/aria/web/lifecycle.py`](../src/aria/web/lifecycle.py) | Startup/shutdown handlers |
+| [`src/aria/web/state.py`](../src/aria/web/state.py) | Global `AppState` singleton |
 | [`src/aria/gui/windows/main_window.py`](../src/aria/gui/windows/main_window.py) | GUI main window |
-| [`src/aria/cli/self_cmd.py`](../src/aria/cli/self_cmd.py) | Self-awareness CLI (test-tools) |
-| [`src/aria/agents/worker.py`](../src/aria/agents/worker.py) | Worker agent factory |
 | [`src/aria/gui/windows/server_handlers.py`](../src/aria/gui/windows/server_handlers.py) | GUI server controls |
+| [`src/aria/agents/worker.py`](../src/aria/agents/worker.py) | Worker agent factory |
 
 ## Troubleshooting
 
 ### Server Won't Start
 
-1. Run `aria check` to identify issues
-2. Check logs in `data/logs/aria.log`
+1. Run `ax check preflight` to identify issues
+2. Check logs in `data/logs/debug.log`
 3. Verify all models are downloaded: `aria models list`
 4. Verify vLLM is installed: `aria vllm status`
 
@@ -328,7 +341,7 @@ uv sync --extra gui
 
 ```bash
 # Check database connectivity
-aria check
+ax check preflight
 
 # The database file is located at
 data/aria.db

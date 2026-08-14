@@ -3,8 +3,6 @@
 # File management operations
 from aria.tools.files.file_management import (
     copy_file,
-    delete_file,
-    rename_file,
 )
 
 # Unified read operations
@@ -45,6 +43,4 @@ __all__ = [
     "EditFileSchema",
     # File management
     "copy_file",
-    "delete_file",
-    "rename_file",
 ]

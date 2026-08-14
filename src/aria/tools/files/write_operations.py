@@ -235,12 +235,6 @@ def write_file(
 ) -> str:
     """Write or append to a file (atomic, dirs auto-created, backup on overwrite).
 
-    Args:
-        reason: Required. Brief explanation of why you are writing this file.
-        file_name: File path.
-        contents: Content to write.
-        mode: overwrite|append (default: overwrite).
-
     Returns:
         JSON with bytes_written/appended, lines, created, backup_created.
     """
@@ -340,13 +334,6 @@ def edit_file(
 
     Operation: length=0+new_lines→insert; length>0+new_lines→replace;
     length>0+new_lines=None→delete.
-
-    Args:
-        reason: Required. Brief explanation of why you are editing this file.
-        file_name: File path.
-        offset: 0-indexed start line.
-        length: Lines to replace/delete (0=insert only).
-        new_lines: Lines to insert/replace (None=delete).
 
     Returns:
         JSON with operation, offset, lines_affected, old/new total_lines.

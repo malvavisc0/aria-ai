@@ -252,8 +252,8 @@ ARIA_VLLM_REMOTE = true
 | `SERVER_HOST = 0.0.0.0` | Must bind to all interfaces inside Docker |
 | `BYPARR_API_URL = http://byparr:8191` | Uses Docker hostname `byparr` |
 | `ARIA_VLLM_REMOTE = true` | Required for remote LLM endpoints (no local GPU) |
-| `TOKEN_LIMIT_RATIO = 0.90` | Fraction of context window for memory (0.90 = 90%) |
-| `EMBEDDINGS_CONTEXT_SIZE = 4096` | Tokens moved to long-term vector memory per overflow cycle |
+| `TOKEN_LIMIT_RATIO = 0.90` | Fraction of context window reserved for memory (0.90 = 90%) |
+| `EMBEDDINGS_CONTEXT_SIZE` | Max input tokens per embedding call — set to the model's native limit (e.g. `512` for `all-MiniLM-L6-v2`) |
 
 ---
 
