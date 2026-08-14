@@ -284,6 +284,13 @@ class VllmServerManager:
         if model_size_mb <= 0:
             return None
 
+        # Clamp against *free* VRAM, not total: another process (a second
+        # vLLM, whisper.cpp on GPU, a game) may already hold memory. Using
+        # total would overestimate the KV budget and let vLLM OOM at startup.
+        free_vram_list = get_free_vram_per_gpu()
+        free_vram_mb = min(free_vram_list) if free_vram_list else total_vram_mb
+        managed_vram_mb = int(free_vram_mb * gpu_memory_utilization)
+
         # vLLM overhead: activation/scratch buffers and CUDA context.
         # CUDA graph memory is profiled separately by vLLM v0.21+,
         # so we only need to account for the non-profiled fixed costs.
@@ -293,7 +300,6 @@ class VllmServerManager:
         overhead_mb = 768 if enforce_eager else 1536
         tp = max(1, tensor_parallel_size)
 
-        managed_vram_mb = int(total_vram_mb * gpu_memory_utilization)
         per_gpu_model_mb, _, _ = estimate_per_gpu_memory_mb(
             model_weights_mb=model_size_mb,
             kv_cache_mb=0,
@@ -306,7 +312,7 @@ class VllmServerManager:
 
         return _KvBreakdown(
             tp=tp,
-            total_vram_mb=total_vram_mb,
+            total_vram_mb=free_vram_mb,
             managed_vram_mb=managed_vram_mb,
             per_gpu_model_mb=per_gpu_model_mb,
             overhead_mb=overhead_mb,
@@ -412,7 +418,7 @@ class VllmServerManager:
             "  context length.\n"
             "  ─────────────────────────────────────────────\n"
             "  Tensor parallel:     {tp:>8}\n"
-            "  VRAM per GPU:        {vram:>8,} MiB\n"
+            "  Free VRAM per GPU:   {vram:>8,} MiB\n"
             "  GPU utilization:     {util:>8.0%}\n"
             "  Managed VRAM/GPU:    {managed:>8,} MiB\n"
             "  Model weights/GPU:   {model:>8,.0f} MiB\n"
