@@ -39,13 +39,13 @@ def _ensure_env() -> None:
 
 
 def reload_env() -> None:
-    """Force-reload the .env file from ARIA_HOME.
+    """Force-reload the .env file from ARIA_HOME and refresh config classes.
 
     Call this after the wizard or GUI writes new values to .env so that
-    subsequent ``get_*_env()`` calls pick up the changes.  Note: this
-    does NOT update already-evaluated class-level attributes in config
-    modules (e.g. ``Vllm.remote``).  Those modules must be re-imported
-    or their attributes refreshed explicitly.
+    subsequent ``get_*_env()`` calls and config attribute reads pick up
+    the changes.  Re-executes the class bodies in ``config.api`` (whose
+    attributes are evaluated once at import) and clears memoized
+    ``_Lazy`` values in ``config.models``/``config.pdf``.
     """
     import os
     from pathlib import Path
@@ -61,6 +61,32 @@ def reload_env() -> None:
         load_dotenv(override=True)
 
     _loader.loaded = True
+
+    from aria.config import api, models, pdf
+    from aria.config.api import _ENV_CLASS_BODIES
+    from aria.config.folders import Bin, Knowledge, Models, Venvs
+
+    exec_globals = {
+        "get_optional_env": get_optional_env,
+        "Path": Path,
+        "Bin": Bin,
+        "Knowledge": Knowledge,
+        "Models": Models,
+        "Venvs": Venvs,
+    }
+    for cls in (api.Vllm, api.KnowledgeHub, api.Lightpanda, api.Voice):
+        namespace: dict = {}
+        exec(  # noqa: S102 - re-evaluate env-derived attrs in a fresh namespace
+            _ENV_CLASS_BODIES[cls.__name__],
+            exec_globals,
+            namespace,
+        )
+        for name, value in namespace.items():
+            if not name.startswith("__"):
+                setattr(cls, name, value)
+
+    models.reset_lazy_config(models.Chat, models.Embeddings)
+    models.reset_lazy_config(pdf.Pdf)
 
 
 def get_bool_env(key: str, default: bool = False) -> bool:

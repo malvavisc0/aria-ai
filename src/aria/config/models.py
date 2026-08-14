@@ -46,6 +46,17 @@ class _Lazy:
         return self._value
 
 
+def reset_lazy_config(*classes: type) -> None:
+    """Clear memoized ``_Lazy`` values so they re-evaluate on next access.
+
+    Call after reloading .env so env-derived config picks up new values.
+    """
+    for cls in classes:
+        for attr in vars(cls).values():
+            if isinstance(attr, _Lazy):
+                attr._value = _SENTINEL
+
+
 def _resolve_model_path(path: str) -> str:
     """Resolve a model path against ~/.aria/models/.
 
