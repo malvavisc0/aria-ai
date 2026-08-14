@@ -11,6 +11,11 @@
   --aria-chat-max-width: 72rem;
 }
 
+html.dark {
+  --aria-shadow: 0 1px 2px rgb(0 0 0 / 0.35), 0 8px 24px rgb(0 0 0 / 0.40);
+  --aria-shadow-raised: 0 12px 32px rgb(0 0 0 / 0.55);
+}
+
 html,
 body {
   min-height: 100%;
@@ -36,14 +41,15 @@ html.light body,
 html[data-theme="light"] body,
 :root[data-theme="light"] body,
 body[data-theme="light"] {
-  background: linear-gradient(135deg, hsl(var(--background)), hsl(210 12% 86%));
+  background: hsl(var(--background));
+  color-scheme: light;
 }
 
 html.dark body,
 html[data-theme="dark"] body,
 :root[data-theme="dark"] body,
 body[data-theme="dark"] {
-  background: radial-gradient(circle at top right, hsl(210 25% 25%), hsl(var(--background)) 50%);
+  background: hsl(var(--background));
   color-scheme: dark;
 }
 
@@ -216,12 +222,14 @@ html.dark .cl-step,
 html[data-theme="dark"] .cl-message,
 html[data-theme="dark"] .cl-card,
 html[data-theme="dark"] .cl-step {
-  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.025) !important;
+  box-shadow: inset 0 1px 0 hsl(0 0% 100% / 0.04) !important;
 }
 
-html.dark .cl-message:nth-child(even),
-html[data-theme="dark"] .cl-message:nth-child(even) {
-  background: hsl(var(--card) / 0.72);
+html.dark .cl-message:hover,
+html.dark .cl-card:hover,
+html[data-theme="dark"] .cl-message:hover,
+html[data-theme="dark"] .cl-card:hover {
+  border-color: hsl(var(--primary) / 0.32) !important;
 }
 
 /* Starters: palette-tinted pills instead of Chainlit's muted defaults. */
@@ -453,11 +461,11 @@ main {
 }
 
 html.dark main {
-  background: radial-gradient(circle at 50% -20%, hsl(210 25% 25% / 0.72), hsl(var(--background)) 48%) !important;
+  background: hsl(var(--background)) !important;
 }
 
 html.light main {
-  background: linear-gradient(145deg, hsl(var(--background)), hsl(210 12% 87%)) !important;
+  background: hsl(var(--background)) !important;
 }
 
 #header {
@@ -490,15 +498,26 @@ html.light main {
 #message-composer {
   border: 1px solid hsl(var(--border) / 0.82);
   background: hsl(var(--card) / 0.92) !important;
-  box-shadow: 0 10px 32px rgb(12 18 30 / 0.12),
+  box-shadow: 0 10px 32px rgb(0 0 0 / 0.24),
     inset 0 1px 0 hsl(0 0% 100% / 0.04);
   transition: border-color var(--aria-duration) var(--aria-ease),
     box-shadow var(--aria-duration) var(--aria-ease),
     transform var(--aria-duration) var(--aria-ease);
 }
 
+html.light #message-composer {
+  box-shadow: 0 10px 32px rgb(12 18 30 / 0.12),
+    inset 0 1px 0 hsl(0 0% 100% / 0.04);
+}
+
 #message-composer:focus-within {
   border-color: hsl(var(--ring) / 0.72);
+  box-shadow: 0 12px 36px rgb(0 0 0 / 0.28),
+    0 0 0 3px hsl(var(--ring) / 0.12),
+    inset 0 1px 0 hsl(0 0% 100% / 0.05);
+}
+
+html.light #message-composer:focus-within {
   box-shadow: 0 12px 36px rgb(12 18 30 / 0.16),
     0 0 0 3px hsl(var(--ring) / 0.12),
     inset 0 1px 0 hsl(0 0% 100% / 0.05);
