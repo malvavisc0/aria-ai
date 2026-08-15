@@ -99,7 +99,6 @@ ax web youtube "url"             # YouTube transcript
 ax memory store "key" "value"    # Persistent key-value memory across sessions
 ax memory recall "key"
 ax knowledge status              # Knowledge hub indexing state
-ax knowledge reindex             # Re-scan documents directory
 ax dev run "code"                # Execute Python
 ax processes list                # Manage background processes
 ax worker spawn --prompt "..."   # Background worker

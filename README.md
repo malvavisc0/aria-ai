@@ -114,7 +114,7 @@ Tools are organized into **7 categories** (33 tools) managed by a centralized re
 | 🎬 **Entertainment** | On-demand | search_imdb_titles, get_movie_details, get_person_details, get_person_filmography, get_all_series_episodes, get_movie_reviews, get_movie_trivia, get_youtube_video_transcription |
 | 🖥️ **System** | On-demand | http_request, process |
 
-Domain tools are also accessible via CLI commands through `ax` (e.g., `ax web search`, `ax knowledge store`, `ax dev run`).
+Domain tools are also accessible via CLI commands through `ax` (e.g., `ax web search`, `ax memory store`, `ax dev run`).
 
 For the full inventory with parameter reference, see [`docs/tools-inventory.md`](docs/tools-inventory.md).
 
@@ -231,10 +231,12 @@ ax web search "query"         # Web search
 ax web fetch "url"            # Fetch URL content
 ax web weather "city"         # Weather forecast
 
-# Knowledge
-ax knowledge store "key" "v"  # Store a fact
-ax knowledge recall "key"     # Retrieve a fact
-ax knowledge search "query"   # Search stored facts
+# Memory (facts)
+ax memory store "key" "v"     # Store a fact
+ax memory recall "key"        # Retrieve a fact
+
+# Knowledge hub
+ax knowledge status           # Index status
 
 # Development
 ax dev run "code"             # Execute Python code

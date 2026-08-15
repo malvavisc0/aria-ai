@@ -11,27 +11,9 @@ import typer
 from rich.console import Console
 from rich.table import Table
 
-app = typer.Typer(
-    help="Knowledge hub — index and query user documents (mini-RAG).",
-)
+app = typer.Typer(help="Knowledge hub (mini-RAG) — index status.")
 
 console = Console()
-
-
-@app.command("reindex")
-def reindex_cmd(
-    force: bool = typer.Option(
-        False, "--force", help="Full rebuild (drop collection + clear state)."
-    ),
-):
-    """Re-index the documents directory."""
-    import asyncio
-
-    from aria.tools.knowledge.functions import knowledge_reindex
-
-    typer.echo(
-        asyncio.run(knowledge_reindex(reason="CLI knowledge reindex", force=force))
-    )
 
 
 def _extract_data(payload: str) -> dict | None:
@@ -69,7 +51,6 @@ def _render_status(payload: str) -> None:
     table.add_column("Value")
     table.add_row("Directory", data.get("dir", ""))
     table.add_row("Collection", data.get("collection", ""))
-    table.add_row("Vector DB ready", "yes" if data.get("vector_db_ready") else "no")
     table.add_row("Docling worker", _docling_value(bool(data.get("docling_installed"))))
     table.add_row("Indexed files", str(data.get("indexed_files", 0)))
     table.add_row("Last index", str(last))

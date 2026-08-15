@@ -334,7 +334,7 @@ the best reasoning, but shorter conversations.
    buffer further and trigger the embedding waterfall on every turn
 2. **Increase `CHAT_CONTEXT_SIZE`** — larger context = more total room
    for vector retrieval results
-3. **Use `ax knowledge`** for facts worth keeping across sessions
+3. **Use `ax memory`** for facts worth keeping across sessions
 4. **Keep messages concise** — shorter messages = better embeddings
 
 ### Maximizing tool-call capacity
