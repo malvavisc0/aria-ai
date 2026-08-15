@@ -175,7 +175,11 @@ async def _run(args):
     result_file = output_dir / "result.md"
 
     try:
-        llm = get_chat_llm(api_base=ChatConfig.api_url, model=ChatConfig.model)
+        llm = get_chat_llm(
+            api_base=ChatConfig.api_url,
+            model=ChatConfig.model,
+            disable_thinking=True,
+        )
         extras = get_instructions_extras(agent_name="worker")
         agent = get_worker_agent(llm=llm, extras=extras, output_dir=str(output_dir))
 

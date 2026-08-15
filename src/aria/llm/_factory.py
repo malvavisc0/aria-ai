@@ -22,7 +22,11 @@ from .memory import IdempotentVectorMemoryBlock
 
 
 def get_chat_llm(
-    api_base: str, model: str = "", api_key: str = "sk-aria"
+    api_base: str,
+    model: str = "",
+    api_key: str = "sk-aria",
+    *,
+    disable_thinking: bool = False,
 ) -> OpenAILike:
     """Create the chat LLM client used by the application.
 
@@ -35,6 +39,10 @@ def get_chat_llm(
         model: Model name to send in API requests (e.g. ``"Lucy-128k-gguf"``).
         api_key: API key sent in ``Authorization: Bearer`` header.
             Must match the ``--api-key`` used to start the vLLM server.
+        disable_thinking: Send ``chat_template_kwargs.enable_thinking=False``
+            so a Qwen3-class reasoning model skips its chain-of-thought block.
+            Used by headless workers: their thinking is never shown, and the
+            block burns the token budget needed for tool calls and plan steps.
 
     Returns:
         An :class:`OpenAILike` LLM instance configured to talk to
@@ -45,6 +53,17 @@ def get_chat_llm(
     max_tokens = None
     if VllmConfig.max_tokens > -1:
         max_tokens = VllmConfig.max_tokens
+
+    extra_body: dict = {
+        "top_p": VllmConfig.top_p,
+        "top_k": VllmConfig.top_k,
+        "min_p": VllmConfig.min_p,
+        "presence_penalty": VllmConfig.presence_penalty,
+        "repetition_penalty": VllmConfig.repetition_penalty,
+        "seed": VllmConfig.seed,
+    }
+    if disable_thinking:
+        extra_body["chat_template_kwargs"] = {"enable_thinking": False}
 
     llm = SanitizedOpenAILike(
         api_base=api_base,
@@ -59,16 +78,7 @@ def get_chat_llm(
             timeout=httpx.Timeout(300.0, connect=10.0),
             limits=httpx.Limits(max_connections=10, max_keepalive_connections=5),
         ),
-        additional_kwargs={
-            "extra_body": {
-                "top_p": VllmConfig.top_p,
-                "top_k": VllmConfig.top_k,
-                "min_p": VllmConfig.min_p,
-                "presence_penalty": VllmConfig.presence_penalty,
-                "repetition_penalty": VllmConfig.repetition_penalty,
-                "seed": VllmConfig.seed,
-            },
-        },
+        additional_kwargs={"extra_body": extra_body},
     )
 
     return llm
