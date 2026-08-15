@@ -340,3 +340,48 @@ class TestDispatch:
             # The function should succeed — unknown args stripped silently
             data = json.loads(result)
             assert "results" in data["data"]
+
+    @pytest.mark.asyncio
+    async def test_dispatches_worker_spawn_with_steps(self):
+        mock_response = '{"tool":"worker","data":{"worker_id":"w"}}'
+
+        def fake_worker(reason, action, prompt="", expected="", steps=None, **kwargs):
+            assert action == "spawn"
+            assert steps == ["a", "b"]
+            return mock_response
+
+        with patch("aria.tools.worker.functions.worker", new=fake_worker):
+            result = await ax(
+                reason="delegate",
+                family="worker",
+                command="spawn",
+                args={
+                    "prompt": "p",
+                    "expected": "e",
+                    "steps": ["a", "b"],
+                },
+            )
+            assert result == mock_response
+
+    @pytest.mark.asyncio
+    async def test_worker_spawn_strips_truly_unknown_kwarg(self):
+        seen: dict = {}
+
+        def fake_worker(reason, action, prompt="", expected="", steps=None, **kwargs):
+            seen.update({"steps": steps, **kwargs})
+            assert "bogus" not in kwargs
+            return '{"tool":"worker","data":{}}'
+
+        with patch("aria.tools.worker.functions.worker", new=fake_worker):
+            await ax(
+                reason="delegate",
+                family="worker",
+                command="spawn",
+                args={
+                    "prompt": "p",
+                    "expected": "e",
+                    "steps": ["a"],
+                    "bogus": 1,
+                },
+            )
+        assert seen["steps"] == ["a"]

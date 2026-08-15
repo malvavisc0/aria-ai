@@ -44,6 +44,7 @@ def worker(
     action: str,
     prompt: str = "",
     expected: str = "",
+    steps: list[str] | None = None,
     instructions: str | None = None,
     thread_id: str | None = None,
     output_dir: str | None = None,
@@ -59,7 +60,7 @@ def worker(
         - Clean up old worker artifacts.
 
     Actions:
-        spawn  — Create a new worker. Requires prompt, expected.
+        spawn  — Create a new worker. Requires prompt, expected, steps.
         list   — List all workers. Optional: thread_id filter.
         status — Get worker status. Requires worker_id.
         logs   — View worker logs. Requires worker_id.
@@ -72,6 +73,8 @@ def worker(
         prompt: (spawn) Self-contained task prompt with objective, context,
             scope, constraints, and success criteria.
         expected: (spawn) Expected deliverable or result.
+        steps: (spawn) Required. Ordered execution steps; the worker tracks
+            them as a plan visible in the UI.
         instructions: (spawn) Optional extra instructions for the worker.
         thread_id: (spawn/list) Conversation thread ID for tracking.
         output_dir: (spawn) Directory for deliverables. Auto-created if omitted.
@@ -89,6 +92,7 @@ def worker(
             reason=reason,
             prompt=prompt,
             expected=expected,
+            steps=steps,
             instructions=instructions,
             thread_id=thread_id,
             output_dir=output_dir,
@@ -128,6 +132,7 @@ def _spawn(
     reason: str,
     prompt: str,
     expected: str,
+    steps: list[str] | None = None,
     instructions: str | None = None,
     thread_id: str | None = None,
     output_dir: str | None = None,
@@ -154,10 +159,55 @@ def _spawn(
                 }
             },
         )
+    if not steps:
+        return tool_response(
+            tool="worker",
+            reason=reason,
+            data={
+                "error": {
+                    "code": "missing_steps",
+                    "message": "steps is required (ordered execution steps)",
+                }
+            },
+        )
 
     wid = _worker_id()
     out_dir = Path(output_dir) if output_dir else _output_dir(wid)
     out_dir.mkdir(parents=True, exist_ok=True)
+
+    plan_id = str(uuid.uuid4())
+    now_iso = datetime.now(UTC).isoformat()
+    step_dicts = [
+        {
+            "id": uuid.uuid4().hex[:8],
+            "description": desc,
+            "status": "pending",
+            "created_at": now_iso,
+            "updated_at": now_iso,
+        }
+        for desc in steps
+    ]
+    try:
+        from aria.tools.planner.database import PlannerDatabase
+
+        PlannerDatabase().save_plan(
+            plan_id=plan_id,
+            agent_id=wid,
+            task=prompt[:500],
+            steps=step_dicts,
+            created_at=now_iso,
+        )
+    except Exception as exc:
+        return tool_response(
+            tool="worker",
+            reason=reason,
+            data={
+                "error": {
+                    "code": "plan_create_failed",
+                    "message": str(exc),
+                }
+            },
+        )
 
     cmd = [
         sys.executable,
@@ -173,6 +223,8 @@ def _spawn(
         reason,
         "--expected",
         expected,
+        "--plan-id",
+        plan_id,
     ]
     if instructions:
         cmd.extend(["--instructions", instructions])
@@ -202,6 +254,7 @@ def _spawn(
         "expected_results": expected,
         "extra_instructions": instructions,
         "output_dir": str(out_dir),
+        "plan_id": plan_id,
         "result": None,
         "error": None,
         "tool_calls": [],
@@ -218,6 +271,7 @@ def _spawn(
             "pid": process.pid,
             "output_dir": str(out_dir),
             "status": "running",
+            "plan_id": plan_id,
         },
     )
 

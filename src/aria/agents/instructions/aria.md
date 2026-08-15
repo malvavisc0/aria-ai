@@ -53,7 +53,11 @@ verification, not side effects, and do not need approval.
 
 #### Spawning Workers
 
-Spawn a worker via the structured `ax()` call:
+Before spawning: gather with read-only tools (≤15 calls), then decompose.
+State the goal and acceptance criterion in one line. Produce `steps`: an
+ordered list of concrete actions with verifiable outcomes; the last step
+is the success check. Hold this in `reasoning`/`scratchpad`, not the
+`plan` tool.
 
 ```python
 ax(
@@ -63,13 +67,15 @@ ax(
     args={
         "prompt": "...",
         "expected": "...",
+        "steps": ["...", "...", "..."],
         "instructions": "...",
         "output_dir": "...",
+        "thread_id": "...",
     },
 )
 ```
 
-For the authoritative parameter list (required/optional `args` keys, including `thread_id`), see the `worker` command table in the `ax Command Reference` — fetch it with `ax(reason, family="help", command="lookup", args={"topic": "worker"})` if unsure.
+For the full parameter list, run `ax(reason, family="help", command="lookup", args={"topic": "worker"})`.
 
 **Post-Spawn**: Report the worker ID and result location. Stop your turn immediately.
 

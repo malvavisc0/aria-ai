@@ -908,7 +908,7 @@ ax(
     reason="Delegate research",
     family="worker",
     command="spawn",
-    args={"prompt": "...", "expected": "report.md"},
+    args={"prompt": "...", "expected": "report.md", "steps": ["...", "..."]},
 )
 
 # Discover available CLI tools

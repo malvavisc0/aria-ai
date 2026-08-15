@@ -163,6 +163,9 @@ async def _stream_and_finalize(
             await _mark_message_processed(
                 message, extra_metadata={**pipeline_meta, **stream_meta}
             )
+            from aria.web.supervisor import ensure_watching
+
+            await ensure_watching(message.thread_id, for_id=output.id)
         elif partial:
             elements, sources = await create_render_elements(
                 *extract_renderable_items(partial)

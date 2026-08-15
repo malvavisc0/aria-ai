@@ -117,7 +117,7 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 
 | Command | Required | Optional |
 |---------|----------|----------|
-| `spawn` | `prompt`, `expected` | `instructions`, `output_dir`, `thread_id` |
+| `spawn` | `prompt`, `expected`, `steps` | `instructions`, `output_dir`, `thread_id` |
 | `list` | — | `thread_id` |
 | `status` | `worker_id` | — |
 | `logs` | `worker_id` | `tail` |

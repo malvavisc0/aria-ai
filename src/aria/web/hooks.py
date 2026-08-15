@@ -168,6 +168,9 @@ async def on_chat_end_handler() -> None:
     discarded — without this, trimmed-off turns are never persisted to
     Chroma.  See ``docs/fix-chat-resume-freeze.md`` (Fix 1b).
     """
+    from aria.web.supervisor import cancel_all_watchers
+
+    cancel_all_watchers()
     memory = cl.user_session.get("memory")
     if memory is None:
         return
@@ -201,6 +204,9 @@ async def on_chat_resume_handler(thread: ThreadDict) -> None:
 
         memory = await restore_chat_history(thread)
         cl.user_session.set("memory", memory)
+        from aria.web.supervisor import ensure_watching
+
+        await ensure_watching(thread["id"], elements=thread.get("elements"))
     except Exception as e:
         logger.exception(f"Failed to restore chat history: {e}")
 
