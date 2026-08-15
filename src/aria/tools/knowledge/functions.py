@@ -50,12 +50,14 @@ def _index_status() -> dict[str, Any]:
 async def knowledge_status(reason: Reason) -> str:
     """Show knowledge hub index status."""
     from aria.scripts.docling import is_installed
+    from aria.server.digest_lease import active_digest
 
     data: dict[str, Any] = {
         "enabled": KnowledgeHub.enabled,
         "dir": KnowledgeHub.dir,
         "collection": "aria_knowledge",
         "docling_installed": is_installed(),
+        "digesting": active_digest() is not None,
     }
     data.update(_index_status())
     return ok(tool=_TOOL, reason=reason, data=data)

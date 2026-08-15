@@ -73,6 +73,7 @@ class AppState(BaseModel):
     browser_manager: Any = None
     voice_manager: Any = None
     db_engine: Engine | None = None
+    digest_task: asyncio.Task[dict[str, Any]] | None = None
     startup_complete: bool = False
     startup_event: asyncio.Event = asyncio.Event()
 

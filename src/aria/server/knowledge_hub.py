@@ -16,6 +16,7 @@ from sqlalchemy import select
 
 from aria.config.api import KnowledgeHub
 from aria.llm.memory import _hash_node_id  # cross-boundary private import
+from aria.server.digest_lease import DigestLease
 from aria.tools.documents.functions import (
     _HTML_EXTENSIONS,
     _PDF_EXTENSIONS,
@@ -52,10 +53,21 @@ class KnowledgeHubIndexer:
         self, settings: KnowledgeHub | type[KnowledgeHub] = KnowledgeHub
     ) -> None:
         self._settings = settings
+        self._lease: DigestLease | None = None
 
     async def reindex(self, force: bool = False) -> dict[str, Any]:
-        async with _INDEX_LOCK:
-            return await self._run(force=force)
+        from aria.web.state import _state
+
+        async with _INDEX_LOCK, DigestLease() as lease:
+            self._lease = lease
+            # Register every run (startup task and agent-tool runs alike) so
+            # the web shutdown handler can cancel whichever is in flight.
+            _state.digest_task = asyncio.current_task()
+            try:
+                return await self._run(force=force)
+            finally:
+                self._lease = None
+                _state.digest_task = None
 
     async def _run(self, *, force: bool = False) -> dict[str, Any]:
         from aria.web.state import _state
@@ -81,6 +93,8 @@ class KnowledgeHubIndexer:
                 continue
             rel = str(fp.relative_to(root))
             walked.add(rel)
+            if self._lease is not None:
+                self._lease.set_current_file(rel)
             n, skip, did_write = await self._index_one(
                 fp,
                 rel,
@@ -247,7 +261,8 @@ class KnowledgeHubIndexer:
                 from aria.scripts.docling import detect_device
 
                 device = detect_device()
-            res = vlm_convert(
+            res = await asyncio.to_thread(
+                vlm_convert,
                 fp,
                 output_path=out,
                 model_id=Pdf.vlm_model_id,

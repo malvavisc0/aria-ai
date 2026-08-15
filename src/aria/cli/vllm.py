@@ -402,11 +402,20 @@ def start_command():
 
 
 @app.command("stop")
-def stop_command():
+def stop_command(
+    force_stop: bool = typer.Option(
+        False,
+        "--force-stop",
+        help="Stop even while the knowledge hub is digesting documents.",
+    ),
+):
     """Stop the vLLM inference server.
 
     Gracefully stops all running vLLM server processes, including
     orphaned processes not tracked by the PID file.
+
+    Refuses to stop while the knowledge hub is digesting documents,
+    unless --force-stop is specified.
 
     Example:
         ```bash
@@ -416,7 +425,17 @@ def stop_command():
     if _remote_notice("stop"):
         return
 
+    from aria.server.digest_lease import block_if_digesting
     from aria.server.vllm import VllmServerManager
+
+    # Embeddings are CPU in-process, so stopping vLLM cannot corrupt the
+    # index — but a vLLM stop mid-digest usually precedes a full shutdown,
+    # so block here for consistency with `aria server stop`.
+    if not force_stop and block_if_digesting(
+        progress=lambda m: console.print(f"[yellow]{m}[/yellow]")
+    ):
+        console.print("[dim]Use --force-stop to stop anyway.[/dim]")
+        raise typer.Exit(1)
 
     vllm = VllmServerManager()
 

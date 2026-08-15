@@ -28,13 +28,17 @@ class _StopWorker(QObject):
     finished = Signal()
     failed = Signal(str)
     progress = Signal(str)
+    blocked = Signal()
 
     def run(self):
         try:
             from aria.server.lifecycle import stop_server
 
-            stop_server(progress=self.progress.emit)
-            self.finished.emit()
+            result = stop_server(progress=self.progress.emit)
+            if result.blocked_by_digest:
+                self.blocked.emit()
+            else:
+                self.finished.emit()
         except Exception as exc:  # pragma: no cover - defensive UI path
             self.failed.emit(str(exc))
 
@@ -366,11 +370,14 @@ class ServerHandlersMixin:
         self._stop_worker.progress.connect(self._on_stop_progress)
         self._stop_worker.finished.connect(self._stop_thread.quit)
         self._stop_worker.failed.connect(self._stop_thread.quit)
+        self._stop_worker.blocked.connect(self._stop_thread.quit)
         self._stop_worker.finished.connect(self._stop_worker.deleteLater)
         self._stop_worker.failed.connect(self._stop_worker.deleteLater)
+        self._stop_worker.blocked.connect(self._stop_worker.deleteLater)
         self._stop_thread.finished.connect(self._stop_thread.deleteLater)
         self._stop_thread.finished.connect(self._on_stop_finished)
         self._stop_worker.failed.connect(self._on_stop_failed)
+        self._stop_worker.blocked.connect(self._on_stop_blocked)
         self._stop_thread.start()
 
     def _on_stop_progress(self, message: str) -> None:
@@ -393,6 +400,17 @@ class ServerHandlersMixin:
             "Stop Failed",
             f"Failed to stop the server:\n{error}",
         )
+        self._update_server_status()
+
+    def _on_stop_blocked(self) -> None:
+        """Called when the stop is refused because a digest is running.
+
+        The block message was already shown in the status bar via the
+        progress signal; just reset the stopping state so the buttons
+        come back.
+        """
+        self._is_stopping = False
+        self._stopping_since = 0.0
         self._update_server_status()
 
     def on_open_server(self):

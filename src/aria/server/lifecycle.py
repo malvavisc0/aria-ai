@@ -36,6 +36,7 @@ class StopResult:
     web_stopped: bool
     vllm_skipped: bool
     vllm_had_pids: bool
+    blocked_by_digest: bool = False
 
 
 def has_cuda() -> bool:
@@ -214,9 +215,15 @@ def wait_for_web_health(
 
 
 def stop_server(
-    skip_vllm: bool = False, progress: ProgressFn | None = None
+    skip_vllm: bool = False,
+    progress: ProgressFn | None = None,
+    force: bool = False,
 ) -> StopResult:
     """Stop the web UI, then vLLM (with orphan cleanup).
+
+    Refuses to stop while the knowledge hub is digesting documents (live
+    digest lease) unless *force* is set — stopping mid-digest orphans the
+    in-flight docling subprocess and loses the index-state flush.
 
     Snapshots vLLM PIDs before stopping the web UI because the Chainlit
     shutdown hook may clear the PID file during teardown. Always
@@ -225,8 +232,17 @@ def stop_server(
     """
     from aria.config.api import Vllm as VllmConfig
     from aria.config.folders import Data as DataConfig
+    from aria.server.digest_lease import block_if_digesting
     from aria.server.manager import ServerManager
     from aria.server.vllm import VllmServerManager
+
+    if not force and block_if_digesting(progress):
+        return StopResult(
+            web_stopped=False,
+            vllm_skipped=skip_vllm,
+            vllm_had_pids=False,
+            blocked_by_digest=True,
+        )
 
     if skip_vllm:
         (DataConfig.path / "skip_vllm_shutdown").touch()

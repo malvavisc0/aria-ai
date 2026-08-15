@@ -593,8 +593,126 @@
         </layout>
        </item>
       </layout>
-     </widget>
-     <widget class="QWidget" name="tab_logs">
+      </widget>
+      <widget class="QWidget" name="tab_knowledge">
+       <attribute name="title">
+        <string>Knowledge</string>
+       </attribute>
+       <layout class="QVBoxLayout" name="verticalLayout_knowledge">
+        <property name="spacing">
+         <number>16</number>
+        </property>
+        <property name="leftMargin">
+         <number>20</number>
+        </property>
+        <property name="topMargin">
+         <number>20</number>
+        </property>
+        <property name="rightMargin">
+         <number>20</number>
+        </property>
+        <property name="bottomMargin">
+         <number>20</number>
+        </property>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_kbStatus">
+          <property name="spacing">
+           <number>12</number>
+          </property>
+          <item>
+           <widget class="QLabel" name="label_KbStatus">
+            <property name="text">
+             <string>-</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_KbDigest">
+            <property name="text">
+             <string>-</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_KbCounts">
+            <property name="text">
+             <string>-</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="label_KbLastIndex">
+            <property name="text">
+             <string>-</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_kbStatus">
+            <property name="orientation">
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <widget class="QListWidget" name="listWidget_KnowledgeFiles"/>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="horizontalLayout_kbButtons">
+          <item>
+           <widget class="QPushButton" name="pushButton_KbAdd">
+            <property name="text">
+             <string>Add Files…</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_KbRemove">
+            <property name="text">
+             <string>Remove Selected</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacer_kbButtons">
+            <property name="orientation">
+             <enum>Qt::Orientation::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_KbReindex">
+            <property name="text">
+             <string>Reindex</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QPushButton" name="pushButton_KbForceReindex">
+            <property name="text">
+             <string>Force Reindex</string>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+      <widget class="QWidget" name="tab_logs">
        <attribute name="title">
         <string>Logs</string>
        </attribute>

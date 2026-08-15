@@ -7,10 +7,12 @@ from PySide6.QtCore import QTimer
 from PySide6.QtGui import QColor, QTextCharFormat
 from PySide6.QtWidgets import QApplication, QMainWindow, QMessageBox
 
+from aria.config.api import KnowledgeHub
 from aria.config.folders import Debug
 from aria.gui.dialogs import AboutDialog
 from aria.gui.tray import TrayIcon
 from aria.gui.ui.mainwindow import Ui_MainWindow
+from aria.gui.windows.knowledge_handlers import KnowledgeHandlersMixin
 from aria.gui.windows.server_handlers import ServerHandlersMixin
 from aria.gui.windows.services_panel import ServicesPanelMixin
 from aria.gui.windows.user_handlers import UserHandlersMixin
@@ -20,6 +22,7 @@ class MainWindow(
     UserHandlersMixin,
     ServerHandlersMixin,
     ServicesPanelMixin,
+    KnowledgeHandlersMixin,
     QMainWindow,
 ):
     """Main application window with user management and logs."""
@@ -49,8 +52,10 @@ class MainWindow(
         self._connect_tab_signals()
         self._connect_user_management_signals()
 
+        self._init_knowledge_tab()
         self._init_server_manager()
         self._connect_server_signals()
+        self._connect_knowledge_signals()
         self.ui.pushButton_SaveSettings.clicked.connect(self._save_remote_settings)
 
         self.load_overview()
@@ -349,17 +354,25 @@ class MainWindow(
         match self.ui.tabWidget.widget(index):
             case self.ui.tab_home:
                 self._logs_timer.stop()
+                self._knowledge_timer.stop()
                 self.statusBar().clearMessage()
                 self.load_overview()
                 self.load_users()
                 self._run_preflight()
+            case self.ui.tab_knowledge:
+                self._logs_timer.stop()
+                self._refresh_knowledge_status()
+                self._knowledge_timer.start(2000)
+                self.statusBar().showMessage(str(KnowledgeHub.dir))
             case self.ui.tab_logs:
+                self._knowledge_timer.stop()
                 self.load_logs()
                 self._logs_timer.start(5000)
                 self._set_auto_refresh_running(True)
                 self.statusBar().showMessage(str(Debug.logs_path))
             case _:
                 self._logs_timer.stop()
+                self._knowledge_timer.stop()
                 self.statusBar().clearMessage()
 
     def show_about_dialog(self):
@@ -381,6 +394,25 @@ class MainWindow(
         if not self._force_quit:
             event.ignore()
             self.hide()
+            return
+
+        # A torn-down QThread mid-reindex skips the lease __aexit__ and can
+        # orphan a docling subprocess — refuse the quit while a GUI digest
+        # is in flight. The window may be hidden to tray (tray Quit), so
+        # show it first — otherwise the refusal is invisible and the quit
+        # appears to hang.
+        if getattr(self, "_kb_reindex_running", False):
+            self.show()
+            self.raise_()
+            self.activateWindow()
+            QMessageBox.information(
+                self,
+                "Digest in progress",
+                "A knowledge digest is running — wait for it to finish "
+                "before quitting.",
+            )
+            self._force_quit = False
+            event.ignore()
             return
 
         # Close wizard if open (it runs a nested event loop)

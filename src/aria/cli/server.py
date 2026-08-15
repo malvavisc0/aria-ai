@@ -475,11 +475,19 @@ def server_stop(
         "--skip-vllm",
         help="Keep vLLM servers running (only stop the web UI).",
     ),
+    force_stop: bool = typer.Option(
+        False,
+        "--force-stop",
+        help="Stop even while the knowledge hub is digesting documents.",
+    ),
 ):
     """Stop the Aria webserver.
 
     Also stops all vLLM server processes managed by the web_ui,
     unless --skip-vllm is specified.
+
+    Refuses to stop while the knowledge hub is digesting documents,
+    unless --force-stop is specified.
     """
     if skip_vllm:
         console.print("[dim]vLLM servers will be left running[/dim]")
@@ -487,7 +495,12 @@ def server_stop(
     result = stop_server(
         skip_vllm=skip_vllm,
         progress=lambda m: console.print(f"[dim]{m}[/dim]"),
+        force=force_stop,
     )
+
+    if result.blocked_by_digest:
+        console.print("[dim]Use --force-stop to stop anyway.[/dim]")
+        raise typer.Exit(1)
 
     if result.web_stopped:
         console.print("[green]✓[/green] Server stopped")

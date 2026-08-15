@@ -455,6 +455,79 @@ class Ui_MainWindow(object):
         self.verticalLayout_home.addLayout(self.horizontalLayout_home_bottom)
 
         self.tabWidget.addTab(self.tab_home, "")
+        self.tab_knowledge = QWidget()
+        self.tab_knowledge.setObjectName("tab_knowledge")
+        self.verticalLayout_knowledge = QVBoxLayout(self.tab_knowledge)
+        self.verticalLayout_knowledge.setSpacing(16)
+        self.verticalLayout_knowledge.setObjectName("verticalLayout_knowledge")
+        self.verticalLayout_knowledge.setContentsMargins(20, 20, 20, 20)
+        self.horizontalLayout_kbStatus = QHBoxLayout()
+        self.horizontalLayout_kbStatus.setSpacing(12)
+        self.horizontalLayout_kbStatus.setObjectName("horizontalLayout_kbStatus")
+        self.label_KbStatus = QLabel(self.tab_knowledge)
+        self.label_KbStatus.setObjectName("label_KbStatus")
+
+        self.horizontalLayout_kbStatus.addWidget(self.label_KbStatus)
+
+        self.label_KbDigest = QLabel(self.tab_knowledge)
+        self.label_KbDigest.setObjectName("label_KbDigest")
+
+        self.horizontalLayout_kbStatus.addWidget(self.label_KbDigest)
+
+        self.label_KbCounts = QLabel(self.tab_knowledge)
+        self.label_KbCounts.setObjectName("label_KbCounts")
+
+        self.horizontalLayout_kbStatus.addWidget(self.label_KbCounts)
+
+        self.label_KbLastIndex = QLabel(self.tab_knowledge)
+        self.label_KbLastIndex.setObjectName("label_KbLastIndex")
+
+        self.horizontalLayout_kbStatus.addWidget(self.label_KbLastIndex)
+
+        self.horizontalSpacer_kbStatus = QSpacerItem(
+            40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+
+        self.horizontalLayout_kbStatus.addItem(self.horizontalSpacer_kbStatus)
+
+        self.verticalLayout_knowledge.addLayout(self.horizontalLayout_kbStatus)
+
+        self.listWidget_KnowledgeFiles = QListWidget(self.tab_knowledge)
+        self.listWidget_KnowledgeFiles.setObjectName("listWidget_KnowledgeFiles")
+
+        self.verticalLayout_knowledge.addWidget(self.listWidget_KnowledgeFiles)
+
+        self.horizontalLayout_kbButtons = QHBoxLayout()
+        self.horizontalLayout_kbButtons.setObjectName("horizontalLayout_kbButtons")
+        self.pushButton_KbAdd = QPushButton(self.tab_knowledge)
+        self.pushButton_KbAdd.setObjectName("pushButton_KbAdd")
+
+        self.horizontalLayout_kbButtons.addWidget(self.pushButton_KbAdd)
+
+        self.pushButton_KbRemove = QPushButton(self.tab_knowledge)
+        self.pushButton_KbRemove.setObjectName("pushButton_KbRemove")
+
+        self.horizontalLayout_kbButtons.addWidget(self.pushButton_KbRemove)
+
+        self.horizontalSpacer_kbButtons = QSpacerItem(
+            40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum
+        )
+
+        self.horizontalLayout_kbButtons.addItem(self.horizontalSpacer_kbButtons)
+
+        self.pushButton_KbReindex = QPushButton(self.tab_knowledge)
+        self.pushButton_KbReindex.setObjectName("pushButton_KbReindex")
+
+        self.horizontalLayout_kbButtons.addWidget(self.pushButton_KbReindex)
+
+        self.pushButton_KbForceReindex = QPushButton(self.tab_knowledge)
+        self.pushButton_KbForceReindex.setObjectName("pushButton_KbForceReindex")
+
+        self.horizontalLayout_kbButtons.addWidget(self.pushButton_KbForceReindex)
+
+        self.verticalLayout_knowledge.addLayout(self.horizontalLayout_kbButtons)
+
+        self.tabWidget.addTab(self.tab_knowledge, "")
         self.tab_logs = QWidget()
         self.tab_logs.setObjectName("tab_logs")
         self.verticalLayout_logs = QVBoxLayout(self.tab_logs)
@@ -681,6 +754,28 @@ class Ui_MainWindow(object):
         self.tabWidget.setTabText(
             self.tabWidget.indexOf(self.tab_home),
             QCoreApplication.translate("MainWindow", "Home", None),
+        )
+        self.label_KbStatus.setText(QCoreApplication.translate("MainWindow", "-", None))
+        self.label_KbDigest.setText(QCoreApplication.translate("MainWindow", "-", None))
+        self.label_KbCounts.setText(QCoreApplication.translate("MainWindow", "-", None))
+        self.label_KbLastIndex.setText(
+            QCoreApplication.translate("MainWindow", "-", None)
+        )
+        self.pushButton_KbAdd.setText(
+            QCoreApplication.translate("MainWindow", "Add Files\u2026", None)
+        )
+        self.pushButton_KbRemove.setText(
+            QCoreApplication.translate("MainWindow", "Remove Selected", None)
+        )
+        self.pushButton_KbReindex.setText(
+            QCoreApplication.translate("MainWindow", "Reindex", None)
+        )
+        self.pushButton_KbForceReindex.setText(
+            QCoreApplication.translate("MainWindow", "Force Reindex", None)
+        )
+        self.tabWidget.setTabText(
+            self.tabWidget.indexOf(self.tab_knowledge),
+            QCoreApplication.translate("MainWindow", "Knowledge", None),
         )
         self.lineEdit_LogSearch.setPlaceholderText(
             QCoreApplication.translate("MainWindow", "Search logs\u2026", None)

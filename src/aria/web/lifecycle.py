@@ -836,6 +836,7 @@ def _reset_app_state() -> None:
     _state.agents_workflow = None
     _state.prompt_enhancer = None
     _state.voice_manager = None
+    _state.digest_task = None
     _state.startup_complete = False
     _state.startup_event.clear()
     if _state.db_engine:
@@ -850,6 +851,31 @@ def _remove_log_sinks() -> None:
     if _sinks.tool_call_sink_id is not None:
         logger.remove(_sinks.tool_call_sink_id)
         _sinks.tool_call_sink_id = None
+
+
+async def _cancel_digest_task() -> None:
+    """Cancel the in-flight knowledge-hub digest task, if any.
+
+    The task registers itself on ``_state.digest_task`` (startup reindex
+    and ``knowledge_reindex`` tool runs alike). Cancellation lands between
+    files: a mid-file cancel waits out the current docling conversion,
+    which runs in a worker thread (``asyncio.to_thread``) that
+    ``task.cancel()`` cannot interrupt. The 30s bound covers the common
+    case; on timeout teardown proceeds anyway and the docling child is
+    reparented (accepted residual risk — the external ``aria server stop``
+    SIGKILLs after 10s regardless). The lease's ``__aexit__`` releases
+    the digest lease on cancellation.
+    """
+    task = _state.digest_task
+    if task is None or task.done():
+        return
+    task.cancel()
+    done, _ = await asyncio.wait([task], timeout=30)
+    if not done:
+        logger.warning(
+            "Knowledge hub digest did not stop within 30s — "
+            "proceeding with shutdown (docling child may be orphaned)"
+        )
 
 
 async def on_app_shutdown_handler() -> None:
@@ -875,6 +901,7 @@ async def on_app_shutdown_handler() -> None:
     from aria.web.hooks import reset_data_layer_cache
 
     reset_data_layer_cache()
+    await _cancel_digest_task()
     await _stop_browser()
     await _stop_voice()
     _stop_vllm_servers(_consume_skip_vllm_sentinel())

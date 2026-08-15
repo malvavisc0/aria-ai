@@ -245,6 +245,40 @@ class TestReindex:
         assert all(h["source"] != "notes.txt" for h in hits)
 
     @pytest.mark.asyncio
+    async def test_lease_held_during_run(
+        self,
+        indexer: KnowledgeHubIndexer,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """The digest lease is live mid-run (with the current file) and
+        released afterwards, so stop paths can refuse to kill the process."""
+        from aria.server.digest_lease import LEASE_FILE, active_digest
+
+        LEASE_FILE.unlink(missing_ok=True)
+        seen: list[dict[str, object] | None] = []
+
+        class _LeaseReadingEmbeddings(_FakeEmbeddings):
+            async def aget_text_embedding_batch(
+                self, texts: list[str]
+            ) -> list[list[float]]:
+                seen.append(active_digest())
+                return await super().aget_text_embedding_batch(texts)
+
+        monkeypatch.setattr(_state, "embeddings", _LeaseReadingEmbeddings())
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "a.txt").write_text("content for the lease test file")
+
+        await indexer.reindex()
+
+        assert seen, "embedding batch never ran"
+        assert all(p is not None for p in seen)
+        assert seen[-1] is not None and seen[-1]["current_file"] == "a.txt"
+        assert active_digest() is None
+        assert not LEASE_FILE.exists()
+
+    @pytest.mark.asyncio
     async def test_pdf_skipped_when_docling_missing(
         self,
         indexer: KnowledgeHubIndexer,
