@@ -119,6 +119,14 @@ class TestCheckInstructions:
         assert "Raw test" in result.output
 
     @patch("aria.agents.aria.ChatterAgent.get_instructions")
+    def test_instructions_raw_mode_preserves_markdown(self, mock_aria):
+        mock_aria.return_value = "# Heading\n\n| A | B |\n|---|---|"
+
+        result = runner.invoke(app, ["instructions", "--agent", "aria", "--raw"])
+        assert result.exit_code == 0
+        assert "| A | B |" in result.output
+
+    @patch("aria.agents.aria.ChatterAgent.get_instructions")
     def test_instructions_includes_extras(self, mock_aria):
         """Should show the full prompt returned by get_instructions."""
         mock_aria.return_value = "# Base prompt\n\n- Date: Jan 1st 2026"

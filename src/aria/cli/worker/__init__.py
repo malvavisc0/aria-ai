@@ -6,9 +6,6 @@ They share the same tool registry as Aria but cannot spawn sub-workers.
 
 import json
 import shutil
-import subprocess
-import sys
-import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -22,6 +19,7 @@ from aria.server.process_utils import (
     save_state,
     stop_process,
 )
+from aria.tools.worker.functions import _mark_zombie
 
 app = typer.Typer(
     help=(
@@ -33,10 +31,6 @@ console = Console()
 
 WORKERS_DIR = Data.path / "workers"
 STORAGE_DIR = Storage.path
-
-
-def _worker_id() -> str:
-    return f"worker_{uuid.uuid4().hex[:8]}"
 
 
 def _audit_path(wid: str) -> Path:
@@ -67,6 +61,11 @@ def spawn(
         "-e",
         help="Expected deliverable or result the worker should produce.",
     ),
+    steps: list[str] = typer.Option(
+        ...,
+        "--step",
+        help="Ordered execution step. Provide once per step; the final step must verify completion.",
+    ),
     instructions: str | None = typer.Option(
         None,
         "--instructions",
@@ -91,67 +90,32 @@ def spawn(
     The worker executes autonomously, so the prompt should be specific and
     self-contained.
     """
-    wid = _worker_id()
-    out_dir = Path(output_dir) if output_dir else _output_dir(wid)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    from aria.tools.execution_context import get_execution_context
+    from aria.tools.worker.functions import worker
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "aria.cli.worker._runner",
-        "--worker-id",
-        wid,
-        "--prompt",
-        prompt,
-        "--output-dir",
-        str(out_dir),
-        "--reason",
-        reason,
-        "--expected",
-        expected,
-    ]
-    if instructions:
-        cmd.extend(["--instructions", instructions])
-
-    logs_dir = Debug.path / "workers"
-    logs_dir.mkdir(parents=True, exist_ok=True)
-    log_handle = open(logs_dir / f"{wid}.log", "w")
-    process = subprocess.Popen(
-        cmd,
-        stdout=log_handle,
-        stderr=subprocess.STDOUT,
-        start_new_session=True,
-    )
-    log_handle.close()  # safe: OS dup'd the fd into the child process
-
-    # Write audit
-    WORKERS_DIR.mkdir(parents=True, exist_ok=True)
-    audit = {
-        "worker_id": wid,
-        "pid": process.pid,
-        "status": "running",
-        "created_at": datetime.now(UTC).isoformat(),
-        "completed_at": None,
-        "thread_id": thread_id,
-        "prompt": prompt,
-        "reason": reason,
-        "expected_results": expected,
-        "extra_instructions": instructions,
-        "output_dir": str(out_dir),
-        "result": None,
-        "error": None,
-        "tool_calls": [],
-    }
-    save_state(_audit_path(wid), audit)
+    if get_execution_context().role == "worker":
+        typer.echo(
+            json.dumps(
+                {
+                    "error": {
+                        "code": "nested_worker_forbidden",
+                        "message": "Worker agents cannot spawn sub-workers.",
+                    }
+                }
+            )
+        )
+        raise typer.Exit(1)
 
     typer.echo(
-        json.dumps(
-            {
-                "worker_id": wid,
-                "pid": process.pid,
-                "output_dir": str(out_dir),
-                "status": "running",
-            }
+        worker(
+            reason=reason,
+            action="spawn",
+            prompt=prompt,
+            expected=expected,
+            steps=steps,
+            instructions=instructions,
+            thread_id=thread_id,
+            output_dir=output_dir,
         )
     )
 
@@ -182,7 +146,7 @@ def list_workers(
         if audit.get("status") == "running" and not is_process_running(
             audit.get("pid", 0)
         ):
-            audit["status"] = "zombie"
+            _mark_zombie(audit)
             save_state(f, audit)
         workers.append(audit)
 
@@ -201,7 +165,7 @@ def status(
 
     audit = load_state(path)
     if audit.get("status") == "running" and not is_process_running(audit.get("pid", 0)):
-        audit["status"] = "zombie"
+        _mark_zombie(audit)
         save_state(path, audit)
 
     typer.echo(json.dumps(audit))

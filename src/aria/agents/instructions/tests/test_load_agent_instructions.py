@@ -57,10 +57,13 @@ class TestLoadAgentInstructions:
             )
 
     def test_worker_includes_base_sections(self):
-        """Worker should include core, tools, and failure sections."""
-        result = load_agent_instructions("worker")
+        """Worker runtime prompt should include only execution sections."""
+        from aria.agents.worker import WorkerAgent
+
+        result = WorkerAgent.get_system_prompt()
         assert "Core Rules" in result
-        assert "Planning (mandatory)" in result
+        assert "Follow the seeded plan" in result
+        assert "## Tool Priority" not in result
 
     def test_prompt_enhancer_no_response_style(self):
         """PromptEnhancer should remain specialized."""

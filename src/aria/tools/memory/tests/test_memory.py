@@ -4,6 +4,11 @@ import json
 
 import pytest
 
+from aria.tools.execution_context import (
+    ExecutionContext,
+    reset_execution_context,
+    set_execution_context,
+)
 from aria.tools.memory import memory
 from aria.tools.memory.database import MemoryDatabase
 
@@ -45,6 +50,18 @@ class TestMemoryStore:
         data = json.loads(result)
         assert data["data"]["found"] is True
         assert data["data"]["value"] == "Python"
+
+    def test_worker_uses_worker_memory_namespace(self, test_db):
+        token = set_execution_context(
+            ExecutionContext(role="worker", worker_id="worker_test")
+        )
+        try:
+            result = memory(
+                "Store worker fact", action="store", key="fact", value="isolated"
+            )
+        finally:
+            reset_execution_context(token)
+        assert json.loads(result)["data"]["error"]["code"] == "WORKER_MEMORY_FORBIDDEN"
 
     def test_recall_missing_key(self, test_db):
         """Test recalling a non-existent key."""

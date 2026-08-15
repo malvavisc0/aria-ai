@@ -279,9 +279,9 @@ def instructions(
 
         if raw:
             # Bare markdown — easy to pipe or redirect
-            console.print(full_prompt)
+            typer.echo(full_prompt)
             if len(agents_to_show) > 1:
-                console.print("\n---\n")
+                typer.echo("\n---\n")
         else:
             # Rich-rendered panel
             console.print()

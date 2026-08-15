@@ -4,11 +4,11 @@ Categories:
 - core_lite: Aria agent tools (reasoning, shell)
 - files_lite: Aria agent file tools (read_file, write_file, edit_file,
               list_files, search_files)
-- core: Worker tools (reasoning, plan, scratchpad, shell)
+- core: Worker tools (plan, scratchpad, shell)
 - files: Worker file tools (read_file, write_file, edit_file,
          file_info, list_files, search_files, copy_file)
-- ax: Unified dispatcher (web, memory, knowledge, finance, imdb, http, dev,
-     processes, documents, check, worker, mcp)
+- ax: Unified dispatcher (web, knowledge, finance, imdb, http, dev, processes,
+      documents, check, worker, mcp)
 """
 
 from collections.abc import Callable
@@ -22,6 +22,7 @@ FILES_LITE = "files_lite"
 CORE = "core"
 FILES = "files"
 AX = "ax"
+WORKER_AX = "worker_ax"
 
 ALL_CATEGORIES = [
     CORE,
@@ -100,19 +101,16 @@ def _get_file_lite_tools() -> list[FunctionTool]:
 
 
 def _get_core_tools() -> list[FunctionTool]:
-    """Worker core tools: reasoning, plan, scratchpad, shell."""
-    from aria.tools.reasoning.functions import ReasoningSchema
+    """Worker core tools: plan, scratchpad, shell."""
     from aria.tools.schemas import PlanSchema, ScratchpadSchema
     from aria.tools.shell.functions import ShellToolSchema
 
     tool_specs = [
-        ("aria.tools.reasoning", "reasoning"),
         ("aria.tools.planner", "plan"),
         ("aria.tools.scratchpad", "scratchpad"),
         ("aria.tools.shell", "shell"),
     ]
     explicit_schemas = {
-        "reasoning": ReasoningSchema,
         "plan": PlanSchema,
         "scratchpad": ScratchpadSchema,
         "shell": ShellToolSchema,
@@ -179,12 +177,26 @@ def _get_ax_tools() -> list[FunctionTool]:
     return [FunctionTool.from_defaults(async_fn=ax, fn_schema=AxSchema)]
 
 
+def _get_worker_ax_tools() -> list[FunctionTool]:
+    """Worker-safe ax dispatcher without memory or worker delegation."""
+    from aria.tools.ax.worker import WorkerAxSchema, worker_ax
+
+    return [
+        FunctionTool.from_defaults(
+            async_fn=worker_ax,
+            name="ax",
+            fn_schema=WorkerAxSchema,
+        )
+    ]
+
+
 _CATEGORY_LOADERS: dict[str, Callable[[], list[FunctionTool]]] = {
     CORE_LITE: _get_core_lite_tools,
     FILES_LITE: _get_file_lite_tools,
     CORE: _get_core_tools,
     FILES: _get_file_tools,
     AX: _get_ax_tools,
+    WORKER_AX: _get_worker_ax_tools,
 }
 
 

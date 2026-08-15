@@ -84,7 +84,7 @@ class TestCheckToolLoading:
         assert len(checks) == 1
         assert checks[0].passed is True
         assert checks[0].category == "tools"
-        assert "11" in checks[0].details
+        assert "10" in checks[0].details
 
     @patch("aria.tools.registry.get_tools")
     def test_tool_loading_fails(self, mock_get_tools):

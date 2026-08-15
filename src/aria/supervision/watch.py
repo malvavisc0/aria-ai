@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 
 from aria.supervision.snapshot import WorkerView, load_worker_view
 
-_TERMINAL = {"completed", "failed", "cancelled", "zombie"}
+_TERMINAL = {"completed", "partial", "failed", "cancelled", "zombie"}
 
 
 async def watch_worker(

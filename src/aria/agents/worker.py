@@ -1,10 +1,4 @@
-"""Worker agent — runs headlessly in background with full tool set.
-
-The WorkerAgent is a FunctionAgent configured with the full core + file
-tool set (reasoning, plan, scratchpad, shell + all file tools) and
-worker-specific instructions that mandate autonomous execution and
-forbid sub-worker spawning.
-"""
+"""Headless worker agent for executing seeded task plans."""
 
 from llama_index.core.agent import FunctionAgent
 from llama_index.core.llms import LLM
@@ -15,7 +9,7 @@ from aria.tools.registry import get_tools
 
 
 class WorkerAgent(FunctionAgent):
-    """Background worker agent. Same tools as Aria, no sub-spawning."""
+    """Background terminal executor with no conversation memory."""
 
     @staticmethod
     def get_system_prompt(
@@ -25,7 +19,7 @@ class WorkerAgent(FunctionAgent):
         base = load_agent_instructions(
             agent_name="worker",
             extras=extras,
-            base_sections=["core", "tools", "failure"],
+            base_sections=["core", "failure"],
         )
         if output_dir:
             base += (
@@ -56,10 +50,10 @@ def get_worker_agent(
     extras: str | None = None,
     output_dir: str | None = None,
 ) -> WorkerAgent:
-    """Create a WorkerAgent with full tool set (plan, scratchpad, ax included)."""
-    from aria.tools.registry import AX, CORE, FILES
+    """Create a WorkerAgent with plan, scratchpad, file, and ax tools."""
+    from aria.tools.registry import CORE, FILES, WORKER_AX
 
-    tools = get_tools([CORE, FILES, AX])
+    tools = get_tools([CORE, FILES, WORKER_AX])
 
     logger.debug(f"Creating WorkerAgent with {len(tools)} tools")
 

@@ -1,6 +1,6 @@
 ## Tool Priority
 
-`ax` is the platform's core interface — it exposes most capabilities (web, memory, knowledge, finance, imdb, http, dev, processes, documents, worker, check, mcp) through one structured, auditable call. **Always prefer `ax` over `shell`; treat `shell` as a fallback.** If a tool fails, read the error and adapt — don't blindly retry.
+`ax` is the platform's core interface — it exposes most capabilities (web, memory, knowledge, finance, imdb, http, dev, processes, documents, worker, check, mcp) through one structured, auditable call. **Always prefer `ax` over `shell`; treat `shell` as a fallback.** If a tool fails, read the error and adapt — don't blindly retry. Workers cannot use persistent memory or spawn workers.
 
 | Tool | Use for |
 |------|---------|
@@ -18,7 +18,7 @@ Work through these steps in order, stopping at the first match:
 4. **No `ax` command and no listed extra** → fall back to a common shell utility (e.g. `curl`, `git`, `jq`, `sed`) via `shell`.
 5. **CLI-only exceptions**: `check instructions` and `check preflight` are never structured `ax()` calls — invoke them as literal CLI strings: `shell(command="ax check instructions --agent aria --raw")`.
 
-Do not skip step 1 just because a task feels "shell-like" (file listing, HTTP request) — a structured `ax` call is safer and logged.
+Do not skip step 1 for "shell-like" tasks — structured `ax` calls are safer and logged. After a result, keep only facts that advance the acceptance criteria.
 
 ### Web Interaction Decision Tree
 
@@ -56,7 +56,10 @@ Persistent key-value store that **survives across conversations and restarts** �
 
 ### Knowledge hub (`ax knowledge`)
 
-User documents indexed for semantic retrieval (mini-RAG). **Retrieval is via the `Knowledge` slash-action** (chunks injected into your prompt before you run), not an `ax` command. Use these only to manage the index.
+User documents indexed for semantic retrieval (mini-RAG). `ax memory` stores
+durable key-value facts; `ax knowledge` manages this document index. Chainlit's
+`Knowledge` action injects untrusted excerpts for retrieval. Headless workers
+must use supplied excerpts or read files; `ax knowledge` does not retrieve text.
 
 | Command | Purpose |
 |---------|---------|

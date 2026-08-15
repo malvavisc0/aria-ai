@@ -22,6 +22,8 @@ from aria.server.process_utils import (
     stop_process,
 )
 from aria.tools import Reason, tool_response
+from aria.tools.execution_context import get_execution_context
+from aria.tools.worker.results import WorkerResultManifest
 
 WORKERS_DIR = Data.path / "workers"
 STORAGE_DIR = Storage.path
@@ -61,6 +63,7 @@ def worker(
 
     Actions:
         spawn  — Create a new worker. Requires prompt, expected, steps.
+            Not available to worker agents (no nested workers).
         list   — List all workers. Optional: thread_id filter.
         status — Get worker status. Requires worker_id.
         logs   — View worker logs. Requires worker_id.
@@ -88,6 +91,17 @@ def worker(
     action = action.lower().strip()
 
     if action == "spawn":
+        if get_execution_context().role == "worker":
+            return tool_response(
+                tool="worker",
+                reason=reason,
+                data={
+                    "error": {
+                        "code": "nested_worker_forbidden",
+                        "message": "Worker agents cannot spawn sub-workers.",
+                    }
+                },
+            )
         return _spawn(
             reason=reason,
             prompt=prompt,
@@ -137,6 +151,17 @@ def _spawn(
     thread_id: str | None = None,
     output_dir: str | None = None,
 ) -> str:
+    if get_execution_context().role == "worker":
+        return tool_response(
+            tool="worker",
+            reason=reason,
+            data={
+                "error": {
+                    "code": "nested_worker_forbidden",
+                    "message": "Worker agents cannot spawn sub-workers.",
+                }
+            },
+        )
     if not prompt:
         return tool_response(
             tool="worker",
@@ -258,6 +283,10 @@ def _spawn(
         "result": None,
         "error": None,
         "tool_calls": [],
+        "result_manifest": None,
+        "completed_steps": 0,
+        "total_steps": len(steps),
+        "warnings": [],
     }
     save_state(_audit_path(wid), audit)
 
@@ -290,8 +319,9 @@ def _list_workers(reason: str, thread_id: str | None = None) -> str:
         if audit.get("status") == "running" and not is_process_running(
             audit.get("pid", 0)
         ):
-            audit["status"] = "zombie"
+            _mark_zombie(audit)
             save_state(f, audit)
+        _attach_manifest(audit)
         workers.append(audit)
 
     return tool_response(tool="worker", reason=reason, data={"workers": workers})
@@ -325,10 +355,46 @@ def _status(reason: str, worker_id: str | None = None) -> str:
 
     audit = load_state(path)
     if audit.get("status") == "running" and not is_process_running(audit.get("pid", 0)):
-        audit["status"] = "zombie"
+        _mark_zombie(audit)
         save_state(path, audit)
 
+    _attach_manifest(audit)
     return tool_response(tool="worker", reason=reason, data=audit)
+
+
+def _mark_zombie(audit: dict[str, Any]) -> None:
+    """Mark a dead-pid worker zombie and settle its unfinished plan step.
+
+    The worker process died without writing a terminal audit, so the
+    planner DB still shows pending/in_progress steps. Fail the first
+    unfinished step so the panel and DB stop claiming live progress.
+    """
+    from aria.tools.worker.results import settle_unfinished_step
+
+    audit["status"] = "zombie"
+    plan_id = audit.get("plan_id")
+    if plan_id:
+        settle_unfinished_step(plan_id, "worker process died")
+
+
+def _attach_manifest(audit: dict[str, Any]) -> None:
+    """Add validated terminal result data to an audit response.
+
+    On validation/read failure, flag the manifest as unreadable so a
+    corrupt result.json is distinguishable from one never written.
+    """
+
+    manifest_path = audit.get("result_manifest")
+    if not manifest_path:
+        return
+    try:
+        manifest = WorkerResultManifest.model_validate_json(
+            Path(manifest_path).read_text(encoding="utf-8")
+        )
+    except (OSError, ValueError):
+        audit["manifest_error"] = "unreadable"
+        return
+    audit["result_manifest_data"] = manifest.model_dump(mode="json")
 
 
 def _logs(reason: str, worker_id: str | None = None, tail: int = 50) -> str:

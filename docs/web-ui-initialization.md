@@ -231,7 +231,7 @@ Required fields (`_REQUIRED_FIELDS`): `llm`, `embeddings`, `vector_db`,
   the missing fields otherwise.
 
 ```python
-_state.validate_initialized()       # raises if not ready
+_state.validate_initialized()  # raises if not ready
 handler = _state.agents_workflow.run(...)
 ```
 

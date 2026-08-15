@@ -14,14 +14,21 @@ from pathlib import Path
 
 from loguru import logger
 
+from aria.tools.worker.results import (
+    build_manifest,
+    settle_unfinished_step,
+    write_manifest,
+)
+
 PLAN_SECTION_TEMPLATE = """
-## Execution Plan
+<system_controlled_execution_plan>
 You have plan {plan_id} registered under agent_id "{agent_id}".
 Work through its steps IN ORDER using the plan tool:
 first plan(action="get", execution_id="{plan_id}", agent_id="{agent_id}"), then for each step
 plan(action="update", execution_id="{plan_id}", step_id=<id>, status="in_progress") before acting,
 and plan(action="update", execution_id="{plan_id}", step_id=<id>, status="completed", result="<summary>") after.
 On an unrecoverable step, set status="failed" with the reason in result.
+</system_controlled_execution_plan>
 """
 
 
@@ -36,49 +43,25 @@ def _update_audit(worker_id: str, updates: dict):
 
 
 def _build_prompt(args) -> str:
-    prompt = args.prompt
+    sections = ["<delegated_task>\n" + args.prompt + "\n</delegated_task>"]
     if args.reason:
-        prompt += f"\n\nReason for delegation: {args.reason}"
+        sections.append(
+            "<delegation_reason>\n" + args.reason + "\n</delegation_reason>"
+        )
     if args.expected:
-        prompt += f"\n\nExpected deliverable: {args.expected}"
+        sections.append(
+            "<expected_deliverable>\n" + args.expected + "\n</expected_deliverable>"
+        )
     if args.instructions:
-        prompt += f"\n\nAdditional instructions: {args.instructions}"
-    prompt += PLAN_SECTION_TEMPLATE.format(
-        plan_id=args.plan_id, agent_id=args.worker_id
+        sections.append(
+            "<additional_task_constraints>\n"
+            + args.instructions
+            + "\n</additional_task_constraints>"
+        )
+    sections.append(
+        PLAN_SECTION_TEMPLATE.format(plan_id=args.plan_id, agent_id=args.worker_id)
     )
-    return prompt
-
-
-def _settle_steps(plan_id: str, mode: str, exc: Exception | None = None) -> None:
-    """Settle plan steps to terminal states at worker exit so the panel
-    never lies.
-
-    mode ∈ {"completed", "failed"}. "completed" flips every
-    pending/in_progress step to completed. "failed" marks the
-    in_progress step — else the first pending step (best-effort
-    attribution: the crashed step is approximated, not detected) — as
-    failed with result=str(exc). Early-returns if load_plan(plan_id) is
-    None. Crash-path safe: only PlannerDatabase() is used (a fresh
-    session on the singleton engine; no workflow session in scope);
-    do not add a session parameter.
-    """
-    from aria.tools.planner.database import PlannerDatabase
-
-    db = PlannerDatabase()
-    plan = db.load_plan(plan_id)
-    if plan is None:
-        return
-    if mode == "completed":
-        for step in plan["steps"]:
-            if step["status"] in {"pending", "in_progress"}:
-                db.update_step(plan_id, step["id"], status="completed")
-        return
-    target = next(
-        (s for s in plan["steps"] if s["status"] == "in_progress"),
-        next((s for s in plan["steps"] if s["status"] == "pending"), None),
-    )
-    if target is not None:
-        db.update_step(plan_id, target["id"], status="failed", result=str(exc))
+    return "\n\n".join(sections)
 
 
 def _process_event(event, tool_calls: list[dict], result_state: list[str]) -> None:
@@ -97,17 +80,36 @@ def _process_event(event, tool_calls: list[dict], result_state: list[str]) -> No
             result_state[0] = content
 
 
-def _record_failure(worker_id: str, exc: Exception, plan_id: str) -> None:
+def _record_failure(
+    worker_id: str,
+    exc: Exception,
+    plan_id: str,
+    report_path: Path,
+    started_at: str,
+) -> None:
     logger.exception(f"Worker {worker_id} failed: {exc}")
+    settle_unfinished_step(plan_id, str(exc))
+    manifest = build_manifest(
+        worker_id=worker_id,
+        plan_id=plan_id,
+        status="failed",
+        summary="Worker execution failed before the task was completed.",
+        report_path=report_path,
+        started_at=started_at,
+        error=str(exc),
+    )
+    manifest_path = report_path.with_name("result.json")
+    write_manifest(manifest_path, manifest)
     _update_audit(
         worker_id,
         {
             "status": "failed",
             "completed_at": datetime.now(UTC).isoformat(),
             "error": str(exc),
+            "result_file": str(report_path),
+            "result_manifest": str(manifest_path),
         },
     )
-    _settle_steps(plan_id, "failed", exc=exc)
 
 
 def _record_completion(
@@ -116,19 +118,34 @@ def _record_completion(
     result_file: Path,
     tool_calls: list[dict],
     plan_id: str,
+    started_at: str,
 ) -> None:
+    manifest = build_manifest(
+        worker_id=worker_id,
+        plan_id=plan_id,
+        status="completed",
+        summary=result_text,
+        report_path=result_file,
+        started_at=started_at,
+    )
+    manifest_file = result_file.with_name("result.json")
+    write_manifest(manifest_file, manifest)
     _update_audit(
         worker_id,
         {
-            "status": "completed",
+            "status": manifest.status,
             "completed_at": datetime.now(UTC).isoformat(),
             "result": result_text[:2000],
             "result_file": str(result_file),
+            "result_manifest": str(manifest_file),
+            "completed_steps": manifest.completed_steps,
+            "total_steps": manifest.total_steps,
+            "warnings": manifest.warnings,
+            "error": manifest.error,
             "tool_calls": tool_calls,
         },
     )
-    _settle_steps(plan_id, "completed")
-    logger.info(f"Worker {worker_id} completed")
+    logger.info(f"Worker {worker_id} {manifest.status}")
 
 
 async def _run(args):
@@ -139,8 +156,10 @@ async def _run(args):
     from aria.config.models import Chat as ChatConfig
     from aria.config.models import Embeddings as EmbeddingsConfig
     from aria.llm import get_chat_llm, get_instructions_extras
+    from aria.tools.execution_context import ExecutionContext, set_execution_context
 
     worker_id = args.worker_id
+    set_execution_context(ExecutionContext(role="worker", worker_id=worker_id))
     output_dir = Path(args.output_dir)
 
     from aria.config.folders import Debug
@@ -151,7 +170,9 @@ async def _run(args):
     logger.add(str(log_file), rotation="10 MB", level="DEBUG")
     logger.info(f"Worker {worker_id} starting (PID {os.getpid()})")
 
-    _update_audit(worker_id, {"started_at": datetime.now(UTC).isoformat()})
+    started_at = datetime.now(UTC).isoformat()
+    _update_audit(worker_id, {"started_at": started_at})
+    result_file = output_dir / "result.md"
 
     try:
         llm = get_chat_llm(api_base=ChatConfig.api_url, model=ChatConfig.model)
@@ -182,15 +203,14 @@ async def _run(args):
                 result_state[0] = content
 
         result_text = result_state[0]
-        result_file = output_dir / "result.md"
         result_file.write_text(result_text)
 
         _record_completion(
-            worker_id, result_text, result_file, tool_calls, args.plan_id
+            worker_id, result_text, result_file, tool_calls, args.plan_id, started_at
         )
 
     except Exception as e:
-        _record_failure(worker_id, e, args.plan_id)
+        _record_failure(worker_id, e, args.plan_id, result_file, started_at)
         sys.exit(1)
 
 

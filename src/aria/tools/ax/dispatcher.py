@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field
 from aria.tools import Reason, tool_response
 from aria.tools.ax.exceptions import AxDispatchError
 from aria.tools.decorators import log_tool_call
+from aria.tools.execution_context import get_execution_context
 
 # ---------------------------------------------------------------------------
 # Explicit schema exposed to the LLM (mirrors ShellToolSchema pattern).
@@ -512,6 +513,24 @@ def _resolve_entry(
             f"Unknown command: '{command}' in family '{family}'",
             available_commands=list(family_commands.keys()),
             hint=f"Use ax(family='{family}', command='help') to see options.",
+        )
+    if family == "memory" and get_execution_context().role == "worker":
+        return _ax_error(
+            reason,
+            "worker_memory_forbidden",
+            "Worker agents do not have persistent conversation memory.",
+            recoverable=False,
+        )
+    if (
+        family == "worker"
+        and command == "spawn"
+        and get_execution_context().role == "worker"
+    ):
+        return _ax_error(
+            reason,
+            "nested_worker_forbidden",
+            "Worker agents cannot spawn sub-workers; complete the delegated task directly.",
+            recoverable=False,
         )
     return entry
 

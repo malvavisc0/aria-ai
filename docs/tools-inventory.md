@@ -136,9 +136,10 @@ The registry exposes three primary categories plus two "lite" variants used by t
 
 | Category | Constant | Used by | Tools |
 |----------|----------|---------|-------|
-| **CORE** | `"core"` | Worker | `reasoning`, `plan`, `scratchpad`, `shell` (4 tools) |
+| **CORE** | `"core"` | Worker | `plan`, `scratchpad`, `shell` (3 tools) |
 | **FILES** | `"files"` | Worker | `read_file`, `write_file`, `edit_file`, `file_info`, `list_files`, `search_files`, `copy_file` (7 tools) |
-| **AX** | `"ax"` | Both | Single unified `ax` dispatcher tool |
+| **AX** | `"ax"` | Aria | Full unified `ax` dispatcher tool |
+| **WORKER_AX** | `"worker_ax"` | Worker | Restricted `ax` dispatcher without memory or worker delegation |
 | **CORE_LITE** | `"core_lite"` | Aria agent | `reasoning`, `shell` (2 tools) |
 | **FILES_LITE** | `"files_lite"` | Aria agent | `read_file`, `write_file`, `edit_file`, `list_files`, `search_files` (5 tools) |
 
@@ -436,7 +437,12 @@ boundaries). For ephemeral working memory within a task use `scratchpad`
 > `command` argument (do not pass it in `args`).
 
 ```python
-ax(reason="Save preference", family="memory", command="store", args={"key": "lang", "value": "Python", "tags": ["prefs"]})
+ax(
+    reason="Save preference",
+    family="memory",
+    command="store",
+    args={"key": "lang", "value": "Python", "tags": ["prefs"]},
+)
 ax(reason="Check preference", family="memory", command="recall", args={"key": "lang"})
 ax(reason="Search memory", family="memory", command="search", args={"query": "Python"})
 ```
@@ -844,7 +850,7 @@ Unified dispatcher that routes `family`/`command` pairs to native Python functio
 | `processes` | `start`, `stop`, `status`, `logs`, `list`, `restart`, `signal` | Manage background processes (dev servers, build watchers, pipelines) |
 | `documents` | `convert`, `status` | Convert office/PDF/HTML to markdown; check the Granite-Docling worker status |
 | `check` | `extras` | Discover additional CLI tools available in the virtual environment |
-| `worker` | `spawn`, `list`, `status`, `logs`, `cancel`, `clean` | Manage background worker agents |
+| `worker` | `spawn`, `list`, `status`, `logs`, `cancel`, `clean` | Manage workers; `spawn` requires `prompt`, `expected`, ordered `steps`; terminal results include summary, step counts, and an absolute Markdown report path |
 | `mcp` | `list`, `call` | Discover and invoke Model Context Protocol servers |
 | `help` | *(any)*, `lookup` | List families/commands; `lookup` fetches a family's detailed reference |
 
@@ -916,7 +922,12 @@ ax(reason="Check available tools", family="check", command="extras")
 
 # Help
 ax(reason="List web commands", family="web", command="help")
-ax(reason="Detailed web reference", family="help", command="lookup", args={"topic": "web"})
+ax(
+    reason="Detailed web reference",
+    family="help",
+    command="lookup",
+    args={"topic": "web"},
+)
 ```
 
 ### Error Handling

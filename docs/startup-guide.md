@@ -101,7 +101,7 @@ ax memory recall "key"
 ax knowledge status              # Knowledge hub indexing state
 ax dev run "code"                # Execute Python
 ax processes list                # Manage background processes
-ax worker spawn --prompt "..."   # Background worker
+ax worker spawn --prompt "..." --reason "Delegate sustained work" --expected "..." --step "..." --step "Verify completion"   # Background worker
 ax check ...                     # Preflight checks
 
 # aria management CLI (entry point: `aria`)

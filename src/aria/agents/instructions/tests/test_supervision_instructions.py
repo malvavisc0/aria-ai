@@ -19,6 +19,18 @@ def test_worker_md_no_longer_says_create_plan():
     assert "Create before any work" not in text
 
 
+def test_worker_md_uses_correct_memory_and_spawn_boundary():
+    text = (INST / "worker.md").read_text()
+    assert "Persistent memory is unavailable" in text
+    assert "Do not spawn workers" in text
+
+
+def test_aria_md_supports_rich_markdown():
+    text = (INST / "aria.md").read_text()
+    assert "Chainlit renders Markdown" in text
+    assert "Make answers vivid" in text
+
+
 def test_ax_reference_worker_spawn_lists_steps_required():
     text = REF.read_text()
     start = text.index("## worker")
@@ -42,4 +54,7 @@ def test_plan_section_template_renders():
         plan_id="P",
         worker_id="W",
     )
-    assert _build_prompt(args) == "do it" + rendered
+    assert (
+        _build_prompt(args)
+        == "<delegated_task>\ndo it\n</delegated_task>\n\n" + rendered
+    )

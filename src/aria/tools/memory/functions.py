@@ -4,6 +4,7 @@ import uuid
 
 from aria.tools import Reason, err, ok
 from aria.tools.decorators import log_tool_call
+from aria.tools.execution_context import get_execution_context
 
 from .database import MemoryDatabase, get_database
 
@@ -65,6 +66,14 @@ def memory(
         - Data is persisted to SQLite and survives restarts.
         - Use tags to organize entries by category for easier search.
     """
+    context = get_execution_context()
+    if context.role == "worker":
+        return err(
+            tool=_TOOL,
+            reason=reason,
+            code="WORKER_MEMORY_FORBIDDEN",
+            message="Worker agents do not have persistent conversation memory.",
+        )
     action = action.lower().strip()
     db = get_database()
 

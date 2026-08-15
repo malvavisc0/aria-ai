@@ -23,8 +23,8 @@ class TestWorkerAgent:
     def test_get_system_prompt_loads_worker_instructions(self):
         """System prompt should load worker.md instructions."""
         prompt = WorkerAgent.get_system_prompt()
-        assert "Worker Agent" in prompt
-        assert "structured results" in prompt.lower()
+        assert "# Worker" in prompt
+        assert "not conversational" in prompt
 
     def test_get_system_prompt_with_output_dir(self):
         """System prompt should include output directory when provided."""
@@ -65,17 +65,20 @@ class TestGetWorkerAgent:
         assert agent.tools is not None
         assert len(agent.tools) > 0
 
-    def test_agent_has_core_and_file_tools(self):
-        """Agent should have core + file tools (11 total)."""
+    def test_agent_has_execution_tools_without_reasoning_or_memory(self):
+        """Worker exposes execution tools but no conversation memory."""
         mock_llm = _make_mock_llm()
         agent = get_worker_agent(llm=mock_llm)
         assert agent.tools is not None
         tools = [t for t in agent.tools if isinstance(t, FunctionTool)]
         names = {t.metadata.name for t in tools}
-        assert "reasoning" in names
+        assert "plan" in names
+        assert "scratchpad" in names
         assert "shell" in names
         assert "read_file" in names
         assert "write_file" in names
+        assert "reasoning" not in names
+        assert "ax" in names
 
     def test_agent_with_output_dir(self):
         """Agent system prompt should include output dir."""

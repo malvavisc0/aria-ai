@@ -96,7 +96,7 @@ User Request → Aria → Registry-selected tools → Response
             Worker Agent → Background execution → Result file
 ```
 
-Aria evaluates each request, keeps core capabilities available by default, and pulls in domain-specific tools only when the task requires them. Tasks requiring 5+ tool calls are automatically delegated to worker agents that run in the background.
+Aria evaluates each request, keeps core capabilities available by default, and pulls in domain-specific tools only when the task requires them. Long-running, multi-step, research-heavy, or artifact-producing work can be delegated to an approved background worker with a tracked execution plan.
 
 ---
 
@@ -242,7 +242,7 @@ ax knowledge status           # Index status
 ax dev run "code"             # Execute Python code
 
 # Workers
-ax worker spawn --prompt "..." # Launch background worker
+ax worker spawn --prompt "..." --reason "Delegate sustained work" --expected "..." --step "..." --step "Verify completion" # Launch background worker
 ax worker list                # List workers
 
 # Processes & checks

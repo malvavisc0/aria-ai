@@ -18,7 +18,7 @@ graph TD
     Audit --> End([Markdown Output Only / End Turn])
 
     %% Path B: Tool Execution & Delegation
-    QA_Check -- No --> Budget_Check{Is task broad/multi-step\nOR >15 tool calls required?}
+    QA_Check -- No --> Budget_Check{Is task long-running, multi-step,\nartifact-producing, or >15 calls?}
     
     %% Worker Delegation Workflow
     Budget_Check -- Yes --> WorkerConfirm{Ask Confirmation:\nSpawn AI Worker?}
@@ -84,9 +84,9 @@ graph TD
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **Is task broad/multi-step OR >15 tool calls?** | If the task is complex enough to warrant a worker, take the delegation path. | `aria.md` — Task Budget rules 2-3, Delegation section |
+| **Is task long-running, multi-step, artifact-producing, or >15 calls?** | If the task is sustained or complex enough to warrant a worker, take the delegation path. | `aria.md` — Delegation and Task Budget sections |
 | **Ask Confirmation: Spawn AI Worker?** | Workers require explicit user approval before spawning. | `aria.md` — Confirmation Required |
-| **ax spawn/worker** | Pass `prompt`, `expected`, optional `instructions` and `output_dir`. | `aria.md` — Spawning Workers table |
+| **ax spawn/worker** | After approval, pass `prompt`, `expected`, non-empty ordered `steps`, and optional `instructions`, `output_dir`, or `thread_id`. | `aria.md` — Spawning Workers; `ax_commands.md` |
 | **Report Worker ID & Result Location** | After spawning, report the ID and stop. Don't check on the worker unless asked. | `aria.md` — Spawning Workers |
 
 ### 4. Local Execution Loop

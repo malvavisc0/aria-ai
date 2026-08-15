@@ -33,6 +33,8 @@ def _header(view: WorkerView) -> str:
     status = view.worker_status
     if status == "completed":
         return "Done"
+    if status == "partial":
+        return "Partial"
     if status in {"failed", "zombie"}:
         return "Failed"
     if status == "cancelled":
@@ -50,7 +52,12 @@ def _header(view: WorkerView) -> str:
 
 
 def _display_status(view: WorkerView, step: StepView) -> cl.TaskStatus:
-    terminal = view.worker_status in {"failed", "cancelled", "zombie"}
+    terminal = view.worker_status in {
+        "partial",
+        "failed",
+        "cancelled",
+        "zombie",
+    }
     if terminal and step.status in _UNFINISHED:
         first = next(s for s in view.steps if s.status in _UNFINISHED)
         if step.id == first.id:

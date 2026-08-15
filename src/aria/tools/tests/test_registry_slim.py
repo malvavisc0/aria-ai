@@ -14,14 +14,14 @@ from aria.tools.registry import (
 
 
 class TestSlimmedCoreTools:
-    """Test that CORE category loads only 4 tools."""
+    """Test that CORE category loads only execution tools."""
 
-    def test_core_returns_4_tools(self):
-        """CORE should load exactly 4 tools: reasoning, plan, scratchpad, shell."""
+    def test_core_returns_3_tools(self):
+        """CORE should load plan, scratchpad, and shell."""
         tools = get_tools([CORE])
         names = {t.metadata.name for t in tools}
-        assert len(tools) == 4
-        assert names == {"reasoning", "plan", "scratchpad", "shell"}
+        assert len(tools) == 3
+        assert names == {"plan", "scratchpad", "shell"}
 
 
 class TestSlimmedFileTools:
@@ -51,10 +51,10 @@ class TestSlimmedFileTools:
 class TestCorePlusFiles:
     """Test loading CORE + FILES together."""
 
-    def test_core_plus_files_returns_11_tools(self):
-        """CORE + FILES should load exactly 11 tools with no duplicates."""
+    def test_core_plus_files_returns_10_tools(self):
+        """CORE + FILES should load exactly 10 tools with no duplicates."""
         tools = get_tools([CORE, FILES])
-        assert len(tools) == 11
+        assert len(tools) == 10
 
     def test_no_duplicate_names(self):
         """Tool names should be unique when loading CORE + FILES."""
@@ -69,8 +69,8 @@ class TestAllCategories:
     def test_none_loads_all_categories(self):
         """get_tools(None) should load tools from all categories."""
         tools = get_tools(None)
-        # Should have at least the 11 core+file tools
-        assert len(tools) >= 11
+        # Should have at least the 10 core+file tools
+        assert len(tools) >= 10
 
     def test_all_categories_defined(self):
         """ALL_CATEGORIES should include all category names."""

@@ -46,14 +46,14 @@ DUPLICATION_JACCARD_THRESHOLD = 0.4
 # explicit lists.
 _AGENT_RESIDENT_BASE: dict[str, list[str] | None] = {
     "aria": None,
-    "worker": ["core", "tools", "failure"],
+    "worker": ["core", "failure"],
     "prompt_enhancer": [],
 }
 
 # Base sections each duplication-scanned agent loads (explicit, for the scan).
 _AGENT_BASE_SECTIONS = {
     "aria": ["core", "tools", "failure"],
-    "worker": ["core", "tools", "failure"],
+    "worker": ["core", "failure"],
 }
 
 

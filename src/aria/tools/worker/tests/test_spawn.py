@@ -8,6 +8,11 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from aria.server.process_utils import load_state
+from aria.tools.execution_context import (
+    ExecutionContext,
+    reset_execution_context,
+    set_execution_context,
+)
 from aria.tools.planner.database import PlannerDatabase
 from aria.tools.worker.functions import _spawn
 
@@ -69,6 +74,28 @@ def test_spawn_empty_steps_returns_missing_steps(
     save.assert_not_called()
     mock_popen.assert_not_called()
     assert not workers.exists() or not list(workers.glob("*.json"))
+
+
+def test_worker_context_rejects_nested_spawn():
+    token = set_execution_context(ExecutionContext(role="worker", worker_id="worker_x"))
+    try:
+        data = _parse(_spawn(reason="r", prompt="p", expected="e", steps=["a"]))
+    finally:
+        reset_execution_context(token)
+    assert data["error"]["code"] == "nested_worker_forbidden"
+
+
+def test_worker_context_cannot_spawn_through_public_tool(test_tools_db):
+    from aria.tools.worker.functions import worker
+
+    token = set_execution_context(ExecutionContext(role="worker", worker_id="worker_x"))
+    try:
+        data = _parse(
+            worker(reason="r", action="spawn", prompt="p", expected="e", steps=["a"])
+        )
+    finally:
+        reset_execution_context(token)
+    assert data["error"]["code"] == "nested_worker_forbidden"
 
 
 @patch("aria.tools.worker.functions.subprocess.Popen")
