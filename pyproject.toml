@@ -97,6 +97,11 @@ quote-style = "double"
 select = ["E", "F", "I", "W"]
 ignore = ["E501"]
 
+# uic-generated files (pyside6-uic *.ui): star-import-style blocks with
+# names used only by Qt's meta-object system — never hand-edit them.
+[tool.ruff.lint.per-file-ignores]
+"src/aria/gui/ui/*.py" = ["F401"]
+
 [tool.basedpyright]
 include = ["src/aria"]
 exclude = ["src/aria/gui"]

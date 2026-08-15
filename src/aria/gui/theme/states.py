@@ -32,8 +32,12 @@ QLabel[status="error"] {
 }
 
 QLabel[status="idle"] {
-    background-color: #EEF1F4;
-    color: #64748B;
+    /* Idle is the absence of a state — quiet text, no tint. The previous
+       grey (#EEF1F4) is the disabled-control token, which made idle pills
+       read as greyed-out widgets. Padding/radius kept so pills don't
+       jump when the state flips. */
+    background-color: transparent;
+    color: #7A8794;
     font-size: 12px;
     font-weight: 600;
     padding: 5px 14px;

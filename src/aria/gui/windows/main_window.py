@@ -47,6 +47,8 @@ class MainWindow(
         self.ui.pushButton_ServiceStart.setProperty("primary", True)
         self.ui.pushButton_DeleteUser.setProperty("danger", True)
         self.ui.pushButton_ServiceStop.setProperty("warning", True)
+        self.ui.pushButton_KbReindex.setProperty("primary", True)
+        self.ui.pushButton_KbRemove.setProperty("danger", True)
 
         self._connect_menu_signals()
         self._connect_tab_signals()

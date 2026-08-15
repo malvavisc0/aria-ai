@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QObject, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor
 from PySide6.QtWidgets import QFileDialog, QListWidgetItem, QMessageBox
 
 from aria.config.api import KnowledgeHub
@@ -86,6 +87,18 @@ def _file_marker(
     if state == _STATE_SKIPPED:
         return "⚠"
     return "●" if mtime == st_mtime and size == st_size else "○"
+
+
+def _humanize_ts(iso: str | None) -> str:
+    """Format an ISO timestamp for the status row; 'never' when absent."""
+    if not iso:
+        return "never"
+    from datetime import datetime
+
+    try:
+        return datetime.fromisoformat(iso).strftime("%b %d, %H:%M")
+    except ValueError:
+        return iso
 
 
 def _load_embeddings_path() -> str:
@@ -174,6 +187,9 @@ class KnowledgeHandlersMixin:
         self._kb_reindex_running = False
         self._knowledge_timer = QTimer()
         self._knowledge_timer.timeout.connect(self._refresh_knowledge_status)
+        # Counts/last-index are metadata, not status — quiet grey, no pill.
+        self.ui.label_KbCounts.setProperty("muted", True)
+        self.ui.label_KbLastIndex.setProperty("muted", True)
         if KnowledgeHub.enabled:
             # Idempotent — ensures the status query works before the first
             # reindex ever ran (fresh install).
@@ -191,6 +207,9 @@ class KnowledgeHandlersMixin:
         )
         self.ui.pushButton_KbForceReindex.clicked.connect(
             lambda: self._on_kb_reindex(force=True)
+        )
+        self.ui.listWidget_KnowledgeFiles.itemSelectionChanged.connect(
+            self._update_kb_buttons
         )
 
     # --- status rendering ---------------------------------------------------
@@ -215,19 +234,24 @@ class KnowledgeHandlersMixin:
         lease = active_digest()
         if lease is not None:
             current = lease.get("current_file") or "…"
+            fm = self.ui.label_KbDigest.fontMetrics()
+            elided = fm.elidedText(current, Qt.TextElideMode.ElideMiddle, 320)
             self._refresh_status_style(self.ui.label_KbDigest, "warning")
-            self.ui.label_KbDigest.setText(f"● Digesting: {current}")
+            self.ui.label_KbDigest.setText(f"● Digesting: {elided}")
+            self.ui.label_KbDigest.setToolTip(current)
         else:
             self._refresh_status_style(self.ui.label_KbDigest, "idle")
             self.ui.label_KbDigest.setText("○ Idle")
+            self.ui.label_KbDigest.setToolTip("")
 
         status = _fetch_kb_status()
         if status is not None:
             self.ui.label_KbCounts.setText(
                 f"{status.indexed_count} indexed · {status.skipped_count} skipped"
             )
-            last = status.last_index_at or "never"
-            self.ui.label_KbLastIndex.setText(f"Last index: {last}")
+            self.ui.label_KbLastIndex.setText(
+                f"Last index: {_humanize_ts(status.last_index_at)}"
+            )
             self._render_kb_file_list(status)
 
         self._update_kb_buttons()
@@ -237,20 +261,40 @@ class KnowledgeHandlersMixin:
 
         Markers: ● indexed (mtime+size match the state row), ○ pending
         (new or changed since last run — e.g. added while the server was
-        stopped), ⚠ skipped (state row carries the reason).
+        stopped), ⚠ skipped (state row carries the reason). Selection and
+        scroll position survive the 2s rebuild.
         """
         root = Path(KnowledgeHub.dir)
         selected = {
             item.data(Qt.ItemDataRole.UserRole)
             for item in self.ui.listWidget_KnowledgeFiles.selectedItems()
         }
+        scrollbar = self.ui.listWidget_KnowledgeFiles.verticalScrollBar()
+        scroll_pos = scrollbar.value()
 
         self.ui.listWidget_KnowledgeFiles.clear()
-        if not root.is_dir():
+        files = (
+            sorted(
+                fp
+                for fp in root.rglob("*")
+                if not fp.is_dir() and not fp.name.startswith(".")
+            )
+            if root.is_dir()
+            else []
+        )
+        if not files:
+            placeholder = (
+                "Knowledge hub is disabled."
+                if not KnowledgeHub.enabled
+                else "No files yet. Add files to build the knowledge base."
+            )
+            item = QListWidgetItem(placeholder)
+            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+            item.setForeground(QColor("#9CA3AF"))
+            self.ui.listWidget_KnowledgeFiles.addItem(item)
             return
-        for fp in sorted(root.rglob("*")):
-            if fp.is_dir() or fp.name.startswith("."):
-                continue
+
+        for fp in files:
             rel = str(fp.relative_to(root))
             try:
                 st = fp.stat()
@@ -264,9 +308,16 @@ class KnowledgeHandlersMixin:
             item.setData(Qt.ItemDataRole.UserRole, rel)
             if reason:
                 item.setToolTip(f"Skipped: {reason}")
+                item.setForeground(QColor("#B45309"))  # amber
+            elif marker == "○":
+                item.setToolTip("Not indexed yet — run Reindex")
+                item.setForeground(QColor("#7A8794"))  # muted
+            else:
+                item.setToolTip("Indexed")
             self.ui.listWidget_KnowledgeFiles.addItem(item)
             if rel in selected:
                 item.setSelected(True)
+        scrollbar.setValue(scroll_pos)
 
     def _update_kb_buttons(self) -> None:
         """Enable/disable knowledge buttons from current state."""
@@ -274,11 +325,12 @@ class KnowledgeHandlersMixin:
         blocked = not KnowledgeHub.enabled or digesting or self._kb_reindex_running
         for btn in (
             self.ui.pushButton_KbAdd,
-            self.ui.pushButton_KbRemove,
             self.ui.pushButton_KbReindex,
             self.ui.pushButton_KbForceReindex,
         ):
             btn.setEnabled(not blocked)
+        has_selection = bool(self.ui.listWidget_KnowledgeFiles.selectedItems())
+        self.ui.pushButton_KbRemove.setEnabled(not blocked and has_selection)
         if not KnowledgeHub.enabled:
             tooltip = "Knowledge hub is disabled (ARIA_KNOWLEDGE_ENABLED)"
         elif digesting:
@@ -293,25 +345,33 @@ class KnowledgeHandlersMixin:
     # --- file operations ----------------------------------------------------
 
     def _on_kb_add_files(self) -> None:
-        """Copy picked files into the knowledge dir, then refresh."""
+        """Copy picked files into the knowledge dir, then offer to index."""
         paths, _ = QFileDialog.getOpenFileNames(self, "Add files to knowledge hub")
         if not paths:
             return
         root = Path(KnowledgeHub.dir)
         root.mkdir(parents=True, exist_ok=True)
+
+        # One batched overwrite confirm instead of N sequential dialogs.
+        existing = [p for p in paths if (root / Path(p).name).exists()]
+        if existing:
+            reply = QMessageBox.question(
+                self,
+                "Overwrite?",
+                f"{len(existing)} of {len(paths)} file(s) already exist. "
+                "Overwrite them?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            overwrite = reply == QMessageBox.StandardButton.Yes
+        else:
+            overwrite = False
+
         added = 0
         for src in paths:
             dest = root / Path(src).name
-            if dest.exists():
-                reply = QMessageBox.question(
-                    self,
-                    "Overwrite?",
-                    f"'{dest.name}' already exists. Overwrite?",
-                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    QMessageBox.StandardButton.No,
-                )
-                if reply != QMessageBox.StandardButton.Yes:
-                    continue
+            if dest.exists() and not overwrite:
+                continue
             shutil.copy2(src, dest)
             added += 1
         self._refresh_knowledge_status()
@@ -344,10 +404,26 @@ class KnowledgeHandlersMixin:
         for item in items:
             rel = item.data(Qt.ItemDataRole.UserRole)
             (root / rel).unlink(missing_ok=True)
-        self.statusBar().showMessage(
-            f"{len(items)} file(s) removed — chunks purged on next reindex", 5000
-        )
         self._refresh_knowledge_status()
+        # Removed files keep their Chroma chunks until the next reindex
+        # purges them — offer to purge now rather than letting the
+        # assistant keep citing deleted content.
+        if active_digest() is None:
+            purge = QMessageBox.question(
+                self,
+                "Purge removed content",
+                f"{len(items)} file(s) removed — reindex now to purge "
+                "their indexed content?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes,
+            )
+            if purge == QMessageBox.StandardButton.Yes:
+                self._on_kb_reindex(force=False)
+        else:
+            self.statusBar().showMessage(
+                f"{len(items)} file(s) removed — chunks purged on next reindex",
+                5000,
+            )
 
     # --- reindex --------------------------------------------------------------
 
