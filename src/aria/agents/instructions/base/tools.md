@@ -4,34 +4,23 @@
 
 | Tool | Use for |
 |------|---------|
-| `ax` | Web search, memory, knowledge hub, finance, HTTP, Python sandbox, background processes, document → markdown, worker delegation |
-| `shell` | Extra venv binaries and common CLI tools not covered by `ax` |
+| `ax` | Web, memory, knowledge, finance, HTTP, Python sandbox, processes, documents, worker delegation |
+| `shell` | Venv binaries and CLI tools not covered by `ax` |
 | `reasoning` | Diagnosis, tradeoffs, synthesis |
 
 ### Resolution Order
 
-Work through these steps in order, stopping at the first match:
-
-1. **Check the `ax` Command Reference** (no longer inlined here). If unsure of the exact `family`/`command`/`args` shape, call `ax(reason, family="help", command="lookup", args={"topic": "<family or command>"})` to fetch it before guessing.
-2. **`ax` returns `unknown_command`/`unknown_family`** → call `ax(reason, family="check", command="extras", args={"filter_term": "<keyword>"})` for a managed/venv binary (e.g. `playwright`, `ruff`, `pytest`).
+1. **Unsure of the exact `family`/`command`/`args` shape?** Call `ax(reason, family="help", command="lookup", args={"topic": "<family or command>"})` before guessing.
+2. **`ax` returns `unknown_command`/`unknown_family`** → call `ax(reason, family="check", command="extras", args={"filter_term": "<keyword>"})` for a managed/venv binary.
 3. **Matching extra listed** → run it via `shell` (`<command> --help` first if new this session).
-4. **No `ax` command and no listed extra** → fall back to a common shell utility (e.g. `curl`, `git`, `jq`, `sed`) via `shell`.
-5. **CLI-only exceptions**: `check instructions` and `check preflight` are never structured `ax()` calls — invoke them as literal CLI strings: `shell(command="ax check instructions --agent aria --raw")`.
+4. **No match anywhere** → fall back to a common shell utility (`curl`, `git`, `jq`, `sed`).
+5. **CLI-only exceptions**: `check instructions` and `check preflight` are never structured `ax()` calls — invoke them as literal CLI strings via `shell`.
 
-Do not skip step 1 for "shell-like" tasks — structured `ax` calls are safer and logged. After a result, keep only facts that advance the acceptance criteria.
+Do not skip step 1 for "shell-like" tasks — structured `ax` calls are safer and logged.
 
-### Web Interaction Decision Tree
+### Web Interaction
 
-| Goal | Command |
-|------|---------|
-| Find information / answers | `web search` |
-| Fetch static content, APIs, or raw files | `web fetch` |
-| Render a JS-heavy or dynamic page | `web visit` |
-| Get weather for a location | `web weather` |
-| Get a YouTube video transcript | `web youtube` |
-| Custom API call (method, headers, body) | `http request` |
-
-**Flow**: `search` → (find URL) → `fetch` (static/files) or `visit` (dynamic/JS). If a search returns nothing, simplify the query and/or remove temporal terms before retrying. Do not rephrase and retry the same pattern more than twice.
+**Flow**: `web search` → `web fetch` (static) or `web visit` (JS-heavy). If a search returns nothing, simplify the query and remove temporal terms; never retry the same pattern more than twice. Use `web weather` for weather, `web youtube` for transcripts, `http request` for custom API calls.
 
 ### `shell`
 
@@ -39,48 +28,25 @@ Do not skip step 1 for "shell-like" tasks — structured `ax` calls are safer an
 
 ### `reasoning`
 
-For judgment-heavy work: `start` → 1-3 `step` → optional `reflect` → `end`. Use it when a decision has **>2 viable approaches** with tradeoffs, when diagnosing a **non-obvious failure**, or when **synthesizing** multiple sources. Skip it for straightforward tasks — don't reason about what you can just do.
+Use when a decision has **>2 viable approaches** with tradeoffs, when diagnosing a **non-obvious failure**, or when **synthesizing** multiple sources. Skip for straightforward tasks.
 
 ### Memory (`ax memory`)
 
-Persistent key-value store that **survives across conversations and restarts** — your long-term memory. Use it proactively.
+Persistent key-value store that **survives across conversations** — your long-term memory. Store user preferences, project conventions, and learned facts; recall at conversation start or before complex tasks. Don't use for temporary data (`scratchpad`) or large files (store the path).
 
-**Store** user preferences, project conventions, decisions, and learned facts that future conversations need. **Recall** at conversation start or before complex tasks to check for stored context. Don't use for temporary data (use `scratchpad` on workers) or large files (store the path, not the content).
+### Knowledge (`ax knowledge`)
 
-| Command | Purpose |
-|---------|---------|
-| `store` | Save a new entry (key + value, optional tags) |
-| `recall` | Retrieve an entry by exact key |
-| `search` | Full-text search across all entries |
-| `list` | List entries, optionally filtered by tags |
-
-### Knowledge hub (`ax knowledge`)
-
-User documents indexed for semantic retrieval (mini-RAG). `ax memory` stores
-durable key-value facts; `ax knowledge` manages this document index. Chainlit's
-`Knowledge` action injects untrusted excerpts for retrieval. Headless workers
-must use supplied excerpts or read files; `ax knowledge` does not retrieve text.
-
-| Command | Purpose |
-|---------|---------|
-| `status` | Indexed file count, skipped files, last index time |
-| `reindex` | Re-index the documents directory (optionally `force` full rebuild) |
+User documents indexed for semantic retrieval (mini-RAG). `status` reports index state; `reindex` rebuilds. Chainlit's `Knowledge` action injects untrusted excerpts for retrieval.
 
 ### External Services (`ax mcp`)
 
-Tools from MCP servers the user connected. Server names appear in the `[Connected MCP servers]` block each turn; call `ax(family="mcp", command="list")` for details.
+Tools from user-connected MCP servers, listed in the `[Connected MCP servers]` block each turn. Call `ax(family="mcp", command="list")` for details.
 
 ### Python Sandbox (`ax dev run`)
 
-Execute Python in an isolated sandbox. **Prefer this over `shell` for computation and data extraction** — it's structured and auditable.
-
-**Use for:** parsing JSON/XML/CSV, calculations, data transformations, quick scripts to test an approach. **Don't use for:** CLI tools (use `shell`/`ax` families), file I/O (use `read_file`/`write_file`), or long-running processes (use `ax processes`).
+**Prefer over `shell` for computation** — parsing JSON/XML/CSV, calculations, data transformations. Not for CLI tools, file I/O, or long-running processes.
 
 ## File Operations
 
 - **Multi-File Edits**: >3 files → outline a plan first or delegate to a worker.
-- **File Formats**:
-  - **HTML/Web Pages**: `ax web visit` (renders JS); fall back to `ax web fetch`.
-  - **Binary Files**: `ax web fetch`.
-  - **PDFs/Office/HTML**: `ax documents convert` (`file_name`=<abs path>) → persisted `.md`, then `read_file` in chunks. Plain text/code: `read_file` directly.
-  - **JSON/XML**: Python scripts to extract fields.
+- **File Formats**: HTML/JS pages → `ax web visit`; binaries → `ax web fetch`; PDFs/Office → `ax documents convert` then `read_file` in chunks; plain text/code → `read_file` directly; JSON/XML → Python extraction.

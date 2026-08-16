@@ -21,7 +21,7 @@ class TestLoadAgentInstructions:
     def test_loads_core_sections_within_aria(self):
         """Shared and role-specific sections should load for Aria."""
         result = load_agent_instructions("aria")
-        assert "Core Rules" in result
+        assert "Operating Rules" in result
         assert "Behavior" in result  # Aria-specific section
         assert "Delegation" in result  # Aria-specific section
 
@@ -29,7 +29,7 @@ class TestLoadAgentInstructions:
         """Agent identity should appear before base sections."""
         result = load_agent_instructions("aria")
         aria_pos = result.index("# Aria")
-        core_pos = result.index("## Core Rules")
+        core_pos = result.index("## Operating Rules")
         assert aria_pos < core_pos
 
     def test_extras_appended(self):
@@ -61,7 +61,7 @@ class TestLoadAgentInstructions:
         from aria.agents.worker import WorkerAgent
 
         result = WorkerAgent.get_system_prompt()
-        assert "Core Rules" in result
+        assert "Operating Rules" in result
         assert "Follow the seeded plan" in result
         assert "## Tool Priority" not in result
 
@@ -131,7 +131,7 @@ class TestLoadAgentInstructions:
     def test_base_sections_selective_loading(self):
         """Only requested base sections should be included."""
         result = load_agent_instructions("prompt_enhancer", base_sections=["core"])
-        assert "Core Rules" in result
+        assert "Operating Rules" in result
         assert "## Tools" not in result
         assert "Failure Handling" not in result
 

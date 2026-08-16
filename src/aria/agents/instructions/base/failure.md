@@ -10,12 +10,6 @@
 - **Transient Failures**: Retry *once* (e.g., timeouts, rate limits).
 - **Deterministic Failures**: Do not retry (e.g., permission denied, missing files).
 
-### When Blocked
-
-- Report the blocker in 1–2 lines.
-- Continue with verified partial results if possible.
-- Never loop on the same failing approach.
-
 ### Tool Parameter Verification
 
 - If a tool call fails due to parameter formatting, **do not retry**. Report the error and adapt.

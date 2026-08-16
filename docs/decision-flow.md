@@ -10,16 +10,17 @@ The chart is **not** injected into the system prompt. The agent reads the prose 
 graph TD
     %% Context & Initialization
     Start([Incoming User Request]) --> Scope[Assess Scope & Define 'Done']
-    Scope --> QA_Check{Is it a simple Q&A?}
+    Scope --> QA_Check{Answerable from verified\nsession evidence or\ngeneral knowledge alone?}
 
-    %% Path A: Simple Q&A
+    %% Path A: Direct answer
     QA_Check -- Yes --> DirectAns[Answer Directly & Concisely]
     DirectAns --> Audit[Claim Audit: Verify vs Current Session Evidence]
     Audit --> End([Markdown Output Only / End Turn])
 
     %% Path B: Tool Execution & Delegation
-    QA_Check -- No --> Budget_Check{Is task long-running, multi-step,\nartifact-producing, or >15 calls?}
-    
+    QA_Check -- "No: needs current system,\nsession, file, or web state" --> Budget_Check
+    Budget_Check{Is task long-running, multi-step,\nartifact-producing, or >15 calls?}
+
     %% Worker Delegation Workflow
     Budget_Check -- Yes --> WorkerConfirm{Ask Confirmation:\nSpawn AI Worker?}
     WorkerConfirm -- Approved --> Spawn[ax spawn/worker]
@@ -69,23 +70,23 @@ graph TD
 | Node | Description | Source |
 |------|-------------|--------|
 | **Incoming User Request** | Entry point. Every interaction starts here. | — |
-| **Assess Scope & Define 'Done'** | Before doing anything, Aria defines what "done" looks like. | `aria.md` — Task Budget rule 1 |
-| **Is it a simple Q&A?** | The first branch. If the question can be answered without tools, take the short path. | `aria.md` — Decision Tree step 1 |
+| **Assess Scope & Define 'Done'** | Before doing anything, Aria defines what "done" looks like. | `base/core.md` — Goal Lock |
+| **Answerable from verified session evidence or general knowledge alone?** | The first branch. Questions about current system state, session, files, or web content always route to tools — "I don't have visibility" is never the answer when a command exists. | `base/core.md` — Operating Rules 3; `aria.md` — Examples |
 
-### 2. Simple Q&A Path
+### 2. Direct Answer Path
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **Answer Directly & Concisely** | No tools needed. Be direct, match tone, be honest. | `aria.md` — Behavior section |
-| **Claim Audit** | Before outputting, verify every material claim is backed by session evidence or marked as inference. | `base/core.md` — Rule 5 |
-| **Markdown Output Only / End Turn** | Output in markdown. No raw HTML, no decorative Unicode. | `aria.md` — Output Standards |
+| **Answer Directly & Concisely** | No tools needed. Be direct, match tone, be honest. | `aria.md` — Voice, Markdown, and Behavior |
+| **Claim Audit** | Before outputting, verify every material claim is backed by session evidence or marked as inference. | `base/core.md` — Operating Rules 7 |
+| **Markdown Output Only / End Turn** | Output in markdown. No raw HTML, no decorative Unicode. | `aria.md` — Voice, Markdown, and Behavior |
 
 ### 3. Delegation Path
 
 | Node | Description | Source |
 |------|-------------|--------|
 | **Is task long-running, multi-step, artifact-producing, or >15 calls?** | If the task is sustained or complex enough to warrant a worker, take the delegation path. | `aria.md` — Delegation and Task Budget sections |
-| **Ask Confirmation: Spawn AI Worker?** | Workers require explicit user approval before spawning. | `aria.md` — Confirmation Required |
+| **Ask Confirmation: Spawn AI Worker?** | Workers require explicit user approval before spawning. | `aria.md` — Confirmation Required; `base/core.md` — Definitions |
 | **ax spawn/worker** | After approval, pass `prompt`, `expected`, non-empty ordered `steps`, and optional `instructions`, `output_dir`, or `thread_id`. | `aria.md` — Spawning Workers; `ax_commands.md` |
 | **Report Worker ID & Result Location** | After spawning, report the ID and stop. Don't check on the worker unless asked. | `aria.md` — Spawning Workers |
 
@@ -102,14 +103,14 @@ graph TD
 | Node | Description | Source |
 |------|-------------|--------|
 | **Install / Run Unrequested Code / Sudo / Fallback?** | Before executing sensitive actions, check if user approval is needed. | `aria.md` — Confirmation Required |
-| **Ask User for Explicit Approval** | Present the action with a brief reason and wait for approval. | `aria.md` — Confirmation template |
+| **Ask User for Explicit Approval** | Present the action with a brief reason and wait for approval. | `aria.md` — Confirmation Required; `base/core.md` — Definitions |
 
 ### 6. Budget Monitoring
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **5+ calls without progress OR >15 total calls?** | Two budget gates: progress-based and absolute. If either triggers, stop and report. | `aria.md` — Task Budget rules 2-3 |
-| **Stop: Report current state & blockers** | Deliver whatever partial results exist and explain what blocked progress. | `aria.md` — Task Budget rule 3, `base/core.md` — Rule 4 |
+| **5+ calls without progress OR >15 total calls?** | Two budget gates: progress-based and absolute. If either triggers, stop and report. | `aria.md` — Task Budget and Scope |
+| **Stop: Report current state & blockers** | Deliver whatever partial results exist and explain what blocked progress. | `base/core.md` — Operating Rules 6 |
 
 ### 7. Failure Handling
 
@@ -118,15 +119,15 @@ graph TD
 | **Is failure transient?** | Transient = timeout, network hiccup, rate limit, or a parameter just fixed. Deterministic = permission denied, missing file, unsupported command, policy block. | `base/failure.md` — Retry Policy |
 | **Deterministic Failure: Do NOT retry** | Report the error immediately. No retries for deterministic failures. | `base/failure.md` — Retry Policy |
 | **Already retried once?** | Only one retry is allowed for transient failures. | `base/failure.md` — Retry Policy |
-| **Loop Prevention: Stop & Report** | After one failed retry, report the error and consider alternatives or ask the user. | `base/failure.md` — Retry Policy, `aria.md` — Task Budget rule 4 |
+| **Loop Prevention: Stop & Report** | After one failed retry, report the error and consider alternatives or ask the user. | `base/failure.md` — Retry Policy, `base/core.md` — Operating Rules 6 |
 
 ### 8. Success & Iteration
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **Has criteria for 'Done' been met?** | Check against the "done" definition established at the start. | `aria.md` — Task Budget rule 1 |
-| **Has user scope expanded mid-task?** | If the user added new requirements during execution, re-evaluate scope before continuing. Don't silently absorb expanded scope. | `aria.md` — Task Budget rule 5 |
-| **Claim Audit** | Every output path converges here. Final verification before responding. | `base/core.md` — Rule 5 |
+| **Has criteria for 'Done' been met?** | Check against the "done" definition established at the start. | `base/core.md` — Goal Lock |
+| **Has user scope expanded mid-task?** | If the user added new requirements during execution, re-evaluate scope before continuing. Don't silently absorb expanded scope. | `aria.md` — Task Budget and Scope |
+| **Claim Audit** | Every output path converges here. Final verification before responding. | `base/core.md` — Operating Rules 7 |
 
 ## Design Notes
 
