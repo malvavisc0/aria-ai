@@ -1,6 +1,6 @@
 # Aria Tools Inventory
 
-A comprehensive guide to all tools available in the `src/aria/tools` package. Each tool returns JSON-formatted responses. Tools are organized into **categories** managed by a centralized registry, plus a unified `ax` dispatcher that routes to domain tools (web, memory, knowledge, finance, IMDb, HTTP, dev, processes, documents, worker, mcp).
+A comprehensive guide to all tools available in the `src/aria/tools` package. Each tool returns JSON-formatted responses. Tools are organized into **categories** managed by a centralized registry, plus a unified `ax` dispatcher that routes to domain tools (web, memory, knowledge, finance, IMDb, HTTP, dev, processes, documents, voice, worker, mcp).
 
 ## Docstring Convention
 
@@ -851,6 +851,7 @@ Unified dispatcher that routes `family`/`command` pairs to native Python functio
 | `documents` | `convert`, `status` | Convert office/PDF/HTML to markdown; check the Granite-Docling worker status |
 | `check` | `extras` | Discover additional CLI tools available in the virtual environment |
 | `worker` | `spawn`, `list`, `status`, `logs`, `cancel`, `clean` | Manage workers; `spawn` requires `prompt`, `expected`, ordered `steps`; terminal results include summary, step counts, and an absolute Markdown report path |
+| `voice` | `transcribe` | Transcribe local audio files to text via the in-process whisper server (requires voice enabled + web UI running) |
 | `mcp` | `list`, `call` | Discover and invoke Model Context Protocol servers |
 | `help` | *(any)*, `lookup` | List families/commands; `lookup` fetches a family's detailed reference |
 

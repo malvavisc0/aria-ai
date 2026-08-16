@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import re
 import signal
 import socket
 import subprocess
@@ -43,6 +44,18 @@ def _port_in_use(port: int, host: str = "127.0.0.1") -> bool:
         return sock.connect_ex((host, port)) == 0
     finally:
         sock.close()
+
+
+# whisper.cpp emits bracketed/parenthesized non-speech annotations instead of
+# text when a segment has no speech, e.g. "[BLANK_AUDIO]", "[SILENCE]",
+# "(silence)", "[MUSIC]", "[NOISE]", "[ Silence ]". Strip these so leftover
+# non-speech segments are treated as an empty transcription.
+_NON_SPEECH_TAG_RE = re.compile(r"[\[(]\s*[A-Za-z _-]+\s*[\])]")
+
+
+def strip_non_speech_tags(text: str) -> str:
+    """Remove whisper.cpp non-speech bracket/paren tags, e.g. [BLANK_AUDIO]."""
+    return _NON_SPEECH_TAG_RE.sub("", text).strip()
 
 
 def stop_voice_servers(progress: Callable[[str], None] | None = None) -> None:
@@ -209,15 +222,21 @@ class WhisperCppManager:
             await self.stop()
             return False
 
-    async def transcribe(self, wav_bytes: bytes) -> str:
-        """POST wav_bytes to /inference and return the transcript."""
+    async def transcribe(self, wav_bytes: bytes, timeout: float | None = None) -> str:
+        """POST wav_bytes to /inference and return the transcript.
+
+        ``timeout`` overrides the client's default request timeout; pass
+        ``None`` to keep the default.
+        """
         if self._client is None:
             return ""
         try:
+            effective = timeout if timeout is not None else httpx.USE_CLIENT_DEFAULT
             response = await self._client.post(
                 f"{self._base_url}{self.INFERENCE_PATH}",
                 files={"file": ("audio.wav", wav_bytes, "audio/wav")},
                 data={"response_format": "json"},
+                timeout=effective,
             )
             response.raise_for_status()
             return response.json().get("text", "")

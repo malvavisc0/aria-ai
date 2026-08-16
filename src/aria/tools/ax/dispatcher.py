@@ -33,7 +33,7 @@ class AxSchema(BaseModel):
         description=(
             "Tool family name. Use 'help' to list all families. "
             "Families: web, memory, knowledge, finance, imdb, http, dev, processes, "
-            "documents, check, worker, mcp."
+            "documents, check, worker, mcp, voice."
         )
     )
     command: str = Field(
@@ -220,6 +220,12 @@ def _documents_status():
     return status
 
 
+def _voice_transcribe():
+    from aria.tools.voice.functions import transcribe
+
+    return transcribe
+
+
 def _mcp_list():
     from aria.tools.mcp_bridge import list_servers, list_tools, resolve_session
     from aria.tools.utils import tool_response
@@ -345,6 +351,9 @@ _DISPATCH: dict[str, dict[str, tuple[Callable, bool]]] = {
     "mcp": {
         "list": (_mcp_list, False),
         "call": (_mcp_call, False),
+    },
+    "voice": {
+        "transcribe": (_voice_transcribe, False),
     },
 }
 
@@ -482,7 +491,7 @@ def _validate_ax_inputs(reason: str, family: str, command: str) -> str | None:
                     "message": "ax() requires 'family' and 'command' arguments.",
                     "expected": {
                         "reason": "Brief explanation of why you are calling this.",
-                        "family": "Tool family: web, memory, knowledge, finance, imdb, http, dev, processes, documents, check, worker, mcp",
+                        "family": "Tool family: web, memory, knowledge, finance, imdb, http, dev, processes, documents, check, worker, mcp, voice",
                         "command": "Subcommand within the family",
                         "args": "Optional arguments dict (exclude 'reason')",
                     },

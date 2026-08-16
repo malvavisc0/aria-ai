@@ -31,7 +31,11 @@ from aria.db.auth import verify_password
 from aria.db.layer import SQLiteSQLAlchemyDataLayer
 from aria.db.local_storage_client import LocalStorageClient
 from aria.db.models import User
-from aria.server.voice import get_kokoro_manager, get_whisper_manager
+from aria.server.voice import (
+    get_kokoro_manager,
+    get_whisper_manager,
+    strip_non_speech_tags,
+)
 from aria.web.session import (
     drain_memory,
     restore_chat_history,
@@ -274,19 +278,6 @@ def _strip_markdown_for_tts(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip()
 
 
-# whisper.cpp emits bracketed/parenthesized non-speech annotations instead of
-# text when a segment has no speech, e.g. "[BLANK_AUDIO]", "[SILENCE]",
-# "(silence)", "[MUSIC]", "[NOISE]", "[ Silence ]". Strip these so leftover
-# non-speech segments are treated as an empty transcription rather than sent
-# to the chat pipeline as a literal user message.
-_NON_SPEECH_TAG_RE = re.compile(r"[\[(]\s*[A-Za-z _-]+\s*[\])]")
-
-
-def _strip_non_speech_tags(text: str) -> str:
-    """Remove whisper.cpp non-speech bracket/paren tags, e.g. [BLANK_AUDIO]."""
-    return _NON_SPEECH_TAG_RE.sub("", text).strip()
-
-
 async def _speech_to_text(wav_bytes: bytes) -> str:
     """Transcribe WAV bytes via the whisper.cpp server.
 
@@ -297,7 +288,7 @@ async def _speech_to_text(wav_bytes: bytes) -> str:
     if whisper is None:
         return ""
     transcription = await whisper.transcribe(wav_bytes)
-    return _strip_non_speech_tags(transcription)
+    return strip_non_speech_tags(transcription)
 
 
 async def _text_to_speech(text: str) -> bytes:

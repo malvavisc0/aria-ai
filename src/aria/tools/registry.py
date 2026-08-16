@@ -8,7 +8,7 @@ Categories:
 - files: Worker file tools (read_file, write_file, edit_file,
          file_info, list_files, search_files, copy_file)
 - ax: Unified dispatcher (web, knowledge, finance, imdb, http, dev, processes,
-      documents, check, worker, mcp)
+      documents, check, voice, worker, mcp)
 """
 
 from collections.abc import Callable

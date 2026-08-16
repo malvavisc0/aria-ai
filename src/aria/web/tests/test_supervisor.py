@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterator
 from unittest.mock import MagicMock
 
 from aria.supervision.snapshot import StepView, WorkerView
@@ -26,18 +27,19 @@ def _view(status: str = "running") -> WorkerView:
     )
 
 
+async def _empty(_wid: object) -> AsyncIterator[WorkerView]:
+    """Empty watch stub: yields nothing, matching watch_worker's signature."""
+    for _ in ():
+        yield _
+
+
 async def test_ensure_watching_arms_one_watcher_per_worker(monkeypatch):
     store: dict = {}
     monkeypatch.setattr("aria.web.supervisor.cl.user_session", _session_mock(store))
     monkeypatch.setattr(
         "aria.web.supervisor.find_supervised_workers", lambda t: ["w1", "w2"]
     )
-
-    async def empty(_wid):
-        if False:
-            yield _view()
-
-    monkeypatch.setattr("aria.web.supervisor.watch_worker", empty)
+    monkeypatch.setattr("aria.web.supervisor.watch_worker", _empty)
     await ensure_watching("T", for_id="M")
     watchers = store["_supervision_watchers"]
     assert set(watchers) == {("T", "w1"), ("T", "w2")}
@@ -53,12 +55,7 @@ async def test_ensure_watching_idempotent(monkeypatch):
     store: dict = {}
     monkeypatch.setattr("aria.web.supervisor.cl.user_session", _session_mock(store))
     monkeypatch.setattr("aria.web.supervisor.find_supervised_workers", lambda t: ["w1"])
-
-    async def empty(_wid):
-        if False:
-            yield _view()
-
-    monkeypatch.setattr("aria.web.supervisor.watch_worker", empty)
+    monkeypatch.setattr("aria.web.supervisor.watch_worker", _empty)
     await ensure_watching("T", for_id="M")
     first = store["_supervision_watchers"][("T", "w1")]
     await ensure_watching("T", for_id="M")
@@ -117,8 +114,8 @@ async def test_cancellation_on_chat_end(monkeypatch):
 
     async def hang(_wid):
         await asyncio.Event().wait()
-        if False:
-            yield _view()
+        for _ in ():
+            yield _
 
     monkeypatch.setattr("aria.web.supervisor.watch_worker", hang)
     await ensure_watching("T", for_id="M")
@@ -137,12 +134,7 @@ async def test_resume_re_arms_only_running_and_alive(monkeypatch):
     monkeypatch.setattr(
         "aria.web.supervisor.find_supervised_workers", lambda t: ["alive"]
     )
-
-    async def empty(_wid):
-        if False:
-            yield _view()
-
-    monkeypatch.setattr("aria.web.supervisor.watch_worker", empty)
+    monkeypatch.setattr("aria.web.supervisor.watch_worker", _empty)
     await ensure_watching("T", elements=[])
     assert set(store["_supervision_watchers"]) == {("T", "alive")}
     for task in store["_supervision_watchers"].values():
@@ -163,11 +155,7 @@ async def test_resume_reuses_persisted_element_row(monkeypatch):
         def __init__(self, wid, for_id=None, element_id=None):
             captured.append((wid, for_id, element_id))
 
-    async def empty(_wid):
-        if False:
-            yield _view()
-
-    monkeypatch.setattr("aria.web.supervisor.watch_worker", empty)
+    monkeypatch.setattr("aria.web.supervisor.watch_worker", _empty)
     monkeypatch.setattr("aria.web.supervisor.WorkerTaskList", FakeList)
     await ensure_watching(
         "T",

@@ -14,8 +14,8 @@ class WorkerAxSchema(AxSchema):
     family: str = Field(
         description=(
             "Tool family. Available: web, knowledge, finance, imdb, http, dev, "
-            "processes, documents, check, worker (list/status/logs/cancel/clean "
-            "only — no spawn), and mcp."
+            "processes, documents, check, voice, worker (list/status/logs/"
+            "cancel/clean only — no spawn), and mcp."
         )
     )
 

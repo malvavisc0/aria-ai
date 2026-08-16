@@ -235,6 +235,31 @@ class TestDispatch:
         assert "stock" in data["data"]["commands"]
 
     @pytest.mark.asyncio
+    async def test_voice_family_in_help(self):
+        result = _build_help("voice")
+        data = json.loads(result)
+        assert data["data"]["family"] == "voice"
+        assert data["data"]["commands"] == ["transcribe"]
+
+    @pytest.mark.asyncio
+    async def test_dispatches_voice_transcribe(self):
+        mock_response = '{"tool":"voice","data":{"text":"ok","chars":2}}'
+        with patch(
+            "aria.tools.voice.functions.transcribe",
+            return_value=mock_response,
+        ) as mock_fn:
+            result = await ax(
+                reason="transcribe audio",
+                family="voice",
+                command="transcribe",
+                args={"file": "/tmp/a.wav"},
+            )
+            mock_fn.assert_called_once_with(
+                reason="transcribe audio", file="/tmp/a.wav"
+            )
+            assert result == mock_response
+
+    @pytest.mark.asyncio
     async def test_dispatches_to_web_search(self):
         mock_response = '{"tool":"web_search","data":{"results":[]}}'
         with patch(

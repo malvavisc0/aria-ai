@@ -136,3 +136,11 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 | `call` | `server`, `tool` | `arguments` |
 
 > **External MCP servers.** `list` with no `server` returns the connected-server index (names + tool count). `list` with `server` returns that server's tools + input schemas (persisted to a file when large — read via `read_file`). `call` invokes a tool with raw-dict `arguments`. If `list` returns "No MCP servers connected", no external service is available — fall back to `web`/`http`/`shell`.
+
+## voice
+
+| Command | Required | Optional |
+|---------|----------|----------|
+| `transcribe` | `file` | — |
+
+> **In-process speech-to-text** via the whisper server that runs with the web UI — no shell needed. `stt_unavailable` when voice is disabled or the web UI is not running (check `aria voice status` via shell). `.wav` files are read directly; other formats are converted in-memory via ffmpeg (`ffmpeg_missing` if the system binary is absent). Short transcripts return `text` inline; longer ones (>2000 chars) are persisted to `workspace/transcripts/` — read them with `read_file`. An empty `text` means no speech was detected.

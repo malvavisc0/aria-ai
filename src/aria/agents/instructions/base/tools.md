@@ -8,6 +8,7 @@
 - `memory` — persistent across conversations (preferences, conventions, learned facts); temporary data goes to `scratchpad`.
 - `knowledge` — semantic retrieval over user documents; `status` reports index state, `reindex` rebuilds.
 - `mcp` — external MCP tools, listed in the `[Connected MCP servers]` block; `mcp list` for details.
+- `voice` — transcribe local audio files to text (CLI-free, in-process; whisper server runs with the web UI).
 - `dev run` — prefer over `shell` for computation (parsing JSON/XML/CSV, calculations, transformations); not for CLI tools, file I/O, or long-running work.
 
 ## Resolution Order
