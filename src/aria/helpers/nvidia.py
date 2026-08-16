@@ -328,10 +328,13 @@ def check_nvidia_smi_available() -> bool:
 def get_cuda_version() -> str:
     """Get the CUDA version from nvidia-smi.
 
-    Parses the CUDA version from ``nvidia-smi --version`` output.
+    Parses the CUDA version from ``nvidia-smi --version`` output. Newer
+    drivers (>= 610) deprecate the classic ``CUDA Version: 12.4`` line in
+    favour of ``CUDA UMD version    : 13.3``; both are matched
+    case-insensitively.
 
     Returns:
-        CUDA version string (e.g. ``"13.2"``, ``"12.4"``), or ``""``
+        CUDA version string (e.g. ``"13.2"``, ``"12.4"``), or ``""
         if unavailable.
 
     Example:
@@ -347,7 +350,11 @@ def get_cuda_version() -> str:
             text=True,
             check=True,
         )
-        match = re.search(r"CUDA Version\s*:\s*(\d+\.\d+)", result.stdout)
+        match = re.search(
+            r"CUDA\s+(?:UMD\s+)?version\s*:\s*(\d+\.\d+)",
+            result.stdout,
+            re.IGNORECASE,
+        )
         return match.group(1) if match else ""
     except (subprocess.CalledProcessError, FileNotFoundError):
         return ""

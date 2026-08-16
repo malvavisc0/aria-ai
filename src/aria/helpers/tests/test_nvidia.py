@@ -12,6 +12,7 @@ from aria.helpers.nvidia import (
     detect_gpu_count,
     detect_gpus_with_details,
     detect_nvlink,
+    get_cuda_version,
     get_free_vram_per_gpu,
     get_nvidia_smi_version,
     get_total_vram_mb,
@@ -85,6 +86,13 @@ MOCK_VERSION_OUTPUT_WITH_COLON = """NVIDIA-SMI version  : 590.48.01
 NVML version        : 590.48
 DRIVER version      : 590.48.01
 CUDA Version        : 13.1"""
+
+MOCK_VERSION_OUTPUT_DEPRECATED = """NVIDIA-SMI version  : 610.57.04
+NVML version        : 610.57
+DRIVER version      : Deprecated, see "KMD version" instead
+CUDA version        : Deprecated, see "CUDA UMD version" instead
+KMD version         : 610.57.04
+CUDA UMD version    : 13.3"""
 
 # Mock data for detect_gpus_with_details()
 MOCK_GPU_DETAILS_SINGLE = """0, NVIDIA GeForce RTX 3090, GPU-12345678-1234-1234-1234-123456789012, 24576, 12288, 12288, Default, 535.104.05, 350, 280, 65, 45, Enabled"""
@@ -452,6 +460,61 @@ class TestCheckNvidiaSmiAvailable:
                 126, "nvidia-smi", "Permission denied"
             )
             assert check_nvidia_smi_available() is False
+
+
+# ============================================================================
+# Tests for get_cuda_version()
+# ============================================================================
+
+
+class TestGetCudaVersion:
+    """Test suite for get_cuda_version function."""
+
+    def test_classic_format(self):
+        """Classic 'CUDA Version: 12.2' single-line format."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(returncode=0, stdout=MOCK_VERSION_OUTPUT)
+            assert get_cuda_version() == "12.2"
+
+    def test_colon_format(self):
+        """Multi-line 'CUDA Version        : 13.1' format."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0, stdout=MOCK_VERSION_OUTPUT_WITH_COLON
+            )
+            assert get_cuda_version() == "13.1"
+
+    def test_deprecated_format(self):
+        """Driver >= 610 deprecates 'CUDA version' in favour of 'CUDA UMD version'.
+
+        The deprecated line's value is the literal word 'Deprecated', not a
+        version — the regex must skip it and match the UMD line instead.
+        """
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(
+                returncode=0, stdout=MOCK_VERSION_OUTPUT_DEPRECATED
+            )
+            assert get_cuda_version() == "13.3"
+
+    def test_nvidia_smi_not_found(self):
+        """Empty string when nvidia-smi is not installed."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = FileNotFoundError("nvidia-smi not found")
+            assert get_cuda_version() == ""
+
+    def test_nvidia_smi_fails(self):
+        """Empty string when nvidia-smi exits non-zero."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.side_effect = subprocess.CalledProcessError(
+                1, "nvidia-smi", "Error"
+            )
+            assert get_cuda_version() == ""
+
+    def test_unparseable_output(self):
+        """Empty string when no CUDA version line is present."""
+        with patch("subprocess.run") as mock_run:
+            mock_run.return_value = Mock(returncode=0, stdout="unexpected output")
+            assert get_cuda_version() == ""
 
 
 # ============================================================================
