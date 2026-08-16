@@ -27,8 +27,8 @@ def test_worker_md_uses_correct_memory_and_spawn_boundary():
 
 def test_aria_md_supports_rich_markdown():
     text = (INST / "aria.md").read_text()
-    assert "Chainlit renders Markdown" in text
-    assert "Make answers vivid" in text
+    assert "Use Markdown deliberately" in text
+    assert "Lead with the conclusion" in text
 
 
 def test_ax_reference_worker_spawn_lists_steps_required():

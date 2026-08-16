@@ -314,6 +314,16 @@ def _render_extras(rows: list[tuple[str, list[str]]]) -> str:
     return "\n".join(lines)
 
 
+def venv_extras_available() -> bool:
+    """Return True if the active venv contains agent-usable CLI binaries."""
+    bin_dir = _get_venv_bin_dir()
+    if not bin_dir or not bin_dir.exists():
+        return False
+    return bool(
+        _scan_venv_binaries(bin_dir, _EXCLUDED_BINARIES, _EXCLUDED_PATTERNS, None)
+    )
+
+
 def get_venv_extras(
     excluded: set[str] | None = None,
     filter_term: str | None = None,

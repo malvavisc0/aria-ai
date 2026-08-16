@@ -22,7 +22,7 @@ class TestLoadAgentInstructions:
         """Shared and role-specific sections should load for Aria."""
         result = load_agent_instructions("aria")
         assert "Operating Rules" in result
-        assert "Behavior" in result  # Aria-specific section
+        assert "## Voice" in result  # Aria-specific section
         assert "Delegation" in result  # Aria-specific section
 
     def test_agent_identity_before_base(self):

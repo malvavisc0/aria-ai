@@ -34,6 +34,8 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 | `weather` | `location` | — |
 | `youtube` | `url` | `languages` |
 
+> **Flow:** `search` → `fetch` (static pages, binary downloads) or `visit` (JS-heavy HTML pages). If a search returns nothing, simplify the query and drop temporal terms; never retry the same pattern more than twice. `weather` for weather, `youtube` for transcripts, `http request` for custom API calls.
+
 ## memory
 
 | Command | Required | Optional |
@@ -83,6 +85,8 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 | Command | Required | Optional |
 |---------|----------|----------|
 | `run` | `code` (or `file`) | `args`, `timeout`, `check_only` |
+
+> **Prefer over `shell` for computation** — parsing JSON/XML/CSV, calculations, data transformations. Not for CLI tools, file I/O, or long-running processes.
 
 ## processes
 

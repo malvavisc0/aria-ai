@@ -555,7 +555,7 @@ Today the spawn example (lines 58-70) shows `prompt / expected / instructions / 
 3. **Keep "Stop your turn immediately" (line 74).** The live `TaskList` is driven by the background watcher (`§5.5`); Aria does not poll. On the user's *next* prompt, Aria reads `result.md` / the audit and evaluates (`aria.md:51-52` already covers this — no change needed there).
 4. **Do not** add an instruction telling Aria to call the `plan` tool to create the plan. Per §4.2 #1, Aria passes `steps` strings; `_spawn` owns plan creation. Adding a `plan(create)` step for Aria would create an `agent_id` mismatch and a redundant two-call spawn.
 
-Reference pointer: the `ax_commands.md` worker section lists `steps` under Required (`§5.1`); Aria fetches that table via `ax(family="help", command="lookup", args={"topic": "worker"})` when unsure (`aria.md:72`). No separate Aria-side reference file is needed.
+Reference pointer: the `ax_commands.md` worker section lists `steps` under Required (`§5.1`); Aria fetches that table via `ax(family="help", command="lookup", args={"topic": "worker"})` when unsure (`base/tools.md`, Resolution Order). No separate Aria-side reference file is needed.
 
 #### `src/aria/agents/instructions/worker.md` — the "Planning (mandatory)" section (lines 39-45)
 

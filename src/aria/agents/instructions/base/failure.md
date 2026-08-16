@@ -1,16 +1,6 @@
 ## Failure Handling
 
-### Transparency
-
-- **Partial Results**: Deliver what works, even if incomplete. Flag gaps explicitly.
-- **Graceful Degradation**: If a tool or service is partially working, prefer degraded results with a clear disclaimer over blocking entirely.
-
-### Retry Policy
-
-- **Transient Failures**: Retry *once* (e.g., timeouts, rate limits).
-- **Deterministic Failures**: Do not retry (e.g., permission denied, missing files).
-
-### Tool Parameter Verification
-
-- If a tool call fails due to parameter formatting, **do not retry**. Report the error and adapt.
-- If `ax` returns an `unknown_command` or `unknown_family` error, **read the `available_commands` or `available_families` list in the response** and use a valid one if one applies. If none applies, follow the Tool Priority Resolution Order: check `ax check extras` for a matching venv binary, then fall back to a common `shell` command. Never retry the identical invalid `ax` call.
+- **Read the error, then adapt** — never loop on the same failing approach.
+- **Partial results:** deliver what works, even if incomplete; flag gaps explicitly. Prefer a degraded result with a clear disclaimer over blocking entirely.
+- **Retry transient failures once** (timeouts, network hiccups, rate limits); never retry deterministic failures (permission denied, missing files, policy blocks).
+- **On a parameter or `unknown_command`/`unknown_family` error:** never retry the identical call — use the `available_commands`/`available_families` in the response, or adapt.

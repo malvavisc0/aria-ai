@@ -75,25 +75,17 @@ class PromptEnhancerAgent(FunctionAgent):
 
     @staticmethod
     def _strip_irrelevant_extras(extras: str) -> str:
-        """Remove runtime context sections the enhancer doesn't need.
+        """Remove runtime context lines the enhancer doesn't need.
 
-        Strips Aria-Managed Binaries and Virtual Environment Commands
-        sections since the prompt enhancer never executes commands.
+        Strips the managed-binaries and venv-CLIs bullets since the prompt
+        enhancer never executes commands.
         """
         import re
 
-        # Remove "### Aria-Managed Binaries" through the next section heading
-        extras = re.sub(
-            r"### Aria-Managed Binaries.*?(?=### |\Z)",
-            "",
-            extras,
-            flags=re.DOTALL,
+        pattern = re.compile(
+            r"^- \*\*(?:Managed binaries|Venv CLIs)\*\*:.*\n?", re.MULTILINE
         )
-        # Remove "### Virtual Environment Commands" to end of string
-        extras = re.sub(
-            r"### Virtual Environment Commands.*$", "", extras, flags=re.DOTALL
-        )
-        return extras.strip()
+        return pattern.sub("", extras).strip()
 
 
 def get_agent(

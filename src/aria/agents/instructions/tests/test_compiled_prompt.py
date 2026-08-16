@@ -32,9 +32,9 @@ _PLACEHOLDER_RE = re.compile(r"\{\{[^}]+\}\}")
 # budgets = post-cleanup baseline + 15% headroom. Measured on resident
 # content only so the guardrail tracks markdown bloat, not environment-
 # dependent extras (managed binaries / venv table).
-ARIA_BUDGET_WORDS = 1865  # resident baseline 1595
-WORKER_BUDGET_WORDS = 2000  # resident baseline 1217
-PROMPT_ENHANCER_BUDGET_WORDS = 583  # resident baseline 507
+ARIA_BUDGET_WORDS = 1225  # resident baseline 1065
+WORKER_BUDGET_WORDS = 615  # resident baseline 534
+PROMPT_ENHANCER_BUDGET_WORDS = 584  # resident baseline 507
 
 # A paragraph in an agent md that is >40% token-overlap (Jaccard) with a
 # paragraph in a base section it loads counts as duplicated. Baseline
@@ -132,6 +132,35 @@ class TestUnresolvedPlaceholders:
         name, _cls, _budget, full_prompt = agent_case
         matches = _PLACEHOLDER_RE.findall(full_prompt)
         assert not matches, f"{name} prompt has unresolved placeholders: {matches}"
+
+
+class TestAriaBehaviorContracts:
+    """Prompt reduction must preserve quality-sensitive operating behavior."""
+
+    @pytest.fixture
+    def prompt(self) -> str:
+        return load_agent_instructions("aria")
+
+    def test_discovers_ax_arguments_before_guessing(self, prompt: str):
+        assert 'family="help", command="lookup"' in prompt
+        assert "before guessing" in prompt
+
+    def test_multi_file_work_does_not_force_delegation(self, prompt: str):
+        assert "outline a brief plan first" in prompt
+        assert "delegate only when the work also meets" in prompt
+
+    @pytest.mark.parametrize(
+        "contract",
+        [
+            "Ask for explicit approval",
+            "Cite only what you fetched",
+            "Retry transient failures once",
+            "Stop at the first blocker or after 5 unproductive calls",
+            "ordered verifiable `steps` ending in a check",
+        ],
+    )
+    def test_retains_essential_contract(self, prompt: str, contract: str):
+        assert contract in prompt
 
 
 class TestNoDuplicatedRules:

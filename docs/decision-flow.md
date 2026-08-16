@@ -70,46 +70,46 @@ graph TD
 | Node | Description | Source |
 |------|-------------|--------|
 | **Incoming User Request** | Entry point. Every interaction starts here. | — |
-| **Assess Scope & Define 'Done'** | Before doing anything, Aria defines what "done" looks like. | `base/core.md` — Goal Lock |
-| **Answerable from verified session evidence or general knowledge alone?** | The first branch. Questions about current system state, session, files, or web content always route to tools — "I don't have visibility" is never the answer when a command exists. | `base/core.md` — Operating Rules 3; `aria.md` — Examples |
+| **Assess Scope & Define 'Done'** | Before doing anything, Aria defines what "done" looks like. | `aria.md` — Task Execution (Budget) |
+| **Answerable from verified session evidence or general knowledge alone?** | The first branch. Questions about current system state, session, files, or web content always route to tools — "I don't have visibility" is never the answer when a command exists. | `base/core.md` — Operating Rules 2 |
 
 ### 2. Direct Answer Path
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **Answer Directly & Concisely** | No tools needed. Be direct, match tone, be honest. | `aria.md` — Voice, Markdown, and Behavior |
-| **Claim Audit** | Before outputting, verify every material claim is backed by session evidence or marked as inference. | `base/core.md` — Operating Rules 7 |
-| **Markdown Output Only / End Turn** | Output in markdown. No raw HTML, no decorative Unicode. | `aria.md` — Voice, Markdown, and Behavior |
+| **Answer Directly & Concisely** | No tools needed. Be direct, match tone, be honest. | `aria.md` — Voice |
+| **Claim Audit** | Before outputting, verify every material claim is backed by session evidence or marked as inference. | `base/core.md` — Operating Rules 5 |
+| **Markdown Output Only / End Turn** | Output in markdown. No raw HTML, no decorative Unicode. | `aria.md` — Voice |
 
 ### 3. Delegation Path
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **Is task long-running, multi-step, artifact-producing, or >15 calls?** | If the task is sustained or complex enough to warrant a worker, take the delegation path. | `aria.md` — Delegation and Task Budget sections |
-| **Ask Confirmation: Spawn AI Worker?** | Workers require explicit user approval before spawning. | `aria.md` — Confirmation Required; `base/core.md` — Definitions |
-| **ax spawn/worker** | After approval, pass `prompt`, `expected`, non-empty ordered `steps`, and optional `instructions`, `output_dir`, or `thread_id`. | `aria.md` — Spawning Workers; `ax_commands.md` |
-| **Report Worker ID & Result Location** | After spawning, report the ID and stop. Don't check on the worker unless asked. | `aria.md` — Spawning Workers |
+| **Is task long-running, multi-step, artifact-producing, or >15 calls?** | If the task is sustained or complex enough to warrant a worker, take the delegation path. | `aria.md` — Task Execution |
+| **Ask Confirmation: Spawn AI Worker?** | Workers require explicit user approval before spawning. | `aria.md` — Confirmation |
+| **ax spawn/worker** | After approval, pass `prompt`, `expected`, non-empty ordered `steps`, and optional `instructions`, `output_dir`, or `thread_id`. | `aria.md` — Task Execution; `ax_commands.md` (worker) |
+| **Report Worker ID & Result Location** | After spawning, report the ID and stop. Don't check on the worker unless asked. | `aria.md` — Task Execution |
 
 ### 4. Local Execution Loop
 
 | Node | Description | Source |
 |------|-------------|--------|
 | **Initiate Execution Loop** | Begin the tool-use cycle. | — |
-| **Reasoning tool decision** | Use `reasoning` when there are >2 viable approaches, a non-obvious failure, or multi-source synthesis is needed. Skip for straightforward tasks. | `base/tools.md` — When to Use `reasoning` |
+| **Reasoning tool decision** | Use `reasoning` when there are >2 viable approaches, a non-obvious failure, or multi-source synthesis is needed. Skip for straightforward tasks. | `base/tools.md` — Family guidance |
 | **Select Tool: Prefer ax over shell** | Always prefer `ax` when it can do the job. Every tool call must include a `reason`. | `base/tools.md` — Tool Priority |
 
 ### 5. Confirmation Gate
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **Install / Run Unrequested Code / Sudo / Fallback?** | Before executing sensitive actions, check if user approval is needed. | `aria.md` — Confirmation Required |
-| **Ask User for Explicit Approval** | Present the action with a brief reason and wait for approval. | `aria.md` — Confirmation Required; `base/core.md` — Definitions |
+| **Install / Run Unrequested Code / Sudo / Fallback?** | Before executing sensitive actions, check if user approval is needed. | `aria.md` — Confirmation |
+| **Ask User for Explicit Approval** | Present the action with a brief reason and wait for approval. | `aria.md` — Confirmation |
 
 ### 6. Budget Monitoring
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **5+ calls without progress OR >15 total calls?** | Two budget gates: progress-based and absolute. If either triggers, stop and report. | `aria.md` — Task Budget and Scope |
+| **5+ calls without progress OR >15 total calls?** | Two budget gates: progress-based and absolute. If either triggers, stop and report. | `aria.md` — Task Execution (Budget) |
 | **Stop: Report current state & blockers** | Deliver whatever partial results exist and explain what blocked progress. | `base/core.md` — Operating Rules 6 |
 
 ### 7. Failure Handling
@@ -125,9 +125,9 @@ graph TD
 
 | Node | Description | Source |
 |------|-------------|--------|
-| **Has criteria for 'Done' been met?** | Check against the "done" definition established at the start. | `base/core.md` — Goal Lock |
-| **Has user scope expanded mid-task?** | If the user added new requirements during execution, re-evaluate scope before continuing. Don't silently absorb expanded scope. | `aria.md` — Task Budget and Scope |
-| **Claim Audit** | Every output path converges here. Final verification before responding. | `base/core.md` — Operating Rules 7 |
+| **Has criteria for 'Done' been met?** | Check against the "done" definition established at the start. | `aria.md` — Task Execution (Budget) |
+| **Has user scope expanded mid-task?** | If the user added new requirements during execution, re-evaluate scope before continuing. Don't silently absorb expanded scope. | `aria.md` — Task Execution (Budget) |
+| **Claim Audit** | Every output path converges here. Final verification before responding. | `base/core.md` — Operating Rules 5 |
 
 ## Design Notes
 
