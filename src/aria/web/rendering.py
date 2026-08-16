@@ -204,6 +204,17 @@ def extract_renderable_items(text: str) -> tuple[list[str], list[CitationRef]]:
     return paths, refs
 
 
+# Model-generated ``**Sources:**`` trailer — the model imitates the pipeline
+# footer it sees in history; strip it before appending the real one so the
+# message never carries two (or a fake one with no backing element).
+_MODEL_SOURCES_RE = re.compile(r"\n+\*\*Sources?:\*\*[^\n]*$", re.IGNORECASE)
+
+
+def strip_model_sources(text: str) -> str:
+    """Remove a trailing model-generated ``**Sources:**`` line from answer text."""
+    return _MODEL_SOURCES_RE.sub("", text).rstrip()
+
+
 def sources_footer(names: list[str]) -> str:
     """Trailing ``**Sources:**`` line giving one chainlit reference chip
     per citation element (chips render where a side element's name occurs

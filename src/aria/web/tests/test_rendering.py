@@ -13,6 +13,7 @@ from aria.web.rendering import (
     create_render_elements,
     extract_renderable_items,
     sources_footer,
+    strip_model_sources,
 )
 
 
@@ -271,3 +272,26 @@ class TestSourcesFooter:
 
     def test_footer_empty_without_names(self) -> None:
         assert sources_footer([]) == ""
+
+
+class TestStripModelSources:
+    """The model imitates the pipeline's ``**Sources:**`` footer it sees in
+    history; the trailer must be stripped before appending the real one."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("Answer.\n\n**Sources:** ocenaudio", "Answer."),
+            ("Answer.\n\n**Sources:** a · b · c", "Answer."),
+            ("Answer.\n\n**Source:** one", "Answer."),
+            ("Answer.\n**Sources:** x", "Answer."),
+            ("Answer.\n\n\n**SOURCES:** y\n", "Answer."),
+            ("Answer text.", "Answer text."),
+            (
+                "Answer with **Sources:** inline mention.",
+                "Answer with **Sources:** inline mention.",
+            ),
+        ],
+    )
+    def test_strip(self, text: str, expected: str) -> None:
+        assert strip_model_sources(text) == expected

@@ -28,6 +28,7 @@ from aria.web.rendering import (
     create_render_elements,
     extract_renderable_items,
     sources_footer,
+    strip_model_sources,
 )
 from aria.web.session import (
     _EditThreadMissingError,
@@ -149,14 +150,18 @@ async def _stream_and_finalize(
     finally:
         partial = getattr(output, "answer_text", "")
         if _run_succeeded:
-            output.answer_text = answer_text  # type: ignore[attr-defined]
+            clean_answer = strip_model_sources(answer_text)
+            output.answer_text = clean_answer  # type: ignore[attr-defined]
             elements, sources = await create_render_elements(
-                *extract_renderable_items(answer_text)
+                *extract_renderable_items(clean_answer)
             )
+            # Footer goes into content (what send() ships); answer_text
+            # stays clean for the TTS side-channel. Only override the
+            # streamed content when there's something to change.
             if sources:
-                # Footer goes into content (what send() ships); answer_text
-                # stays clean for the TTS side-channel.
-                output.content = answer_text + sources_footer(sources)
+                output.content = clean_answer + sources_footer(sources)
+            elif clean_answer != answer_text:
+                output.content = clean_answer
             if elements:
                 output.elements = elements
             await output.send()
@@ -167,11 +172,14 @@ async def _stream_and_finalize(
 
             await ensure_watching(message.thread_id, for_id=output.id)
         elif partial:
+            clean_partial = strip_model_sources(partial)
             elements, sources = await create_render_elements(
-                *extract_renderable_items(partial)
+                *extract_renderable_items(clean_partial)
             )
             if sources:
-                output.content = partial + sources_footer(sources)
+                output.content = clean_partial + sources_footer(sources)
+            elif clean_partial != partial:
+                output.content = clean_partial
             if elements:
                 output.elements = elements
             await output.send()
