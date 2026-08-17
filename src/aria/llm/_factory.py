@@ -62,6 +62,8 @@ def get_chat_llm(
         "repetition_penalty": VllmConfig.repetition_penalty,
         "seed": VllmConfig.seed,
     }
+    if VllmConfig.reasoning_effort:
+        extra_body["reasoning_effort"] = VllmConfig.reasoning_effort
     if disable_thinking:
         extra_body["chat_template_kwargs"] = {"enable_thinking": False}
 

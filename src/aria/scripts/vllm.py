@@ -179,10 +179,9 @@ def _resolve_extra_index_url(target: str) -> str | None:
     url = PYTORCH_INDEX.get(target)
     if target == "cu126" and url:
         try:
-            from aria.helpers.nvidia import get_cuda_version
+            from aria.helpers.nvidia import get_cuda_version, pypi_torch_supports_cuda
 
-            cv = get_cuda_version()
-            if cv and int(cv.split(".")[0]) >= 13:
+            if pypi_torch_supports_cuda(get_cuda_version()):
                 return None  # CUDA 13+ uses default PyPI wheels
         except Exception:
             pass  # keep cu126 extra-index-url as fallback

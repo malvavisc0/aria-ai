@@ -24,3 +24,19 @@ def test_disable_thinking_preserves_sampling_params():
     body = _extra_body(llm)
     for key in ("top_p", "top_k", "min_p", "presence_penalty", "seed"):
         assert key in body
+
+
+def test_reasoning_effort_included_from_config(monkeypatch) -> None:
+    from aria.config.api import Vllm as VllmConfig
+
+    monkeypatch.setattr(VllmConfig, "reasoning_effort", "low")
+    llm = get_chat_llm(api_base="http://test:9090/v1", model="m")
+    assert _extra_body(llm)["reasoning_effort"] == "low"
+
+
+def test_reasoning_effort_omitted_when_blank(monkeypatch) -> None:
+    from aria.config.api import Vllm as VllmConfig
+
+    monkeypatch.setattr(VllmConfig, "reasoning_effort", "")
+    llm = get_chat_llm(api_base="http://test:9090/v1", model="m")
+    assert "reasoning_effort" not in _extra_body(llm)

@@ -329,6 +329,7 @@ def _sampling_table() -> Table:
     table.add_row("Min P", str(VllmConfig.min_p))
     table.add_row("Repetition Penalty", str(VllmConfig.repetition_penalty))
     table.add_row("Seed", str(VllmConfig.seed))
+    table.add_row("Reasoning Effort", _or_dim(VllmConfig.reasoning_effort, "none"))
     return table
 
 

@@ -166,6 +166,9 @@ class Vllm:
         get_optional_env("ARIA_VLLM_REPETITION_PENALTY", "1.0")
     )
     seed: int = int(get_optional_env("ARIA_VLLM_SEED", "42"))
+    # Reasoning effort for thinking models (vLLM request-level field).
+    # One of "low"/"medium"/"high"/"none" (or "" to omit). Default "low".
+    reasoning_effort: str = get_optional_env("ARIA_VLLM_REASONING_EFFORT", "low")
 
     # Context sizes for each model type
     # Use int(v) if v is non-empty, otherwise fall back to default

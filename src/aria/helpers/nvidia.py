@@ -360,6 +360,26 @@ def get_cuda_version() -> str:
         return ""
 
 
+def pypi_torch_supports_cuda(cuda_version: str) -> bool:
+    """Whether PyPI's default torch wheels cover the given CUDA version.
+
+    CUDA 13+ is served by PyPI's default ``torch`` wheels (they bundle
+    the CUDA 13 runtime), so no ``--extra-index-url`` is needed.  Older
+    CUDA versions require the pytorch.org ``cuXXX`` index.  Returns
+    ``False`` on empty or unparseable input so callers can fall back to
+    the explicit extra index.
+
+    Used by both ``scripts/vllm.py`` and ``scripts/docling.py`` to keep
+    the CUDA-13 skip decision in one place.
+    """
+    if not cuda_version:
+        return False
+    try:
+        return int(cuda_version.split(".", 1)[0]) >= 13
+    except (ValueError, IndexError):
+        return False
+
+
 def get_nvidia_smi_version() -> str:
     """
     Get the version of nvidia-smi installed on the system.

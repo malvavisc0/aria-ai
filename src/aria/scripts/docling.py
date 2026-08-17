@@ -13,7 +13,7 @@ from pathlib import Path
 
 from aria.config.folders import Bin
 from aria.config.pdf import DoclingVenv
-from aria.helpers.nvidia import get_cuda_version
+from aria.helpers.nvidia import get_cuda_version, pypi_torch_supports_cuda
 from aria.scripts.vllm import _create_venv  # reuse the venv builder
 
 # Heavy deps installed into the isolated venv (immutable — never mutate).
@@ -24,6 +24,10 @@ _PACKAGES: tuple[str, ...] = (
 )
 
 _EXTRA_INDEX = "https://download.pytorch.org/whl/"
+
+# CUDA 13+ ships CUDA-13 torch wheels on PyPI by default (same as
+# scripts/vllm.py); only CUDA 12.x needs the cu126 extra index.
+_CUDA13_INDEX: str | None = None
 
 
 @lru_cache(maxsize=1)
@@ -58,9 +62,19 @@ def is_installed() -> bool:
     )
 
 
-def _torch_wheel_target() -> str:
-    """Pick the PyTorch wheel target for the detected device."""
-    return "cu126" if detect_device() == "cuda" else "cpu"
+def _resolve_torch_index() -> str | None:
+    """PyTorch wheel index URL for the detected CUDA version.
+
+    CUDA 13+ uses PyPI's default torch wheels (which bundle the CUDA 13
+    runtime), so no extra index is needed.  CUDA 12.6+ uses the cu126
+    index.  CPU-only systems use the cpu index to avoid pulling the
+    multi-GB CUDA stack.
+    """
+    if detect_device() != "cuda":
+        return _EXTRA_INDEX + "cpu"
+    if pypi_torch_supports_cuda(get_cuda_version()):
+        return _CUDA13_INDEX  # PyPI default = CUDA 13 torch
+    return _EXTRA_INDEX + "cu126"
 
 
 def _make_shim(venv: Path) -> Path:
@@ -100,8 +114,6 @@ def install_docling() -> None:
     _create_venv(venv)
     py = DoclingVenv.get_python_executable()
 
-    extra_index = _EXTRA_INDEX + _torch_wheel_target()
-
     # Editable install of the worker package + heavy runtime deps.
     worker_src = Path(__file__).resolve().parents[2] / "docling"
     cmd = [
@@ -115,7 +127,18 @@ def install_docling() -> None:
         str(worker_src),
     ]
     cmd += [*_PACKAGES]
-    cmd += ["--extra-index-url", extra_index, "--index-strategy", "unsafe-best-match"]
+    # CUDA 13+: PyPI's default torch wheels are CUDA 13 builds, so no
+    # extra index is needed.  CUDA 12.x / CPU: pin the index so the
+    # correct torch variant wins (unsafe-best-match so the cu126/cpu
+    # wheel actually beats PyPI's default-CUDA wheel).
+    torch_index = _resolve_torch_index()
+    if torch_index is not None:
+        cmd += [
+            "--extra-index-url",
+            torch_index,
+            "--index-strategy",
+            "unsafe-best-match",
+        ]
     subprocess.run(cmd, check=True)
 
     _make_shim(venv)
