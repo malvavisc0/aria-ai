@@ -72,6 +72,7 @@ jobs:
     name: Build whisper-server (CUDA, static)
     needs: validate-version
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # CUDA builds need 1-2 hours
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
