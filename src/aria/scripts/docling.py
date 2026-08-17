@@ -80,12 +80,14 @@ def _resolve_torch_index() -> str | None:
 def _make_shim(venv: Path) -> Path:
     """Create/refresh the ``~/.aria/bin/docling`` shim.
 
-    Prefers a symlink to ``<venv>/bin/docling``; falls back to a shell
-    wrapper on filesystems without symlink support.
+    Symlinks to ``<venv>/bin/aria-docling`` (the worker's console script,
+    named uniquely to avoid collision with the PyPI ``docling`` package's
+    own ``docling`` CLI).  Falls back to a shell wrapper on filesystems
+    without symlink support.
     """
     Bin.path.mkdir(parents=True, exist_ok=True)
     shim = Bin.path / "docling"
-    target = venv / "bin" / "docling"
+    target = venv / "bin" / "aria-docling"
     if shim.exists() or shim.is_symlink():
         shim.unlink()
     try:
@@ -115,7 +117,7 @@ def install_docling() -> None:
     py = DoclingVenv.get_python_executable()
 
     # Editable install of the worker package + heavy runtime deps.
-    worker_src = Path(__file__).resolve().parents[2] / "docling"
+    worker_src = Path(__file__).resolve().parents[2] / "worker"
     cmd = [
         "uv",
         "--no-config",
