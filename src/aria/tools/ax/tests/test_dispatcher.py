@@ -382,6 +382,45 @@ class TestDispatch:
         assert data["data"]["error"]["code"] == "worker_memory_forbidden"
 
     @pytest.mark.asyncio
+    async def test_mcp_call_unknown_server_lists_available(self):
+        """no_mcp_session must carry the connected names so the agent can adapt."""
+        with (
+            patch("aria.tools.mcp_bridge.resolve_session", return_value=None),
+            patch(
+                "aria.tools.mcp_bridge.connected_server_names",
+                return_value=["Whatsapp"],
+            ),
+        ):
+            result = await ax(
+                reason="test mcp",
+                family="mcp",
+                command="call",
+                args={"server": "whatsapp", "tool": "send"},
+            )
+        data = json.loads(result)
+        assert data["data"]["error"]["code"] == "no_mcp_session"
+        assert data["data"]["error"]["available"] == ["Whatsapp"]
+
+    @pytest.mark.asyncio
+    async def test_mcp_call_forwards_arguments_to_call_tool(self):
+        client = object()
+        with (
+            patch("aria.tools.mcp_bridge.resolve_session", return_value=client),
+            patch("aria.tools.mcp_bridge.call_tool") as mock_call,
+        ):
+            mock_call.return_value = '{"tool":"ax","data":{"content":"ok"}}'
+            result = await ax(
+                reason="test mcp",
+                family="mcp",
+                command="call",
+                args={"server": "whatsapp", "tool": "send", "arguments": {}},
+            )
+        assert result == '{"tool":"ax","data":{"content":"ok"}}'
+        _, client, tool, arguments = mock_call.call_args[0]
+        assert tool == "send"
+        assert arguments == {}
+
+    @pytest.mark.asyncio
     async def test_strips_unknown_kwargs(self):
         """Unknown kwargs are stripped before forwarding to the target function."""
 

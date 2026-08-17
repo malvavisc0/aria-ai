@@ -250,6 +250,13 @@ class TestResolveSession:
         _fake_user_session.get.return_value = {"github": session}
         assert resolve_session("github") is session
 
+    def test_case_insensitive_match(self, _fake_user_session):
+        """The LLM is not trusted to reproduce the user's exact casing."""
+        session = object()
+        _fake_user_session.get.return_value = {"Whatsapp": session}
+        assert resolve_session("whatsapp") is session
+        assert resolve_session("WHATSAPP") is session
+
     def test_no_chainlit_context_returns_none(self, monkeypatch):
         """Outside a chainlit session (workers/CLI/tests) the lazy ``context``
         proxy raises ``ChainlitContextException`` — degrade to None, not an

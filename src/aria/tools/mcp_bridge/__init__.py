@@ -21,6 +21,9 @@ _PERSIST_THRESHOLD = 2000  # chars
 def resolve_session(server: str) -> ClientSession | None:
     """Return the connected ClientSession for *server* in this chainlit session.
 
+    Server names match case-insensitively (the exact name the user typed in
+    the UI is not something the LLM can be trusted to reproduce).
+
     Returns None outside a chainlit session (workers, CLI) or when the
     named server is not connected. Uses cl.user_session (per-session, no
     module-level global) -- see AGENTS.md "No mutable module-level globals".
@@ -32,9 +35,15 @@ def resolve_session(server: str) -> ClientSession | None:
         sessions: dict[str, ClientSession] | None = cl.user_session.get("_mcp_sessions")
     except ChainlitContextException:
         return None
-    if sessions is None:
+    if not sessions:
         return None
-    return sessions.get(server)
+    if server in sessions:
+        return sessions[server]
+    lowered = server.lower()
+    for name, client in sessions.items():
+        if name.lower() == lowered:
+            return client
+    return None
 
 
 def _content_to_text(result: CallToolResult) -> str:

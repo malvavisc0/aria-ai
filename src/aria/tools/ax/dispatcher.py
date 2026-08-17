@@ -226,25 +226,33 @@ def _voice_transcribe():
     return transcribe
 
 
+def _no_mcp_session_error(reason: Reason, server: str) -> str:
+    from aria.tools.mcp_bridge import connected_server_names
+    from aria.tools.utils import tool_response
+
+    return tool_response(
+        tool="ax",
+        reason=reason,
+        data={
+            "error": {
+                "code": "no_mcp_session",
+                "message": f"No connected MCP server '{server}'",
+                "available": connected_server_names(),
+                "hint": "Use one of the listed server names (case-insensitive) or run `ax mcp list`.",
+            }
+        },
+    )
+
+
 def _mcp_list():
     from aria.tools.mcp_bridge import list_servers, list_tools, resolve_session
-    from aria.tools.utils import tool_response
 
     async def _list(reason: Reason, server: str = "") -> str:
         if not server:
             return await list_servers()
         client = resolve_session(server)
         if client is None:
-            return tool_response(
-                tool="ax",
-                reason=reason,
-                data={
-                    "error": {
-                        "code": "no_mcp_session",
-                        "message": f"No connected MCP server '{server}'",
-                    }
-                },
-            )
+            return _no_mcp_session_error(reason, server)
         return await list_tools(server, client)
 
     return _list
@@ -252,7 +260,6 @@ def _mcp_list():
 
 def _mcp_call():
     from aria.tools.mcp_bridge import call_tool, resolve_session
-    from aria.tools.utils import tool_response
 
     async def _call(
         reason: Reason,
@@ -262,16 +269,7 @@ def _mcp_call():
     ) -> str:
         client = resolve_session(server)
         if client is None:
-            return tool_response(
-                tool="ax",
-                reason=reason,
-                data={
-                    "error": {
-                        "code": "no_mcp_session",
-                        "message": f"No connected MCP server '{server}'",
-                    }
-                },
-            )
+            return _no_mcp_session_error(reason, server)
         return await call_tool(server, client, tool, arguments or {})
 
     return _call
