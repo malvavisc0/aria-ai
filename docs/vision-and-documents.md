@@ -228,7 +228,7 @@ Model snapshot: `~/.aria/models/<model-name>/` when
 | `src/aria/web/message_pipeline.py` | `_describe_image()`, `_handle_message()` prompt assembly |
 | `src/aria/config/pdf.py` | `Pdf`, `DoclingVenv` configuration |
 | `src/aria/scripts/docling.py` | Worker install/detect/uninstall |
-| `src/docling/` | Isolated Granite-Docling worker package |
+| `src/worker/` | Isolated Granite-Docling worker package |
 | `src/aria/tools/documents/` | `ax documents` tool family (`convert`, `status`) |
 | `src/aria/config/api.py` | `Vllm.vision_enabled` configuration |
 | `src/aria/.chainlit/config.toml` | File upload UI settings (`spontaneous_file_upload`) |

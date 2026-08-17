@@ -142,7 +142,7 @@ override-dependencies = ["onnxruntime; sys_platform != 'darwin'"]
 # The Granite-Docling PDF backend pulls in the same heavy stack (torch,
 # docling, docling-ibm-models) and is likewise isolated — installed into
 # ~/.aria/venvs/docling and invoked via the `docling` shim. It is NOT
-# declared here; the worker declares its own deps in src/docling/.
+# declared here; the worker declares its own deps in src/worker/.
 #
 # `unsafe-best-match` is required (not the default `first-index`): the PyTorch
 # CPU index mirrors some pure-Python packages at STALE versions (e.g. certifi

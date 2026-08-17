@@ -48,7 +48,7 @@ def _find_worker_dist_info() -> Path | None:
     sp = DoclingVenv.get_site_packages()
     if not sp or not sp.is_dir():
         return None
-    return next(iter(sp.glob("docling-*.dist-info")), None)
+    return next(iter(sp.glob("aria_docling_worker-*.dist-info")), None)
 
 
 def is_installed() -> bool:
