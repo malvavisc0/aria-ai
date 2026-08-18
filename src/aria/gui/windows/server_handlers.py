@@ -71,9 +71,16 @@ class _StartupWorker(QObject):
     def _run(self) -> None:
         from aria.server.lifecycle import (
             ensure_endpoint_reachable,
+            ensure_lightpanda_installed,
+            ensure_models_downloaded,
             ensure_vllm_running,
             wait_for_web_health,
         )
+
+        # Mirrors the CLI: self-heal installable deps before the endpoint
+        # check so GUI and CLI start paths stay identical.
+        ensure_lightpanda_installed(progress=self.progress.emit)
+        ensure_models_downloaded(progress=self.progress.emit)
 
         result = ensure_endpoint_reachable(progress=self.progress.emit)
         if not result.ok:

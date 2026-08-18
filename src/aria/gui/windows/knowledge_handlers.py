@@ -7,6 +7,7 @@ add/remove, and reindex execution in a background worker.
 
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 from typing import Any
@@ -87,6 +88,51 @@ def _file_marker(
     if state == _STATE_SKIPPED:
         return "⚠"
     return "●" if mtime == st_mtime and size == st_size else "○"
+
+
+def _kb_files(root: Path) -> list[Path]:
+    """List knowledge-hub files (sorted, skipping dirs and dotfiles)."""
+    if not root.is_dir():
+        return []
+    return sorted(
+        fp for fp in root.rglob("*") if not fp.is_dir() and not fp.name.startswith(".")
+    )
+
+
+def _kb_placeholder_item() -> QListWidgetItem:
+    """Empty-state row shown when the knowledge hub has no files."""
+    text = (
+        "Knowledge hub is disabled."
+        if not KnowledgeHub.enabled
+        else "No files yet. Add files to build the knowledge base."
+    )
+    item = QListWidgetItem(text)
+    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
+    item.setForeground(QColor("#9CA3AF"))
+    return item
+
+
+def _kb_file_item(
+    rel: str,
+    st: os.stat_result,
+    rows: dict[str, tuple[str, float, int, str | None]],
+) -> QListWidgetItem:
+    """Build one file-list row with its state marker and styling."""
+    marker = _file_marker(rel, st.st_mtime, st.st_size, rows)
+    row = rows.get(rel)
+    reason = row[3] if row is not None and row[0] == _STATE_SKIPPED else None
+    label = f"{marker} {rel}" + (f"  ({reason})" if reason else "")
+    item = QListWidgetItem(label)
+    item.setData(Qt.ItemDataRole.UserRole, rel)
+    if reason:
+        item.setToolTip(f"Skipped: {reason}")
+        item.setForeground(QColor("#B45309"))  # amber
+    elif marker == "○":
+        item.setToolTip("Not indexed yet — run Reindex")
+        item.setForeground(QColor("#7A8794"))  # muted
+    else:
+        item.setToolTip("Indexed")
+    return item
 
 
 def _humanize_ts(iso: str | None) -> str:
@@ -273,25 +319,9 @@ class KnowledgeHandlersMixin:
         scroll_pos = scrollbar.value()
 
         self.ui.listWidget_KnowledgeFiles.clear()
-        files = (
-            sorted(
-                fp
-                for fp in root.rglob("*")
-                if not fp.is_dir() and not fp.name.startswith(".")
-            )
-            if root.is_dir()
-            else []
-        )
+        files = _kb_files(root)
         if not files:
-            placeholder = (
-                "Knowledge hub is disabled."
-                if not KnowledgeHub.enabled
-                else "No files yet. Add files to build the knowledge base."
-            )
-            item = QListWidgetItem(placeholder)
-            item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsSelectable)
-            item.setForeground(QColor("#9CA3AF"))
-            self.ui.listWidget_KnowledgeFiles.addItem(item)
+            self.ui.listWidget_KnowledgeFiles.addItem(_kb_placeholder_item())
             return
 
         for fp in files:
@@ -300,20 +330,7 @@ class KnowledgeHandlersMixin:
                 st = fp.stat()
             except OSError:
                 continue
-            marker = _file_marker(rel, st.st_mtime, st.st_size, status.rows)
-            row = status.rows.get(rel)
-            reason = row[3] if row is not None and row[0] == _STATE_SKIPPED else None
-            label = f"{marker} {rel}" + (f"  ({reason})" if reason else "")
-            item = QListWidgetItem(label)
-            item.setData(Qt.ItemDataRole.UserRole, rel)
-            if reason:
-                item.setToolTip(f"Skipped: {reason}")
-                item.setForeground(QColor("#B45309"))  # amber
-            elif marker == "○":
-                item.setToolTip("Not indexed yet — run Reindex")
-                item.setForeground(QColor("#7A8794"))  # muted
-            else:
-                item.setToolTip("Indexed")
+            item = _kb_file_item(rel, st, status.rows)
             self.ui.listWidget_KnowledgeFiles.addItem(item)
             if rel in selected:
                 item.setSelected(True)
@@ -344,6 +361,20 @@ class KnowledgeHandlersMixin:
 
     # --- file operations ----------------------------------------------------
 
+    def _confirm_kb_overwrite(self, paths: list[str], root: Path) -> bool:
+        """One batched overwrite confirm instead of N sequential dialogs."""
+        existing = [p for p in paths if (root / Path(p).name).exists()]
+        if not existing:
+            return False
+        reply = QMessageBox.question(
+            self,
+            "Overwrite?",
+            f"{len(existing)} of {len(paths)} file(s) already exist. Overwrite them?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return reply == QMessageBox.StandardButton.Yes
+
     def _on_kb_add_files(self) -> None:
         """Copy picked files into the knowledge dir, then offer to index."""
         paths, _ = QFileDialog.getOpenFileNames(self, "Add files to knowledge hub")
@@ -351,21 +382,7 @@ class KnowledgeHandlersMixin:
             return
         root = Path(KnowledgeHub.dir)
         root.mkdir(parents=True, exist_ok=True)
-
-        # One batched overwrite confirm instead of N sequential dialogs.
-        existing = [p for p in paths if (root / Path(p).name).exists()]
-        if existing:
-            reply = QMessageBox.question(
-                self,
-                "Overwrite?",
-                f"{len(existing)} of {len(paths)} file(s) already exist. "
-                "Overwrite them?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No,
-            )
-            overwrite = reply == QMessageBox.StandardButton.Yes
-        else:
-            overwrite = False
+        overwrite = self._confirm_kb_overwrite(paths, root)
 
         added = 0
         for src in paths:

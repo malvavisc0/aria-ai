@@ -40,8 +40,13 @@ class TestVoice:
             exe = tmp_path / "bin" / "whisper-cpp" / "whisper-server"
             exe.parent.mkdir(parents=True)
             exe.touch()
-            assert Voice.is_available() is True
-            assert Voice.get_whisper_binary_path() == exe
+            original = Voice.enabled
+            try:
+                Voice.enabled = True
+                assert Voice.is_available() is True
+                assert Voice.get_whisper_binary_path() == exe
+            finally:
+                Voice.enabled = original
 
     def test_available_with_nested_release_dir(self, tmp_path: Path) -> None:
         """The extracted bundle nests whisper-server under a release dir."""
@@ -57,7 +62,12 @@ class TestVoice:
             )
             exe.parent.mkdir(parents=True)
             exe.touch()
-            assert Voice.is_available() is True
+            original = Voice.enabled
+            try:
+                Voice.enabled = True
+                assert Voice.is_available() is True
+            finally:
+                Voice.enabled = original
             assert Voice.get_whisper_binary_path() == exe
 
     def test_flat_path_preferred_over_nested(self, tmp_path: Path) -> None:

@@ -240,7 +240,7 @@ def _copy_chainlit_translations(dest: Path) -> None:
             return
         dest.mkdir(parents=True, exist_ok=True)
         for json_file in src.iterdir():
-            if json_file.suffix == ".json":
+            if json_file.suffix == ".json" and not (dest / json_file.name).exists():
                 copy2(json_file, dest / json_file.name)
 
 
@@ -270,6 +270,9 @@ def setup_chainlit_config() -> None:
     ]
 
     if all(dest.exists() for dest, _ in copies):
+        # Translations dir exists — still mirror any locales added by an
+        # upgrade (per-file skip keeps user edits).
+        _copy_chainlit_translations(chainlit_dest / "translations")
         return
 
     for dest, copy_fn in copies:

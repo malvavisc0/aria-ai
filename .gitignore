@@ -46,3 +46,5 @@ wheels/
 .coverage
 htmlcov/
 .pytest_cache/
+# Kilo agent config
+.kilo/

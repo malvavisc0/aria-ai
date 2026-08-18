@@ -37,7 +37,7 @@ def sync_chainlit_audio_feature(host: str, aria_home: Path) -> None:
     The mic button is gated by ``[features.audio] enabled`` in the
     config.toml that the Chainlit subprocess reads at startup. Audio
     is enabled only when both conditions hold: voice is enabled via
-    ``ARIA_VOICE_ENABLED`` (default true) and the bind is a loopback
+    ``ARIA_VOICE_ENABLED`` (default false) and the bind is a loopback
     address (``getUserMedia`` requires a secure context). For any non-
     loopback bind, or when voice is disabled, the feature is turned off
     so the broken mic button is not shown. Run before launching the

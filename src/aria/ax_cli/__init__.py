@@ -9,10 +9,19 @@ lightpanda) are only available through the full ``aria`` CLI.
 
 
 def main():
-    from aria.initializer import is_initialized, run_initialization
+    from aria.initializer import (
+        is_initialized,
+        run_initialization,
+        setup_chainlit_config,
+        setup_public_assets,
+    )
 
     if not is_initialized():
         run_initialization()
+
+    # Idempotent — mirrors the aria CLI entry point.
+    setup_public_assets()
+    setup_chainlit_config()
 
     from aria.ax_cli.app import app
 

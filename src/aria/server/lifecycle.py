@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -131,6 +132,97 @@ def _ensure_local_endpoint(progress: ProgressFn | None = None) -> StepResult:
     if progress:
         progress("OpenAI endpoint healthy")
     return StepResult(ok=True)
+
+
+def ensure_lightpanda_installed(progress: ProgressFn | None = None) -> None:
+    """Download Lightpanda if it is missing (no-op when installed)."""
+    from aria.config.api import Lightpanda
+
+    if Lightpanda.is_available():
+        return
+
+    from aria.scripts.lightpanda import download_lightpanda
+
+    if progress:
+        progress("Lightpanda not installed — downloading...")
+    download_lightpanda(bin_dir=Lightpanda.get_bin_path(), version=Lightpanda.version)
+
+
+def download_model_snapshot(
+    alias: str,
+    raw_value: str,
+    path: Path,
+    max_retries: int = 3,
+    progress: ProgressFn | None = None,
+) -> None:
+    """Download a HuggingFace model snapshot into *path* with retries.
+
+    Raises:
+        RuntimeError: When all attempts fail.
+    """
+    from huggingface_hub import snapshot_download
+
+    from aria.config.huggingface import HuggingFace
+
+    last_error: Exception | None = None
+    for attempt in range(1, max_retries + 1):
+        if progress:
+            progress(
+                f"Downloading {alias} model ({raw_value})"
+                if attempt == 1
+                else f"Retrying {alias} model download (attempt {attempt}/{max_retries})"
+            )
+        try:
+            snapshot_download(
+                repo_id=raw_value,
+                local_dir=str(path),
+                token=HuggingFace.token,
+                ignore_patterns=["onnx/*", "openvino/*", "openvino_model.*"],
+            )
+            if progress:
+                progress(f"{alias} model ready at {path}")
+            return
+        except Exception as e:
+            last_error = e
+
+    raise RuntimeError(
+        f"Failed to download {alias} model after {max_retries} attempts: {last_error}"
+    )
+
+
+def ensure_models_downloaded(progress: ProgressFn | None = None) -> None:
+    """Auto-download configured chat/embeddings models if they are missing.
+
+    Only HuggingFace repo IDs are downloaded (absolute local paths are
+    skipped). In remote mode the chat model is excluded — the remote
+    endpoint serves it.
+    """
+    from os import getenv
+
+    from aria.config.api import Vllm as VllmConfig
+    from aria.config.models import Chat, Embeddings
+
+    models_to_check = [
+        ("chat", "CHAT_MODEL_PATH", Chat),
+        ("embeddings", "EMBED_MODEL_PATH", Embeddings),
+    ]
+    if VllmConfig.remote:
+        models_to_check = [m for m in models_to_check if m[0] != "chat"]
+
+    for alias, env_var, config_cls in models_to_check:
+        model_path = config_cls.model_path
+        if not model_path:
+            continue
+
+        path = Path(model_path)
+        if path.exists() and path.is_dir():
+            continue
+
+        raw_value = getenv(env_var, "")
+        if not raw_value or Path(raw_value).is_absolute():
+            continue
+
+        download_model_snapshot(alias, raw_value, path, progress=progress)
 
 
 def ensure_endpoint_reachable(progress: ProgressFn | None = None) -> StepResult:

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from os import getenv
-
 from PySide6.QtCore import QObject, Signal
 
 
@@ -38,25 +36,34 @@ class _DownloadWorker(QObject):
                     version=Lightpanda.version,
                 )
                 self.finished.emit(True, "Lightpanda installed.")
-            elif self._target == "embeddings":
-                from huggingface_hub import snapshot_download
+            elif self._target == "vllm":
+                from aria.scripts.vllm import install_vllm
 
-                from aria.config.huggingface import HuggingFace
-                from aria.config.models import Embeddings
+                install_vllm()
+                self.finished.emit(True, "vLLM installed.")
+            elif self._target in ("chat", "embeddings"):
+                from os import getenv
+                from pathlib import Path
 
-                repo_id = getenv("EMBED_MODEL_PATH", "")
-                if not repo_id:
+                from aria.config.models import Chat, Embeddings
+                from aria.server.lifecycle import download_model_snapshot
+
+                env_var = (
+                    "CHAT_MODEL_PATH" if self._target == "chat" else "EMBED_MODEL_PATH"
+                )
+                config = Chat if self._target == "chat" else Embeddings
+                raw = getenv(env_var, "")
+                if not raw or Path(raw).is_absolute():
                     self.finished.emit(
                         False,
-                        "EMBED_MODEL_PATH is not set — configure it in .env first",
+                        f"{env_var} must be a HuggingFace repo ID "
+                        "(owner/model) to download from the wizard.",
                     )
                     return
-                snapshot_download(
-                    repo_id=repo_id,
-                    local_dir=Embeddings.model_path,
-                    token=HuggingFace.token,
+                download_model_snapshot(self._target, raw, Path(config.model_path))
+                self.finished.emit(
+                    True, f"{self._target.capitalize()} model downloaded."
                 )
-                self.finished.emit(True, "Embeddings model downloaded.")
             else:
                 self.finished.emit(False, f"Unknown target: {self._target}")
         except Exception as exc:

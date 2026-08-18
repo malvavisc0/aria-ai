@@ -19,30 +19,31 @@ def should_show_wizard() -> bool:
     Returns True when any setup step is incomplete:
 
     1. No users in the database
-    2. No NVIDIA GPU → remote mode required:
+    2. Remote mode (``Vllm.remote``):
        Chat.api_url, Chat.model, and Vllm.api_key must all be set
-    3. NVIDIA GPU present → local mode:
+    3. Local mode:
        Chat model must be downloaded
     4. Embeddings model must be downloaded (always)
     5. Lightpanda must be installed (always)
-    """
-    from aria.helpers.nvidia import check_nvidia_smi_available
 
+    The gate follows the configured mode, not the physical GPU: a
+    remote-configured user on a GPU box must not be looped back into
+    the wizard for a local chat model that remote mode never uses.
+    """
     # 1. No users in DB → always show
     if not _has_admin_user():
         return True
 
-    has_nvidia = check_nvidia_smi_available()
+    from aria.config.api import Vllm
 
-    if not has_nvidia:
-        # 2. No NVIDIA → remote mode required
-        from aria.config.api import Vllm
+    if Vllm.remote:
+        # 2. Remote mode → remote endpoint must be configured
         from aria.config.models import Chat
 
         if not Chat.api_url or not Chat.model or not Vllm.api_key:
             return True
     else:
-        # 3. NVIDIA present → chat model must be downloaded
+        # 3. Local mode → chat model must be downloaded
         from aria.config.models import Chat
 
         if not _is_model_downloaded(Chat.model_path):

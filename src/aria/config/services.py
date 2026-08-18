@@ -263,12 +263,12 @@ class Voice:
     ``/inference`` endpoint; kokoro-tts is a one-shot CLI invoked per
     synthesis. All fields are env-driven with sensible defaults.
 
-    Set ``ARIA_VOICE_ENABLED=false`` to disable voice entirely: no STT/TTS
-    servers are started, the microphone stream is refused, and preflight
-    skips voice checks. Useful when optimising for text-only throughput.
+    Voice is opt-in: set ``ARIA_VOICE_ENABLED=true`` to enable it
+    (default is off). When disabled, no STT/TTS servers are started,
+    the microphone stream is refused, and preflight skips voice checks.
     """
 
-    enabled: bool = get_optional_env("ARIA_VOICE_ENABLED", "true").lower() == "true"
+    enabled: bool = get_optional_env("ARIA_VOICE_ENABLED", "false").lower() == "true"
     whisper_model: str = get_optional_env(
         "ARIA_VOICE_WHISPER_MODEL", "large-v3-turbo-q5_0"
     )

@@ -281,19 +281,20 @@ class TestRunPreflightChecks:
 
 
 class TestCheckDocling:
-    """docling is a required worker — preflight must fail loudly if missing."""
+    """docling is optional — a missing install is a warning, not a failure."""
 
     @patch("aria.scripts.docling.is_installed", return_value=False)
-    def test_missing_fails_with_hint(self, _mock_installed):
+    def test_missing_is_warning_not_failure(self, _mock_installed):
         from aria.preflight import _check_docling
 
         checks: list = []
         _check_docling(checks)
         assert len(checks) == 1
-        assert checks[0].passed is False
+        assert checks[0].passed is True
+        assert checks[0].warning is True
         assert checks[0].category == "binaries"
-        assert "not installed" in checks[0].error
-        assert "aria docling install" in checks[0].hint
+        assert "not installed" in checks[0].details
+        assert "aria docling install" in checks[0].details
 
     @patch("aria.scripts.docling.is_installed", return_value=True)
     @patch("aria.scripts.docling.detect_device", return_value="cpu")

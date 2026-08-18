@@ -26,7 +26,6 @@ Example:
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable
 from urllib.error import URLError
 from urllib.request import urlopen
@@ -114,6 +113,24 @@ def _get_startup_failure_message(exc: Exception | None = None) -> str:
     return "Aria Web UI failed to start. Check the log files for details."
 
 
+def _format_check_line(check) -> str:
+    """Render one preflight check as a tagged Rich line."""
+    if not check.passed:
+        text = f"{check.name}  [red]{check.error}[/red]"
+        if check.hint:
+            text += f"  [dim]→ {check.hint}[/dim]"
+        return f"  [red]✗[/red]  {text}"
+    if check.warning:
+        text = check.name
+        if check.details:
+            text += f"  [yellow]{check.details}[/yellow]"
+        return f"  [yellow]⚠[/yellow]  {text}"
+    text = check.name
+    if check.details:
+        text += f"  [dim]{check.details}[/dim]"
+    return f"  [green]✓[/green]  {text}"
+
+
 def _print_preflight_result(result) -> bool:
     """Print preflight results as a clean bordered panel and return True if all pass."""
     grouped = result.group_by_category()
@@ -147,17 +164,7 @@ def _print_preflight_result(result) -> bool:
         lines.append(f"[bold]{label}[/bold]  {badge}")
 
         for check in checks:
-            if check.passed:
-                tag = "[green]✓[/green]"
-                text = check.name
-                if check.details:
-                    text += f"  [dim]{check.details}[/dim]"
-            else:
-                tag = "[red]✗[/red]"
-                text = f"{check.name}  [red]{check.error}[/red]"
-                if check.hint:
-                    text += f"  [dim]→ {check.hint}[/dim]"
-            lines.append(f"  {tag}  {text}")
+            lines.append(_format_check_line(check))
         lines.append("")
 
     if result.passed:
@@ -242,106 +249,30 @@ def _is_vllm_healthy() -> bool:
 def _ensure_lightpanda_installed() -> None:
     """Download Lightpanda automatically if it is missing."""
     from aria.config.api import Lightpanda
+    from aria.server.lifecycle import ensure_lightpanda_installed
 
     if Lightpanda.is_available():
         return
 
-    from aria.scripts.lightpanda import download_lightpanda
-
     console.print("[dim]Lightpanda not installed — downloading...[/dim]")
     try:
-        binary = download_lightpanda(
-            bin_dir=Lightpanda.get_bin_path(), version=Lightpanda.version
-        )
+        ensure_lightpanda_installed()
     except Exception as e:
         error_console.print(f"[red]Failed to install Lightpanda: {e}[/red]")
         raise typer.Exit(1)
 
-    console.print(f"[green]✓[/green] Lightpanda installed at {binary}")
-
-
-def _download_model(alias: str, raw_value: str, path: Path, max_retries: int) -> None:
-    from huggingface_hub import snapshot_download
-    from rich.status import Status
-
-    from aria.config.huggingface import HuggingFace
-
-    last_error: Exception | None = None
-    for attempt in range(1, max_retries + 1):
-        label = (
-            f"Downloading {alias} model ({raw_value})"
-            if attempt == 1
-            else f"Retrying {alias} model download (attempt {attempt}/{max_retries})"
-        )
-        try:
-            with Status(f"[dim]{label}…[/dim]", console=console):
-                snapshot_download(
-                    repo_id=raw_value,
-                    local_dir=str(path),
-                    token=HuggingFace.token,
-                    ignore_patterns=["onnx/*", "openvino/*", "openvino_model.*"],
-                )
-            console.print(f"[green]✓[/green] {alias} model ready at {path}")
-            return
-        except Exception as e:
-            last_error = e
-            if attempt < max_retries:
-                console.print(
-                    f"[yellow]⚠[/yellow] {alias} model download failed "
-                    f"(attempt {attempt}/{max_retries}): {e}"
-                )
-
-    error_console.print(
-        f"[red]Failed to download {alias} model after "
-        f"{max_retries} attempts: {last_error}[/red]"
-    )
-    raise typer.Exit(1)
-
-
-def _should_auto_download(raw_value: str) -> bool:
-    from pathlib import Path
-
-    if not raw_value:
-        return False
-    return not Path(raw_value).is_absolute()
+    console.print("[green]✓[/green] Lightpanda installed")
 
 
 def _ensure_models_downloaded() -> None:
-    """Auto-download models from HuggingFace if they are missing.
+    """Auto-download models from HuggingFace if they are missing."""
+    from aria.server.lifecycle import ensure_models_downloaded
 
-    Checks each configured model (chat, embeddings). If the model
-    directory does not exist locally and the env var contains a
-    HuggingFace repo ID (not an absolute path), downloads the
-    snapshot automatically with a progress indicator and retry logic.
-    """
-    from os import getenv
-    from pathlib import Path
-
-    from aria.config.api import Vllm as VllmConfig
-    from aria.config.models import Chat, Embeddings
-
-    models_to_check = [
-        ("chat", "CHAT_MODEL_PATH", Chat),
-        ("embeddings", "EMBED_MODEL_PATH", Embeddings),
-    ]
-
-    if VllmConfig.remote:
-        models_to_check = [m for m in models_to_check if m[0] != "chat"]
-
-    for alias, env_var, config_cls in models_to_check:
-        model_path = config_cls.model_path
-        if not model_path:
-            continue
-
-        path = Path(model_path)
-        if path.exists() and path.is_dir():
-            continue
-
-        raw_value = getenv(env_var, "")
-        if not _should_auto_download(raw_value):
-            continue
-
-        _download_model(alias, raw_value, path, max_retries=3)
+    try:
+        ensure_models_downloaded(progress=lambda m: console.print(f"[dim]{m}[/dim]"))
+    except Exception as e:
+        error_console.print(f"[red]{e}[/red]")
+        raise typer.Exit(1)
 
 
 def _ensure_endpoint_reachable() -> None:

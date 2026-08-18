@@ -12,6 +12,14 @@ from aria.web import hooks as hooks_mod
 pytestmark = pytest.mark.voice
 
 
+@pytest.fixture(autouse=True)
+def _voice_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """These tests exercise the audio flow, not the voice default."""
+    from aria.config.api import Voice
+
+    monkeypatch.setattr(Voice, "enabled", True)
+
+
 class _UserSession:
     """In-memory fake for cl.user_session.get/set."""
 

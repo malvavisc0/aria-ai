@@ -66,6 +66,12 @@ class Debug:
     startup_error_path = path / "startup-error.txt"
 
 
+# Shared loguru sink format for debug.log — the GUI and web processes
+# write to the same file, so their formats must stay identical for the
+# Logs tab parser.
+LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} - {level} - {name}.{function} : {message}"
+
+
 class Storage:
     """Local file storage for Chainlit elements."""
 

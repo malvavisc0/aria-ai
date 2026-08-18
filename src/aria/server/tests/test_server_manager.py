@@ -86,11 +86,18 @@ def test_sync_audio_disables_for_lan_host(tmp_path: Path) -> None:
 
 
 def test_sync_audio_enables_for_localhost(tmp_path: Path) -> None:
+    from aria.config.api import Voice
+
     config = tmp_path / ".chainlit" / "config.toml"
     config.parent.mkdir(parents=True)
     config.write_text(_AUDIO_CONFIG.replace("enabled = true", "enabled = false"))
 
-    sync_chainlit_audio_feature("localhost", tmp_path)
+    original = Voice.enabled
+    try:
+        Voice.enabled = True
+        sync_chainlit_audio_feature("localhost", tmp_path)
+    finally:
+        Voice.enabled = original
 
     assert _audio_enabled(config.read_text()) is True
 

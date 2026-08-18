@@ -6,18 +6,19 @@ from pathlib import Path
 
 
 def _has_admin_user() -> bool:
-    """Return True if at least one user exists in the database."""
-    try:
-        from sqlalchemy import select
+    """Return True if at least one user exists in the database.
 
-        from aria.cli import get_db_session
-        from aria.db.models import User
+    Errors propagate to the caller: silently returning False for a
+    corrupt database would loop the first-run wizard indefinitely.
+    """
+    from sqlalchemy import select
 
-        with get_db_session() as session:
-            users = session.execute(select(User)).scalars().all()
-            return len(users) > 0
-    except Exception:
-        return False
+    from aria.cli import get_db_session
+    from aria.db.models import User
+
+    with get_db_session() as session:
+        users = session.execute(select(User)).scalars().all()
+        return len(users) > 0
 
 
 def _is_model_downloaded(model_path: str) -> bool:

@@ -85,8 +85,14 @@ def _print_category(category: str, checks: list) -> tuple[int, int]:
     # Individual checks
     for check in checks:
         if check.passed:
-            details = f" [dim]({check.details})[/dim]" if check.details else ""
-            console.print(f"   [green]✓[/green] {check.name}{details}")
+            if check.warning:
+                details = (
+                    f" [yellow]({check.details})[/yellow]" if check.details else ""
+                )
+                console.print(f"   [yellow]⚠[/yellow] {check.name}{details}")
+            else:
+                details = f" [dim]({check.details})[/dim]" if check.details else ""
+                console.print(f"   [green]✓[/green] {check.name}{details}")
         else:
             console.print(f"   [red]✗[/red] {check.name} - [red]{check.error}[/red]")
             if check.hint:

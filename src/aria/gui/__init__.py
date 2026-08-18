@@ -41,13 +41,43 @@ def _install_exception_hook() -> None:
     sys.excepthook = _hook
 
 
+def _init_logging() -> None:
+    """Add the shared log file sink so GUI-side events reach the Logs tab.
+
+    The web server process configures the same file independently; without
+    this, GUI events (first launch, preflight, start/stop failures) only
+    reach stderr and the Logs tab is empty until the server process runs.
+    """
+    from loguru import logger
+
+    from aria.config.folders import LOG_FORMAT, Debug
+
+    logger.add(
+        str(Debug.logs_path),
+        rotation="10 MB",
+        level="INFO",
+        format=LOG_FORMAT,
+    )
+
+
 def main():
     """Launch the Aria GUI application."""
-    from aria.initializer import is_initialized, run_initialization
+    from aria.initializer import (
+        is_initialized,
+        run_initialization,
+        setup_chainlit_config,
+        setup_public_assets,
+    )
 
     if not is_initialized():
         run_initialization()
 
+    # Idempotent — mirrors the aria CLI entry point so a home created by
+    # other means (pre-seeded .env, partial init) still gets its assets.
+    setup_public_assets()
+    setup_chainlit_config()
+
+    _init_logging()
     _install_exception_hook()
 
     from aria.gui.windows import MainWindow
@@ -64,8 +94,24 @@ def main():
 
     window = MainWindow()
 
-    # Show first-run wizard if no users exist yet
-    if should_show_wizard():
+    # Show first-run wizard if setup is incomplete. A database error
+    # here must not kill the GUI before it opens — fail into the wizard
+    # path (the old behavior) and log the cause.
+    try:
+        show_wizard = should_show_wizard()
+    except Exception as e:
+        from loguru import logger
+
+        logger.exception("Setup check failed — falling back to first-run wizard")
+        QMessageBox.warning(
+            window,
+            "Setup Check Failed",
+            f"Could not verify the installation state:\n\n{e}\n\n"
+            "The setup wizard will run instead.",
+        )
+        show_wizard = True
+
+    if show_wizard:
         if run_wizard(window):
             # Reload env so config picks up wizard-written values
             from aria.config import reload_env

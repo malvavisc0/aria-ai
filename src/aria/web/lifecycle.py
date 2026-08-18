@@ -26,6 +26,7 @@ from aria.config.api import KnowledgeHub
 from aria.config.api import Vllm as VllmConfig
 from aria.config.database import ChromaDB as ChromaDBConfig
 from aria.config.database import SQLite as SQLiteConfig
+from aria.config.folders import LOG_FORMAT
 from aria.config.folders import Data as DataConfig
 from aria.config.folders import Debug as DebugConfig
 from aria.config.models import Chat as ChatConfig
@@ -33,8 +34,6 @@ from aria.config.models import Embeddings as EmbeddingsConfig
 from aria.llm import get_agent_workflow, get_chat_llm, get_embeddings_model
 from aria.server.vllm import VllmServerManager
 from aria.web.state import _state
-
-LOG_FORMAT = "{time:YYYY-MM-DD HH:mm:ss} - {level} - {name}.{function} : {message}"
 
 _HEALTH_ENDPOINTS = ("/health",)
 

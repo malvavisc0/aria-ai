@@ -116,7 +116,7 @@ class _ConnectionPage(QWizardPage):
     def _on_mode_changed(self):
         """Show/hide remote settings based on mode selection."""
         is_remote = self._remote_radio.isChecked()
-        for i in range(1, self._remote_container.count()):
+        for i in range(self._remote_container.count()):
             item = self._remote_container.itemAt(i)
             if item is None:
                 continue
@@ -208,10 +208,10 @@ class _ConnectionPage(QWizardPage):
 class _DependenciesPage(QWizardPage):
     """Wizard page that checks and downloads installable dependencies.
 
-    Checks that can be installed from the wizard (lightpanda, embeddings)
-    gate progression. Other preflight results (chat model, docling, voice)
-    are shown for information only — they are enforced by the main window's
-    preflight gate on the Start button.
+    Checks that can be installed from the wizard (vLLM, lightpanda, chat
+    and embeddings models) gate progression. Other preflight results
+    (docling, voice) are shown for information only — they are enforced
+    by the main window's preflight gate on the Start button.
     """
 
     def __init__(self, parent=None):
@@ -297,10 +297,16 @@ class _DependenciesPage(QWizardPage):
             return
 
         self._all_ok = all(self._add_check_row(c) for c in relevant)
-        if self._all_ok:
-            self._info_label.setText("All dependencies are ready.")
-        else:
+        warnings = [c for c in relevant if c.warning]
+        if not self._all_ok:
             self._info_label.setText("Install the missing dependencies to continue.")
+        elif warnings:
+            names = ", ".join(c.name for c in warnings)
+            self._info_label.setText(
+                f"Dependencies are ready. Optional components missing: {names}."
+            )
+        else:
+            self._info_label.setText("All dependencies are ready.")
         self.completeChanged.emit()
 
     def _add_check_row(self, check) -> bool:
@@ -310,7 +316,7 @@ class _DependenciesPage(QWizardPage):
         or it has no installable target and is shown for information only.
         """
         target = self._resolve_target(check.name)
-        icon = "\u2705" if check.passed else "\u274c"
+        icon = "❌" if not check.passed else ("⚠️" if check.warning else "✅")
         text = f"{icon}  {check.name}"
         if check.passed:
             if check.details:
@@ -381,6 +387,10 @@ class _DependenciesPage(QWizardPage):
         name_lower = name.lower()
         if "lightpanda" in name_lower:
             return "lightpanda"
+        if "vllm" in name_lower:
+            return "vllm"
+        if "chat model" in name_lower:
+            return "chat"
         if "embedding" in name_lower:
             return "embeddings"
         return None
