@@ -122,7 +122,7 @@ def _check_token_limit(checks: list[CheckResult]) -> None:
     ratio = EmbeddingsConfig.token_limit_ratio
     requested_ctx = VllmConfig.chat_context_size
 
-    # Compute effective context (same clamping as _check_kv_cache_memory)
+    # Same effective-context clamping as _check_kv_cache_memory
     effective_ctx = requested_ctx
     ctx_was_clamped = False
     model_max_ctx = None
@@ -152,7 +152,6 @@ def _check_token_limit(checks: list[CheckResult]) -> None:
     # Reserve 10% of context for system prompt, tools, and response
     max_safe_ratio = 0.90
 
-    # Build context chain description
     ctx_parts = [f"effective {_format_context_size(effective_ctx)}"]
     if model_max_ctx is not None and model_max_ctx != effective_ctx:
         ctx_parts.append(f"model max {_format_context_size(model_max_ctx)}")

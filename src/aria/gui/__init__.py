@@ -87,7 +87,6 @@ def main():
     app.setApplicationName("Aria")
     app.setApplicationDisplayName("Aria")
 
-    # Apply global stylesheet
     from aria.gui.theme import STYLESHEET
 
     app.setStyleSheet(STYLESHEET)

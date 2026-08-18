@@ -214,7 +214,6 @@ def server_run():
     _ensure_lightpanda_installed()
     _ensure_models_downloaded()
 
-    # Run preflight checks
     result = run_preflight_checks()
     if not _print_preflight_result(result):
         raise typer.Exit(1)
@@ -346,7 +345,6 @@ def server_start(
     _ensure_lightpanda_installed()
     _ensure_models_downloaded()
 
-    # Run preflight checks
     result = run_preflight_checks()
     if not _print_preflight_result(result):
         raise typer.Exit(1)

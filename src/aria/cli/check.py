@@ -75,14 +75,12 @@ def _print_category(category: str, checks: list) -> tuple[int, int]:
     passed = sum(1 for c in checks if c.passed)
     failed = len(checks) - passed
 
-    # Category header
     if failed == 0:
         status = f"[green]{passed}/{len(checks)}[/green]"
     else:
         status = f"[red]{passed}/{len(checks)}[/red]"
     console.print(f"{config['icon']} {config['label']} {status}")
 
-    # Individual checks
     for check in checks:
         if check.passed:
             if check.warning:

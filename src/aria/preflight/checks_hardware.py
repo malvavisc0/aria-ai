@@ -13,7 +13,6 @@ def _detect_compute_platform() -> str:
     """
     import platform
 
-    # Check for NVIDIA GPU
     try:
         from aria.helpers.nvidia import get_total_vram_mb
 
@@ -22,7 +21,6 @@ def _detect_compute_platform() -> str:
     except Exception:
         pass
 
-    # Check for Apple Silicon (Metal)
     if platform.system() == "Darwin":
         import subprocess
 
@@ -35,7 +33,6 @@ def _detect_compute_platform() -> str:
         except Exception:
             pass
 
-    # Fallback to CPU
     return "cpu"
 
 
@@ -69,10 +66,8 @@ def _check_memory_requirements(checks: list[CheckResult]) -> None:
     def _mb_to_gb(mb: int) -> str:
         return f"{mb // 1024} GB"
 
-    # Detect platform
     platform_type = _detect_compute_platform()
 
-    # Check system RAM (all platforms)
     total_ram_mb, avail_ram_mb = detect_system_ram()
     if total_ram_mb > 0:
         checks.append(
@@ -84,7 +79,6 @@ def _check_memory_requirements(checks: list[CheckResult]) -> None:
             )
         )
 
-    # Platform-specific checks
     if platform_type == "nvidia":
         total_vram = get_total_vram_mb()
         free_vram = get_free_vram_per_gpu()
@@ -118,7 +112,6 @@ def _check_memory_requirements(checks: list[CheckResult]) -> None:
             )
         )
 
-    # Show model weight size so users understand VRAM requirements
     from aria.config.models import Chat
 
     if Chat.model_path:

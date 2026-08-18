@@ -30,32 +30,27 @@ def should_show_wizard() -> bool:
     remote-configured user on a GPU box must not be looped back into
     the wizard for a local chat model that remote mode never uses.
     """
-    # 1. No users in DB → always show
     if not _has_admin_user():
         return True
 
     from aria.config.api import Vllm
 
     if Vllm.remote:
-        # 2. Remote mode → remote endpoint must be configured
         from aria.config.models import Chat
 
         if not Chat.api_url or not Chat.model or not Vllm.api_key:
             return True
     else:
-        # 3. Local mode → chat model must be downloaded
         from aria.config.models import Chat
 
         if not _is_model_downloaded(Chat.model_path):
             return True
 
-    # 4. Embeddings model must be downloaded
     from aria.config.models import Embeddings
 
     if not _is_model_downloaded(Embeddings.model_path):
         return True
 
-    # 5. Lightpanda must be installed
     from aria.config.api import Lightpanda
 
     if not Lightpanda.is_available():
