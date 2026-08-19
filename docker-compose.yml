@@ -8,7 +8,7 @@
 #   docker compose --profile rocm up -d aria-rocm
 #
 # Prerequisites:
-#   - Copy .env.example to .env and configure
+#   - Copy src/aria/.env.example (or a docs/env/ preset) to .env and configure
 #   - NVIDIA: install nvidia-container-toolkit
 #   - ROCm:   install amdgpu driver + ROCm container toolkit
 # ─────────────────────────────────────────────────────────────────────────────

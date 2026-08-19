@@ -16,7 +16,7 @@
 </div>
 
 <div align="center">
-<img src="screenshot.png" alt="Aria Screenshot" width="80%">
+<img src="https://github.com/malvavisc0/aria-ai/blob/master/screenshot.png?raw=true" alt="Aria Screenshot" width="80%">
 </div>
 
 ---
@@ -25,7 +25,7 @@
 
 | | Feature | Description |
 |:--|:--------|:------------|
-| 🎯 | **Unified Tool Architecture** | 7 categories, 33 tools managed by a centralized registry |
+| 🎯 | **Unified Tool Architecture** | Centralized registry of named tools + an `ax` dispatcher routing to 13 domain families (46 commands) |
 | 🖥️ | **Multiple Interfaces** | Web UI, CLI, and native PySide6 desktop GUI |
 | 🤖 | **Local LLM Support** | Run models locally with vLLM (GPU-accelerated inference with GPTQ/AWQ quantization) |
 | 🌐 | **Browser Automation** | Lightpanda headless browser with CDP/Playwright support |
@@ -60,7 +60,7 @@ aria server run
 # → Open http://localhost:9876
 ```
 
-### Option C — Docker (GPU required)
+### Option C — Docker (CUDA)
 
 ```bash
 docker run -p 9876:9876 -v ./data:/app/data ghcr.io/malvavisc0/aria-ai-cuda:latest
@@ -86,7 +86,7 @@ Or download the standalone binary for your platform from the [latest release](ht
 
 ## 🤖 Agent System
 
-Aria uses a **tool-first architecture** centered around one primary agent with a centralized tool registry. Tools are organized into always-loaded core capabilities and on-demand domain tools that load when needed. Heavy tasks are delegated to background **worker agents**.
+Aria uses a **tool-first architecture** centered around one primary agent with a centralized tool registry. Agents register their core and file tools directly and route every domain task through a single **`ax` dispatcher**. Heavy tasks are delegated to background **worker agents**.
 
 ### How It Works
 
@@ -102,19 +102,35 @@ Aria evaluates each request, keeps core capabilities available by default, and p
 
 ## 🛠️ Tools
 
-Tools are organized into **7 categories** (33 tools) managed by a centralized registry. Core and file tools are always available; domain tools load on demand.
+Aria's agents register a small set of named tools and route everything else through a single **`ax` dispatcher**. Tool loading is managed by a centralized registry (`src/aria/tools/registry.py`).
 
-| Category | Loading | Tools |
-|:---------|:--------|:------|
-| 🧠 **Core** | Always | reasoning, plan, knowledge, scratchpad, web_search, download, weather, shell |
-| 📁 **Files** | Always | read_file, write_file, edit_file, file_info, list_files, search_files, copy_file |
-| 🌍 **Browser** | On-demand | open_url, browser_click |
-| 🐍 **Development** | On-demand | python |
-| 📊 **Finance** | On-demand | fetch_current_stock_price, fetch_company_information, fetch_ticker_news |
-| 🎬 **Entertainment** | On-demand | search_imdb_titles, get_movie_details, get_person_details, get_person_filmography, get_all_series_episodes, get_movie_reviews, get_movie_trivia, get_youtube_video_transcription |
-| 🖥️ **System** | On-demand | http_request, process |
+**Registered tools** — called directly by the agent:
 
-Domain tools are also accessible via CLI commands through `ax` (e.g., `ax web search`, `ax memory store`, `ax dev run`).
+| Group | Tools |
+|:------|:------|
+| 🧠 Core | `reasoning` (agent) · `scratchpad` + `plan` (worker) · `shell` |
+| 📁 Files | `read_file`, `write_file`, `edit_file`, `list_files`, `search_files` (+ `file_info`, `copy_file` in workers) |
+| 🔀 `ax` | The dispatcher above — routes to the domain families below |
+
+**`ax` domain families** — 13 families, 46 commands (call `ax help` in-app to list them live):
+
+| Family | Commands |
+|:-------|:---------|
+| `web` | search, fetch, visit, click, close, weather, youtube |
+| `memory` | store, recall, search, list, update, delete |
+| `knowledge` | status, reindex |
+| `finance` | stock, company, news |
+| `imdb` | search, movie, person, filmography, episodes, reviews, trivia |
+| `http` | request |
+| `dev` | run |
+| `processes` | start, stop, status, logs, list, restart, signal |
+| `documents` | convert, status |
+| `check` | extras |
+| `worker` | spawn, list, status, logs, cancel, clean |
+| `voice` | transcribe |
+| `mcp` | list, call |
+
+Domain tools are also available as CLI commands via `ax` (e.g., `ax web search`, `ax memory store`, `ax dev run`).
 
 For the full inventory with parameter reference, see [`docs/tools-inventory.md`](docs/tools-inventory.md).
 
@@ -124,11 +140,11 @@ For the full inventory with parameter reference, see [`docs/tools-inventory.md`]
 
 ### Prerequisites
 
-- **GPU with 8 GB+ VRAM** (minimum; 12 GB+ recommended)
-- **16 GB+ system RAM**
 - Python 3.12 or higher
 - `uv` package manager (recommended)
 - Git
+- **16 GB+ system RAM**
+- **GPU with 8 GB+ VRAM** (8 GB minimum; 12 GB+ recommended) — *only for local LLM inference.* With no GPU, point at a remote endpoint via `ARIA_VLLM_REMOTE=true`, or use the no-GPU `aria-ai-lite` / `aria-ai-arm64` Docker images.
 
 > See [`docs/memory-requirements.md`](docs/memory-requirements.md) for detailed VRAM/RAM breakdown per model.
 
@@ -299,10 +315,11 @@ docker run -p 9876:9876 -v ./data:/app/data ghcr.io/malvavisc0/aria-ai-rocm:late
 ### Docker Compose
 
 ```bash
-# Copy and configure environment
-# A generic template ships at the repo root; VRAM-tuned presets live in docs/env/
-#   (e.g. cp docs/env/.env.16gb.example .env for a 16 GB GPU)
-cp .env.example .env
+# Copy and configure environment. Start from the generic template at
+# src/aria/.env.example, or from a VRAM-tuned preset in docs/env/.
+cp src/aria/.env.example .env
+#   e.g. for a 16 GB GPU use the tuned preset instead:
+#   cp docs/env/.env.16gb.example .env
 
 # NVIDIA / CUDA
 docker compose up -d

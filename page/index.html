@@ -854,9 +854,10 @@
                 alt="Aria" class="hero-logo" id="hero-logo">
             <h1>An AI that lives on your hardware.</h1>
             <p class="hero-subtitle">
-                No cloud. No telemetry. Just a capable assistant with 33 tools,
-                a web UI, a CLI, and a desktop app. Deploy via Docker, pip, or
-                source — entirely under your control.
+                No cloud. No telemetry. Just a capable assistant built on 13
+                tool families (46 domain commands), a web UI, a CLI, and a
+                desktop app. Deploy via Docker, pip, or source — entirely
+                under your control.
             </p>
             <p class="hero-meta">
                 Python 3.12+<span class="sep">·</span>MIT License<span class="sep">·</span>GPU optional<span class="sep">·</span>Docker ready
@@ -889,7 +890,8 @@
                 <div class="feature-cell">
                     <i data-lucide="settings" class="icon"></i>
                     <h3>Tool Registry</h3>
-                    <p>+30 Tools in 7 categories. Core tools always loaded; domain tools activated on demand.</p>
+                    <p>A centralized registry of named tools plus an <code>ax</code> dispatcher that routes to 13 tool
+                        families (46 commands).</p>
                 </div>
                 <div class="feature-cell">
                     <i data-lucide="monitor" class="icon"></i>
@@ -925,7 +927,8 @@
         <div class="container">
             <div class="section-header fade-in">
                 <h2>Tool inventory</h2>
-                <p>Core and file tools are always loaded. Everything else activates on demand.</p>
+                <p>Core and file tools are registered directly; 13 tool families route through the
+                    <code>ax</code> dispatcher.</p>
             </div>
             <div class="tools-table-wrapper fade-in">
                 <table class="tools-table">
@@ -933,7 +936,7 @@
                         <tr>
                             <th>Category</th>
                             <th>Tools</th>
-                            <th>Load</th>
+                            <th>Route</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -941,12 +944,10 @@
                             <td><span class="cat-name"><i data-lucide="brain" class="icon"></i> Core</span></td>
                             <td>
                                 <div class="tool-tags"><span class="tool-tag">reasoning</span><span
-                                        class="tool-tag">plan</span><span class="tool-tag">knowledge</span><span
-                                        class="tool-tag">scratchpad</span><span class="tool-tag">web_search</span><span
-                                        class="tool-tag">download</span><span class="tool-tag">weather</span><span
+                                        class="tool-tag">scratchpad</span><span class="tool-tag">plan</span><span
                                         class="tool-tag">shell</span></div>
                             </td>
-                            <td><span class="load-badge always">Always</span></td>
+                            <td><span class="load-badge always">direct</span></td>
                         </tr>
                         <tr>
                             <td><span class="cat-name"><i data-lucide="folder" class="icon"></i> Files</span></td>
@@ -954,57 +955,125 @@
                                 <div class="tool-tags"><span class="tool-tag">read_file</span><span
                                         class="tool-tag">write_file</span><span class="tool-tag">edit_file</span><span
                                         class="tool-tag">file_info</span><span class="tool-tag">list_files</span><span
-                                        class="tool-tag">search_files</span><span class="tool-tag">copy</span><span
-                                        class="tool-tag">delete</span><span class="tool-tag">rename</span></div>
+                                        class="tool-tag">search_files</span><span class="tool-tag">copy_file</span></div>
                             </td>
-                            <td><span class="load-badge always">Always</span></td>
+                            <td><span class="load-badge always">direct</span></td>
                         </tr>
                         <tr>
-                            <td><span class="cat-name"><i data-lucide="globe" class="icon"></i> Browser</span></td>
+                            <td><span class="cat-name"><i data-lucide="globe" class="icon"></i> Web</span></td>
                             <td>
-                                <div class="tool-tags"><span class="tool-tag">open_url</span><span
-                                        class="tool-tag">browser_click</span></div>
+                                <div class="tool-tags"><span class="tool-tag">search</span><span
+                                        class="tool-tag">fetch</span><span class="tool-tag">visit</span><span
+                                        class="tool-tag">click</span><span class="tool-tag">close</span><span
+                                        class="tool-tag">weather</span><span class="tool-tag">youtube</span></div>
                             </td>
-                            <td><span class="load-badge ondemand">On-demand</span></td>
+                            <td><span class="load-badge ondemand">ax</span></td>
                         </tr>
                         <tr>
-                            <td><span class="cat-name"><i data-lucide="terminal" class="icon"></i> Development</span>
+                            <td><span class="cat-name"><i data-lucide="database" class="icon"></i> Memory</span></td>
+                            <td>
+                                <div class="tool-tags"><span class="tool-tag">store</span><span
+                                        class="tool-tag">recall</span><span class="tool-tag">search</span><span
+                                        class="tool-tag">list</span><span class="tool-tag">update</span><span
+                                        class="tool-tag">delete</span></div>
+                            </td>
+                            <td><span class="load-badge ondemand">ax</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="cat-name"><i data-lucide="book-open" class="icon"></i> Knowledge</span>
                             </td>
                             <td>
-                                <div class="tool-tags"><span class="tool-tag">python</span></div>
+                                <div class="tool-tags"><span class="tool-tag">status</span><span
+                                        class="tool-tag">reindex</span></div>
                             </td>
-                            <td><span class="load-badge ondemand">On-demand</span></td>
+                            <td><span class="load-badge ondemand">ax</span></td>
                         </tr>
                         <tr>
                             <td><span class="cat-name"><i data-lucide="bar-chart-3" class="icon"></i> Finance</span>
                             </td>
                             <td>
-                                <div class="tool-tags"><span class="tool-tag">stock_price</span><span
-                                        class="tool-tag">company_info</span><span class="tool-tag">ticker_news</span>
-                                </div>
+                                <div class="tool-tags"><span class="tool-tag">stock</span><span
+                                        class="tool-tag">company</span><span class="tool-tag">news</span></div>
                             </td>
-                            <td><span class="load-badge ondemand">On-demand</span></td>
+                            <td><span class="load-badge ondemand">ax</span></td>
                         </tr>
                         <tr>
-                            <td><span class="cat-name"><i data-lucide="clapperboard" class="icon"></i>
-                                    Entertainment</span></td>
+                            <td><span class="cat-name"><i data-lucide="clapperboard" class="icon"></i> IMDb</span>
+                            </td>
                             <td>
-                                <div class="tool-tags"><span class="tool-tag">imdb_search</span><span
-                                        class="tool-tag">movie_details</span><span
-                                        class="tool-tag">person_details</span><span
+                                <div class="tool-tags"><span class="tool-tag">search</span><span
+                                        class="tool-tag">movie</span><span class="tool-tag">person</span><span
                                         class="tool-tag">filmography</span><span class="tool-tag">episodes</span><span
-                                        class="tool-tag">reviews</span><span class="tool-tag">trivia</span><span
-                                        class="tool-tag">youtube</span></div>
+                                        class="tool-tag">reviews</span><span class="tool-tag">trivia</span></div>
                             </td>
-                            <td><span class="load-badge ondemand">On-demand</span></td>
+                            <td><span class="load-badge ondemand">ax</span></td>
                         </tr>
                         <tr>
-                            <td><span class="cat-name"><i data-lucide="server" class="icon"></i> System</span></td>
+                            <td><span class="cat-name"><i data-lucide="plug" class="icon"></i> HTTP</span></td>
                             <td>
-                                <div class="tool-tags"><span class="tool-tag">http_request</span><span
-                                        class="tool-tag">process</span></div>
+                                <div class="tool-tags"><span class="tool-tag">request</span></div>
                             </td>
-                            <td><span class="load-badge ondemand">On-demand</span></td>
+                            <td><span class="load-badge ondemand">ax</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="cat-name"><i data-lucide="terminal" class="icon"></i> Dev</span></td>
+                            <td>
+                                <div class="tool-tags"><span class="tool-tag">run</span></div>
+                            </td>
+                            <td><span class="load-badge ondemand">ax</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="cat-name"><i data-lucide="activity" class="icon"></i> Processes</span>
+                            </td>
+                            <td>
+                                <div class="tool-tags"><span class="tool-tag">start</span><span
+                                        class="tool-tag">stop</span><span class="tool-tag">status</span><span
+                                        class="tool-tag">logs</span><span class="tool-tag">list</span><span
+                                        class="tool-tag">restart</span><span class="tool-tag">signal</span></div>
+                            </td>
+                            <td><span class="load-badge ondemand">ax</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="cat-name"><i data-lucide="file-text" class="icon"></i> Documents</span>
+                            </td>
+                            <td>
+                                <div class="tool-tags"><span class="tool-tag">convert</span><span
+                                        class="tool-tag">status</span></div>
+                            </td>
+                            <td><span class="load-badge ondemand">ax</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="cat-name"><i data-lucide="package" class="icon"></i> Check</span>
+                            </td>
+                            <td>
+                                <div class="tool-tags"><span class="tool-tag">extras</span></div>
+                            </td>
+                            <td><span class="load-badge ondemand">ax</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="cat-name"><i data-lucide="hard-hat" class="icon"></i> Worker</span></td>
+                            <td>
+                                <div class="tool-tags"><span class="tool-tag">spawn</span><span
+                                        class="tool-tag">list</span><span class="tool-tag">status</span><span
+                                        class="tool-tag">logs</span><span class="tool-tag">cancel</span><span
+                                        class="tool-tag">clean</span></div>
+                            </td>
+                            <td><span class="load-badge ondemand">ax</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="cat-name"><i data-lucide="blocks" class="icon"></i> MCP</span></td>
+                            <td>
+                                <div class="tool-tags"><span class="tool-tag">list</span><span
+                                        class="tool-tag">call</span></div>
+                            </td>
+                            <td><span class="load-badge ondemand">ax</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="cat-name"><i data-lucide="mic" class="icon"></i> Voice</span></td>
+                            <td>
+                                <div class="tool-tags"><span class="tool-tag">transcribe</span></div>
+                            </td>
+                            <td><span class="load-badge ondemand">ax</span></td>
                         </tr>
                     </tbody>
                 </table>
@@ -1091,7 +1160,7 @@
                 <div class="arch-node">
                     <i data-lucide="wrench" class="icon"></i>
                     <div class="label">Tools</div>
-                    <div class="sub">+30 tools, 7 categories</div>
+                    <div class="sub">registry + ax dispatcher</div>
                 </div>
                 <div class="arch-arrow">→</div>
                 <div class="arch-node">
