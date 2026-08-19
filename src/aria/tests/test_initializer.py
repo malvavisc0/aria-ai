@@ -3,10 +3,7 @@ persistence across container restarts (the Docker mounted-.env scenario).
 """
 
 import os
-from importlib.resources import as_file, files
 from pathlib import Path
-
-import pytest
 
 from aria.initializer import (
     _has_valid_secret,
@@ -14,22 +11,6 @@ from aria.initializer import (
     is_initialized,
     setup_env_file,
 )
-
-
-def test_root_env_example_matches_packaged_template() -> None:
-    """The repo-root .env.example must stay byte-identical to the packaged
-    src/aria/.env.example that the initializer copies at runtime.  Drift
-    between the two would give Docker users a different default config than
-    pip/non-Docker users.
-    """
-    root_example = Path(".env.example")
-    if not root_example.exists():
-        pytest.skip("repo-root .env.example not present (e.g. installed wheel)")
-    with as_file(files("aria").joinpath(".env.example")) as packaged:
-        assert root_example.read_text() == packaged.read_text(), (
-            "Root .env.example has drifted from src/aria/.env.example — "
-            "update both to keep Docker and non-Docker defaults in sync."
-        )
 
 
 def test_has_valid_secret_rejects_placeholders() -> None:

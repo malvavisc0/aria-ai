@@ -58,8 +58,10 @@ def _detect_platform(has_nvidia: bool) -> str:
             ).decode()
             if arch.strip() == "arm64":
                 return "metal"
-        except Exception:
-            pass
+        except Exception as exc:
+            from loguru import logger
+
+            logger.debug(f"Platform architecture probe failed: {exc}")
     return "cpu"
 
 
@@ -79,8 +81,10 @@ def detect_hardware() -> HardwareProfile:
         has_nvidia = vram_mb > 0
         if has_nvidia:
             cuda_version = get_cuda_version()
-    except Exception:
-        pass
+    except Exception as exc:
+        from loguru import logger
+
+        logger.debug(f"NVIDIA detection failed: {exc}")
 
     return HardwareProfile(
         has_nvidia_gpu=has_nvidia,

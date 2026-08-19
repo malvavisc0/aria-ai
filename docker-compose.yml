@@ -8,9 +8,10 @@
 #   - Copy src/aria/.env.example (or a docs/env/ preset) to .env and configure
 #   - NVIDIA: install nvidia-container-toolkit
 #
-# Note: ROCm is unsupported (init refuses local chat on non-NVIDIA GPUs).
-# AMD users must set ARIA_VLLM_REMOTE=true and a remote endpoint in .env,
-# and use the aria-lite service below (no local GPU).
+# Note: ROCm is unsupported — local chat requires NVIDIA CUDA. The
+# aria-lite / aria-arm64 services run without a GPU, so the mounted .env
+# MUST set ARIA_VLLM_REMOTE=true together with CHAT_OPENAI_API /
+# ARIA_VLLM_API_KEY / CHAT_MODEL, or `aria init` aborts on first boot.
 # ─────────────────────────────────────────────────────────────────────────────
 
 services:

@@ -56,6 +56,26 @@ class TierDefaults:
         return self.chat_model.rsplit("/", 1)[-1]
 
 
+def _validate_tier(entry: Any) -> None:
+    """Fail fast on a malformed tier entry."""
+    if not isinstance(entry, dict):
+        raise ValueError("bootstrap/models.json: tier entries must be objects")
+    missing = [k for k in _TIER_SCHEMA_KEYS if k not in entry]
+    if missing:
+        raise ValueError(f"bootstrap/models.json: tier missing keys {missing}")
+
+
+def _validate_floors(tiers: list[dict[str, Any]]) -> None:
+    """Tiers must sort descending by ``min_vram_mb`` and end with the
+    no-GPU catch-all so resolution always matches."""
+    floors = [t["min_vram_mb"] for t in tiers]
+    if floors != sorted(floors, reverse=True) or floors[-1] != 0:
+        raise ValueError(
+            "bootstrap/models.json: tiers must be sorted descending by "
+            "min_vram_mb and end with the min_vram_mb=0 catch-all"
+        )
+
+
 def _load_tiers() -> list[dict[str, Any]]:
     """Load and validate the packaged tier definitions from ``models.json``.
 
@@ -73,34 +93,29 @@ def _load_tiers() -> list[dict[str, Any]]:
 
     tiers: list[dict[str, Any]] = []
     for entry in raw_tiers:
-        if not isinstance(entry, dict):
-            raise ValueError("bootstrap/models.json: tier entries must be objects")
-        missing = [k for k in _TIER_SCHEMA_KEYS if k not in entry]
-        if missing:
-            raise ValueError(f"bootstrap/models.json: tier missing keys {missing}")
+        _validate_tier(entry)
         tiers.append(entry)
-
-    # Tiers must be sorted descending by min_vram_mb and non-overlapping.
-    floors = [t["min_vram_mb"] for t in tiers]
-    if floors != sorted(floors, reverse=True):
-        raise ValueError(
-            "bootstrap/models.json: tiers must be sorted descending by min_vram_mb"
-        )
+    _validate_floors(tiers)
     return tiers
 
 
+def _as_tier(tier: dict[str, Any]) -> TierDefaults:
+    return TierDefaults(
+        chat_model=tier["chat_model"],
+        quant=tier["quant"],
+        context_size=tier["context_size"],
+        voice_allowed=tier["voice_allowed"],
+    )
+
+
 def resolve_defaults(hardware: HardwareProfile) -> TierDefaults:
-    """Pick the first matching tier (``min_vram_mb`` inclusive, top-down)."""
+    """Pick the first matching tier (``min_vram_mb`` inclusive, top-down).
+
+    ``_load_tiers`` guarantees a ``min_vram_mb=0`` catch-all, so the walk
+    always resolves a tier — no-GPU hardware lands on the catch-all.
+    """
     tiers = _load_tiers()
-    vram = hardware.vram_mb
-    for tier in tiers:
-        if vram >= tier["min_vram_mb"]:
-            return TierDefaults(
-                chat_model=tier["chat_model"],
-                quant=tier["quant"],
-                context_size=tier["context_size"],
-                voice_allowed=tier["voice_allowed"],
-            )
-    # Defensive: the no-GPU tier has min_vram_mb=0 so this is unreachable
-    # unless models.json is malformed. Fail fast rather than silently pick.
-    raise ValueError("bootstrap/models.json: no matching tier for vram=0")
+    for tier in tiers[:-1]:
+        if hardware.vram_mb >= tier["min_vram_mb"]:
+            return _as_tier(tier)
+    return _as_tier(tiers[-1])

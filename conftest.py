@@ -2,6 +2,21 @@
 
 import atexit
 import importlib
+
+# ---------------------------------------------------------------------------
+# inspect.unwrap tolerance for chainlit's lazy __getattr__
+#
+# chainlit's package __init__ uses a PEP 562 lazy ``__getattr__`` that raises
+# ``KeyError`` (not ``AttributeError``) for unknown attributes.
+# ``inspect.unwrap`` probes ``__wrapped__`` via ``hasattr`` on every object it
+# unwraps — including modules — so ``inspect.getsource(chainlit)`` explodes
+# with ``KeyError: '__wrapped__'``. PySide6's shibokensupport import hook
+# calls ``inspect.getsource`` on subsequently imported modules, which kills
+# pytest collection for every chainlit-importing test module once PySide6 is
+# loaded. Patch ``unwrap`` to treat a failed ``__wrapped__`` probe as
+# "not a wrapper" — the semantics ``hasattr`` was supposed to provide.
+# ---------------------------------------------------------------------------
+import inspect as _inspect
 import os
 import shutil
 import tempfile
@@ -10,6 +25,18 @@ from typing import Any
 
 import pytest
 from dotenv import load_dotenv
+
+_orig_unwrap = _inspect.unwrap
+
+
+def _tolerant_unwrap(func, *, stop=None):
+    try:
+        return _orig_unwrap(func, stop=stop)
+    except (KeyError, AttributeError):
+        return func
+
+
+_inspect.unwrap = _tolerant_unwrap
 
 # ---------------------------------------------------------------------------
 # Global test sandbox

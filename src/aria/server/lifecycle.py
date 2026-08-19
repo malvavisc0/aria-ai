@@ -50,13 +50,18 @@ def has_cuda() -> bool:
         return False
 
 
-def _authenticated_get(url: str, timeout: float = 5):
-    """Open *url* carrying the vLLM API key when in remote mode."""
+def _authenticated_get(url: str, timeout: float = 5, api_key: str | None = None):
+    """Open *url* carrying a bearer key.
+
+    Defaults to the configured vLLM API key (remote mode only); an
+    explicit *api_key* carries through instead (e.g. a value prompted
+    at ``aria init`` before it is persisted to ``.env``).
+    """
     from aria.config.api import Vllm as VllmConfig
 
-    headers = {}
-    if VllmConfig.remote and VllmConfig.api_key:
-        headers["Authorization"] = f"Bearer {VllmConfig.api_key}"
+    if api_key is None:
+        api_key = VllmConfig.api_key if VllmConfig.remote else None
+    headers = {"Authorization": f"Bearer {api_key}"} if api_key else {}
     return urlopen(Request(url, headers=headers), timeout=timeout)
 
 
@@ -84,11 +89,20 @@ def is_vllm_healthy() -> bool:
         return False
 
 
-def _remote_endpoint_reachable(timeout: float = 10.0) -> StepResult:
+def _remote_endpoint_reachable(
+    timeout: float = 10.0, url: str | None = None, api_key: str | None = None
+) -> StepResult:
+    """Probe a remote endpoint's ``/models``.
+
+    Defaults to the configured ``Chat.api_url`` / vLLM API key; explicit
+    *url*/*api_key* probe a candidate endpoint instead (``aria init``
+    validates the user's values before they are persisted to ``.env``).
+    """
     from aria.config.models import Chat
 
+    target = url if url is not None else f"{Chat.api_url}/models"
     try:
-        with _authenticated_get(f"{Chat.api_url}/models", timeout=timeout) as resp:
+        with _authenticated_get(target, timeout=timeout, api_key=api_key) as resp:
             if resp.status == 200:
                 return StepResult(ok=True)
             return StepResult(
@@ -96,7 +110,7 @@ def _remote_endpoint_reachable(timeout: float = 10.0) -> StepResult:
             )
     except (URLError, OSError) as e:
         return StepResult(
-            ok=False, error=f"Remote endpoint unreachable: {Chat.api_url}\n  {e}"
+            ok=False, error=f"Remote endpoint unreachable: {target}\n  {e}"
         )
 
 

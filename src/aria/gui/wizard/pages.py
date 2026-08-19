@@ -229,43 +229,6 @@ class _ConnectionPage(QWizardPage):
         """Return 'local' or 'remote'."""
         return "remote" if self._remote_radio.isChecked() else "local"
 
-    def save_connection_config(self) -> bool:
-        """Save connection configuration to .env.
-
-        Writes through the shared ``parse_dotenv``/``write_dotenv`` helpers
-        (same path as the main window) so comments and structure are
-        preserved. ``ARIA_VLLM_REMOTE`` is persisted explicitly for both
-        modes.
-        """
-        import os
-        from pathlib import Path
-
-        from aria.helpers.dotenv import parse_dotenv, write_dotenv
-
-        env_path = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria")) / ".env"
-        env_path.parent.mkdir(parents=True, exist_ok=True)
-
-        mode = self.get_connection_mode()
-        values: dict[str, str] = {
-            "ARIA_VLLM_REMOTE": "true" if mode == "remote" else "false",
-        }
-        if mode == "remote":
-            values["CHAT_OPENAI_API"] = self._endpoint_edit.text().strip()
-            values["ARIA_VLLM_API_KEY"] = self._api_key_edit.text().strip()
-            values["CHAT_MODEL"] = self._model_edit.text().strip()
-
-        try:
-            _, raw_lines = parse_dotenv(env_path)
-            write_dotenv(env_path, values, raw_lines)
-        except Exception as exc:
-            QMessageBox.warning(
-                self,
-                "Configuration Error",
-                f"Could not save connection settings:\n{exc}",
-            )
-            return False
-        return True
-
 
 class _UserPage(QWizardPage):
     """Wizard page for creating the admin user."""

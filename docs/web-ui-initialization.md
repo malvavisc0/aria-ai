@@ -145,8 +145,11 @@ never overwrite user-set `.env` values. The flow:
 6. Download models (chat local-chat only; embeddings + docling always;
    whisper/kokoro when voice is enabled).
 7. Warn on small GPUs (< 12 GB VRAM) when voice or docling CUDA is enabled.
-8. Verify via preflight; hard failures exit 1.
-9. Write `$ARIA_HOME/.init-completed.json` and print a summary.
+8. Verify via preflight; hard failures exit 1 (hardware-fit findings are
+   advisories only — `aria config optimize` and vLLM's runtime context
+   clamp resolve them).
+9. Print a summary, then write `$ARIA_HOME/.init-completed.json` on
+   success only — a failed init never passes the entry-point gate.
 
 The `aria`, `ax`, and `aria-gui` entry points gate on that marker: non-init
 commands refuse to run until it exists (the GUI routes into the wizard

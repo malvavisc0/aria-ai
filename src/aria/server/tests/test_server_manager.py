@@ -284,6 +284,25 @@ def test_sync_features_preserves_unrelated_sections(tmp_path: Path) -> None:
     assert _accept_image_count(text) == 0
 
 
+def test_sync_audio_shim_preserves_images_when_vision_enabled(tmp_path: Path) -> None:
+    """The back-compat shim honors the live ARIA_VLLM_VISION_ENABLED flag:
+    image entries survive when vision is on (S11)."""
+    from aria.config.api import Vllm
+
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(_UPLOAD_CONFIG)
+
+    original = Vllm.vision_enabled
+    try:
+        Vllm.vision_enabled = True
+        sync_chainlit_audio_feature("localhost", tmp_path)
+    finally:
+        Vllm.vision_enabled = original
+
+    assert _accept_image_count(config.read_text()) == 6
+
+
 def test_sync_features_leaves_reformatted_accept_untouched(tmp_path: Path) -> None:
     """When the ``accept = [`` array is absent (user removed it or moved
     uploads elsewhere), the sync must leave the section alone — fail-safe,

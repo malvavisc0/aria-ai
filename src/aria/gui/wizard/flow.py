@@ -70,12 +70,12 @@ def should_show_wizard() -> bool:
 def run_wizard(parent: MainWindow | None = None) -> bool:
     """Show the setup wizard and return True if setup succeeded.
 
-    Returns False if the wizard was cancelled, config save failed,
-    or user creation failed. On success the wizard writes the
-    ``.init-completed.json`` marker (the same one ``aria init`` writes) so
-    the entry-point gate passes for the GUI front-end too, and syncs the
-    deployed ``config.toml`` feature flags so the file matches the chosen
-    mode immediately (no waiting for the first server start).
+    Returns False if the wizard was cancelled or user creation failed.
+    On success the wizard writes the chosen configuration to ``.env``
+    (via the same ``apply_mode_to_env`` writer as ``aria init``), syncs
+    the deployed ``config.toml`` feature flags, and writes the
+    ``.init-completed.json`` marker (the same one ``aria init`` writes)
+    so the entry-point gate passes for the GUI front-end too.
     """
     wizard = SetupWizard(parent)
 
@@ -86,12 +86,9 @@ def run_wizard(parent: MainWindow | None = None) -> bool:
     result = wizard.exec()
 
     if result == QWizard.DialogCode.Accepted:
-        # Save connection config
         conn_page = cast(_ConnectionPage, wizard.page(0))
-        if not conn_page.save_connection_config():
-            return False
 
-        # Sync config.toml features + write the init-completed marker so
+        # Apply .env + sync config.toml features + write the marker so
         # the entry-point gate (§6) passes for the GUI front-end.
         _finalize_init(conn_page)
 
@@ -106,18 +103,20 @@ def run_wizard(parent: MainWindow | None = None) -> bool:
 
 
 def _finalize_init(conn_page: _ConnectionPage) -> None:
-    """Sync config.toml features and write the init-completed marker.
+    """Apply the wizard's init step 4: ``.env`` + ``config.toml`` + marker.
 
-    Runs the GUI's share of the ``aria init`` feature application: the
-    connection page already wrote ``ARIA_VLLM_REMOTE`` (+ remote endpoint
-    fields) to ``.env``; this mirrors the CLI's step 4 (config.toml sync)
-    and step 9 (marker). Binary installs and model downloads happen on
-    the dependencies page (full parity with CLI init, §7.2).
+    Uses the same single writer as the CLI (``apply_mode_to_env``): the
+    mode switch, tier values, docling device, vision/voice choices, and
+    the remote endpoint fields (carried on ``feature_choices``) are
+    persisted in one place — CLI/GUI parity by construction, and
+    user-customized ``.env`` values are never overwritten. Binary
+    installs and model downloads happen on the dependencies page (full
+    parity with CLI init, §7.2).
     """
     import os
     from pathlib import Path
 
-    from aria.bootstrap import write_init_completed_marker
+    from aria.bootstrap import apply_mode_to_env, write_init_completed_marker
     from aria.bootstrap.defaults import resolve_defaults
     from aria.bootstrap.detect import detect_hardware
     from aria.bootstrap.features import (
@@ -128,13 +127,15 @@ def _finalize_init(conn_page: _ConnectionPage) -> None:
     from aria.server.manager import sync_chainlit_features
 
     aria_home = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria"))
-    mode = conn_page.get_connection_mode()
-    hardware = detect_hardware()
-    vision = vision_enabled_for_config(
-        hardware,
-        CHAT_MODE_REMOTE if mode == "remote" else CHAT_MODE_LOCAL,
-        conn_page.feature_choices(),
+    mode = (
+        CHAT_MODE_REMOTE
+        if conn_page.get_connection_mode() == "remote"
+        else CHAT_MODE_LOCAL
     )
+    hardware = detect_hardware()
+    choices = conn_page.feature_choices()
+    apply_mode_to_env(aria_home / ".env", mode, hardware, choices)
+    vision = vision_enabled_for_config(hardware, mode, choices)
     sync_chainlit_features(aria_home, vision_enabled=vision)
-    tier = resolve_defaults(hardware) if mode == "local" else None
+    tier = resolve_defaults(hardware) if mode == CHAT_MODE_LOCAL else None
     write_init_completed_marker(mode, tier)

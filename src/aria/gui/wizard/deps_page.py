@@ -230,6 +230,10 @@ class _DependenciesPage(QWizardPage):
         name = check.name.lower()
         if remote and ("vllm" in name or "chat model" in name):
             return False
-        if not hardware.has_nvidia_gpu and ("whisper" in name or "kokoro" in name):
+        # No GPU: hide every voice row — preflight emits a literal
+        # "voice" check (disabled state) plus the whisper/kokoro rows.
+        if not hardware.has_nvidia_gpu and (
+            "voice" in name or "whisper" in name or "kokoro" in name
+        ):
             return False
         return True

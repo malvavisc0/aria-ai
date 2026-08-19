@@ -142,10 +142,11 @@ def sync_chainlit_features(
 def sync_chainlit_audio_feature(host: str, aria_home: Path) -> None:
     """Back-compat shim — delegates to :func:`sync_chainlit_features`.
 
-    Kept so external callers and tests that reference the old name keep
-    working. Prefer ``sync_chainlit_features`` for new call sites.
+    Reads the live ``ARIA_VLLM_VISION_ENABLED`` flag so legacy callers
+    don't silently strip image MIME types from the deployed config.
+    Prefer ``sync_chainlit_features`` for new call sites.
     """
-    sync_chainlit_features(aria_home, host=host, vision_enabled=False)
+    sync_chainlit_features(aria_home, host=host, vision_enabled=_vision_enabled())
 
 
 def _vision_enabled() -> bool:

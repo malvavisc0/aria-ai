@@ -20,17 +20,6 @@ from aria.bootstrap import (
     write_init_completed_marker,
 )
 from aria.bootstrap.defaults import TierDefaults
-from aria.bootstrap.detect import HardwareProfile
-
-
-def _hw_no_gpu() -> HardwareProfile:
-    return HardwareProfile(
-        has_nvidia_gpu=False,
-        has_rocm=False,
-        cuda_version="",
-        vram_mb=0,
-        platform="cpu",
-    )
 
 
 def test_marker_round_trip(monkeypatch, tmp_path: Path) -> None:
@@ -78,6 +67,24 @@ def test_allowed_before_init_config_paths_is_escape_hatch(monkeypatch) -> None:
 def test_allowed_before_init_config_other_subcommands_refused(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["aria", "config", "show"])
     assert _allowed_before_init("config") is False
+
+
+def test_allowed_before_init_help_flag_anywhere(monkeypatch) -> None:
+    """``aria config --help`` and any ``--help``/``-h`` subcommand position
+    are introspection — allowed before init completes."""
+    monkeypatch.setattr("sys.argv", ["aria", "config", "--help"])
+    assert _allowed_before_init("config") is True
+
+    monkeypatch.setattr("sys.argv", ["aria", "server", "--help"])
+    assert _allowed_before_init("server") is True
+
+    monkeypatch.setattr("sys.argv", ["aria", "users", "-h"])
+    assert _allowed_before_init("users") is True
+
+
+def test_allowed_before_init_subcommand_action_still_refused(monkeypatch) -> None:
+    monkeypatch.setattr("sys.argv", ["aria", "server", "start"])
+    assert _allowed_before_init("server") is False
 
 
 def test_aria_main_refuses_when_marker_absent(monkeypatch, tmp_path: Path) -> None:

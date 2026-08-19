@@ -66,26 +66,35 @@ def is_init_completed() -> bool:
 _INIT_EXEMPT_COMMANDS = frozenset({"init"})
 
 
+def _is_help_invocation(argv: list[str]) -> bool:
+    """True when the invocation asks for help at any level."""
+    return "--help" in argv or "-h" in argv
+
+
+def _is_config_paths(argv: list[str]) -> bool:
+    """True for ``config paths`` — the "where is my ARIA_HOME?" escape hatch."""
+    tokens = [t for t in argv if not t.startswith("-")]
+    return len(tokens) >= 2 and tokens[0] == "config" and tokens[1] == "paths"
+
+
 def _allowed_before_init(first_arg: str | None) -> bool:
     """True when *first_arg* is an init-exempt command path.
 
-    Recognises compound paths like ``config paths`` (the second token is
-    inspected) so users can locate ARIA_HOME without the marker.
+    Any ``--help``/``-h`` in the invocation is exempt (Typer renders
+    group/subcommand help without needing setup). Also recognises compound
+    paths like ``config paths`` (the second token is inspected) so users
+    can locate ARIA_HOME without the marker.
     """
-    if first_arg is None:
-        return True  # bare invocation → help banner, never refuses
-    if first_arg.startswith("-"):
-        return True  # global flag (--help / --version) → Typer handles it
-    if first_arg in _INIT_EXEMPT_COMMANDS:
-        return True
-    # ``config paths`` is the "where is my ARIA_HOME?" escape hatch.
-    if first_arg == "config":
-        import sys
+    import sys
 
-        tokens = [t for t in sys.argv[1:] if not t.startswith("-")]
-        if len(tokens) >= 2 and tokens[1] == "paths":
-            return True
-    return False
+    argv = sys.argv[1:]
+    return (
+        _is_help_invocation(argv)
+        or first_arg is None  # bare invocation → help banner, never refuses
+        or first_arg.startswith("-")  # global flag → Typer handles it
+        or first_arg in _INIT_EXEMPT_COMMANDS
+        or _is_config_paths(argv)
+    )
 
 
 def write_init_completed_marker(chat_mode: str, tier: TierDefaults | None) -> None:
@@ -146,15 +155,18 @@ def run_init(
     *,
     dry_run: bool = False,
     progress: ProgressFn | None = None,
+    write_marker: bool = True,
 ) -> InitReport:
     """Apply the feature matrix to ``.env`` + ``config.toml`` and return a report.
 
     This is the orchestrator shared by ``aria init`` and the GUI wizard's
     save step. It **only** handles feature application (plan step 4) +
-    the small-GPU advisory (step 7) + the completion marker (step 9 tail);
-    binary installs, model downloads, and preflight (steps 5/6/8) stay in
-    the CLI flow because they need progress UI and are not idempotent
-    no-ops the way env/config writes are.
+    the small-GPU advisory (step 7); binary installs, model downloads,
+    and preflight (steps 5/6/8) stay in the CLI flow because they need
+    progress UI and are not idempotent no-ops the way env/config writes
+    are. The completion marker is written by the caller on success — the
+    CLI writes it after preflight passes; the GUI wizard writes it in its
+    finalize step.
 
     A read-only ``.env`` (Docker ``:ro`` mount) is tolerated: the env
     write is skipped with a notice, process env vars are adopted as-is,
@@ -167,6 +179,10 @@ def run_init(
         choices: User opt-ins (vision/voice/remote endpoint).
         dry_run: When True, compute the plan but write nothing.
         progress: Optional callback for human-facing progress lines.
+        write_marker: Write the ``.init-completed.json`` marker at the end.
+            The CLI passes ``False`` and writes the marker itself only
+            after preflight succeeds, so a failed init never passes the
+            entry-point gate.
 
     Returns:
         An :class:`InitReport` describing what was (or would be) applied.
@@ -205,7 +221,7 @@ def run_init(
     if warning:
         _say(f"⚠ {warning}")
 
-    if not dry_run:
+    if not dry_run and write_marker:
         write_init_completed_marker(chat_mode, tier)
 
     return InitReport(
