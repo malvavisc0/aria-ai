@@ -1,8 +1,27 @@
 __version__ = "0.3.7"
 
 
+def _init_gate_should_pass() -> bool:
+    """Return True when the invoked command may run before ``aria init``.
+
+    Detection of the invoked command checks ``sys.argv[1]`` before Typer
+    dispatch (Decision 3). ``init`` and ``config paths`` plus help-style
+    introspection are exempt; everything else requires the completion
+    marker so a fresh install doesn't half-start the server.
+    """
+    import sys
+
+    from aria.bootstrap import _allowed_before_init, is_init_completed
+
+    if is_init_completed():
+        return True
+    first = sys.argv[1] if len(sys.argv) > 1 else None
+    return _allowed_before_init(first)
+
+
 def main():
     import os
+    import sys
     from pathlib import Path
 
     from dotenv import load_dotenv
@@ -34,6 +53,12 @@ def main():
     # (e.g. after upgrade or first run with new asset extraction logic).
     setup_public_assets()
     setup_chainlit_config()
+
+    # Entry-point gate (Decision 3): refuse to run anything but `init` /
+    # `config paths` / help until the init-completed marker exists.
+    if not _init_gate_should_pass():
+        sys.stderr.write("Aria is not set up yet. Run: aria init\n")
+        sys.exit(1)
 
     from aria.cli.main import app
 

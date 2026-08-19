@@ -71,17 +71,14 @@ class _StartupWorker(QObject):
     def _run(self) -> None:
         from aria.server.lifecycle import (
             ensure_endpoint_reachable,
-            ensure_lightpanda_installed,
-            ensure_models_downloaded,
             ensure_vllm_running,
             wait_for_web_health,
         )
 
-        # Mirrors the CLI: self-heal installable deps before the endpoint
-        # check so GUI and CLI start paths stay identical.
-        ensure_lightpanda_installed(progress=self.progress.emit)
-        ensure_models_downloaded(progress=self.progress.emit)
-
+        # Installs and model downloads are owned by `aria init` (and the
+        # setup wizard). The preflight gate on the Start button already
+        # blocks startup when those are missing, so the worker only brings
+        # the endpoint up and launches the web UI.
         result = ensure_endpoint_reachable(progress=self.progress.emit)
         if not result.ok:
             raise RuntimeError(result.error or "AI endpoint unreachable")

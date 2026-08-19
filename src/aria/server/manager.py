@@ -30,37 +30,133 @@ _AUDIO_ENABLED_RE = re.compile(
     re.IGNORECASE,
 )
 
+# The packaged template's image MIME block — restored into the deployed
+# config.toml ``accept`` array when vision is (re-)enabled. Kept in sync with
+# ``src/aria/.chainlit/config.toml``'s ``[features.spontaneous_file_upload]``
+# ``accept`` block; the round-trip test in bootstrap/tests pins this.
+_TEMPLATE_IMAGE_MIMES = [
+    '"image/png"',
+    '"image/jpeg"',
+    '"image/webp"',
+    '"image/gif"',
+    '"image/bmp"',
+    '"image/tiff"',
+]
 
-def sync_chainlit_audio_feature(host: str, aria_home: Path) -> None:
-    """Rewrite the deployed Chainlit config's ``[features.audio] enabled``.
+# Matches the ``accept = [ ... ]`` array (DOTALL so newlines inside the
+# array are spanned). The capture group is the full array body.
+_ACCEPT_ARRAY_RE = re.compile(
+    r"(\[features\.spontaneous_file_upload\]\n(?:[^\[]*?)accept\s*=\s*\[)"
+    r"(.*?)"
+    r"(\])",
+    re.DOTALL,
+)
 
-    The mic button is gated by ``[features.audio] enabled`` in the
-    config.toml that the Chainlit subprocess reads at startup. Audio
-    is enabled only when both conditions hold: voice is enabled via
-    ``ARIA_VOICE_ENABLED`` (default false) and the bind is a loopback
-    address (``getUserMedia`` requires a secure context). For any non-
-    loopback bind, or when voice is disabled, the feature is turned off
-    so the broken mic button is not shown. Run before launching the
-    subprocess so it responds to ``SERVER_HOST`` changes on every boot.
 
-    Args:
-        host: The bind address to evaluate.
-        aria_home: ARIA_HOME, where ``.chainlit/config.toml`` lives.
+def _sync_audio_feature(content: str, host: str) -> str:
+    """Rewrite ``[features.audio] enabled`` for the loopback host rule.
+
+    Audio is enabled only when voice is on (``ARIA_VLLM_VOICE_ENABLED``)
+    and the bind is a loopback address (``getUserMedia`` needs a secure
+    context). Any non-loopback bind or voice-disabled case turns it off so
+    the broken mic button is not shown.
     """
     from aria.config.api import Voice
 
-    config_path = aria_home / ".chainlit" / "config.toml"
-    if not config_path.is_file():
-        return
     enabled = Voice.enabled and is_loopback_host(host)
     value = "true" if enabled else "false"
-    content = config_path.read_text()
-    updated = _AUDIO_ENABLED_RE.sub(
+    return _AUDIO_ENABLED_RE.sub(
         lambda m: f"[features.audio]\n{m.group(1)}{m.group(2)}{value}",
         content,
     )
+
+
+def _sync_upload_accept(content: str, *, vision_enabled: bool) -> str:
+    """Strip or restore ``image/*`` entries in the ``accept`` array.
+
+    Image MIME types are only useful when vision is enabled. When vision
+    is off, the contiguous image block is filtered out of the array; when
+    on, the packaged template's image block is restored (idempotent if it
+    is already present). On any parse surprise the section is left
+    untouched — same fail-safe as the audio sync returning early on a
+    missing file.
+    """
+    match = _ACCEPT_ARRAY_RE.search(content)
+    if match is None:
+        return content  # user reformat → leave untouched (fail-safe)
+
+    head, body, tail = match.group(1), match.group(2), match.group(3)
+    lines = body.splitlines()
+
+    if not vision_enabled:
+        kept = [ln for ln in lines if "image/" not in ln]
+        new_body = "\n".join(kept)
+    else:
+        # Restore: drop any stray image lines first, then append the
+        # template block once so re-enabling is idempotent.
+        non_image = [ln for ln in lines if "image/" not in ln]
+        restored = non_image + [f"    {mime}," for mime in _TEMPLATE_IMAGE_MIMES]
+        new_body = "\n".join(restored)
+
+    return content[: match.start()] + head + new_body + tail + content[match.end() :]
+
+
+def sync_chainlit_features(
+    aria_home: Path, *, host: str = "", vision_enabled: bool = False
+) -> None:
+    """Sync the deployed Chainlit config's feature flags in place.
+
+    Two concerns, both regex-rewrite-in-place (never re-copy the file so
+    user edits survive):
+
+    - ``[features.spontaneous_file_upload] accept``: strip ``image/*``
+      entries when *vision_enabled* is False, restore them from the
+      packaged template list when True.
+    - ``[features.audio] enabled``: enable only when voice is on and the
+      bind is a loopback address. Skipped when *host* is empty (e.g. the
+      init path, which runs before the server bind is known — the per-boot
+      ``start()``/``run()`` call supplies the host).
+
+    Run before launching the Chainlit subprocess so config reflects the
+    current ``.env`` on every boot, and from ``aria init`` so the file
+    matches the chosen mode immediately.
+
+    Args:
+        aria_home: ARIA_HOME, where ``.chainlit/config.toml`` lives.
+        host: The bind address to evaluate the audio rule against. Empty
+            skips the audio sync (used by the init path).
+        vision_enabled: Whether ``image/*`` uploads should be kept.
+    """
+    config_path = aria_home / ".chainlit" / "config.toml"
+    if not config_path.is_file():
+        return
+
+    content = config_path.read_text()
+    updated = _sync_upload_accept(content, vision_enabled=vision_enabled)
+    if host:
+        updated = _sync_audio_feature(updated, host)
     if updated != content:
         config_path.write_text(updated)
+
+
+def sync_chainlit_audio_feature(host: str, aria_home: Path) -> None:
+    """Back-compat shim — delegates to :func:`sync_chainlit_features`.
+
+    Kept so external callers and tests that reference the old name keep
+    working. Prefer ``sync_chainlit_features`` for new call sites.
+    """
+    sync_chainlit_features(aria_home, host=host, vision_enabled=False)
+
+
+def _vision_enabled() -> bool:
+    """Read the current ``ARIA_VLLM_VISION_ENABLED`` flag from config.
+
+    The config class is env-driven and re-evaluated on ``reload_env()``,
+    so this reflects the latest ``.env`` state at every server start.
+    """
+    from aria.config.api import Vllm
+
+    return bool(Vllm.vision_enabled)
 
 
 @dataclass
@@ -320,7 +416,9 @@ class ServerManager:
 
         aria_home = self._resolve_cwd()
         os.chdir(aria_home)
-        sync_chainlit_audio_feature(self._host, Path(aria_home))
+        sync_chainlit_features(
+            Path(aria_home), host=self._host, vision_enabled=_vision_enabled()
+        )
 
         cmd = self._build_command()
         log_file = open(log_path, "a")
@@ -352,7 +450,9 @@ class ServerManager:
 
         aria_home = self._resolve_cwd()
         os.chdir(aria_home)
-        sync_chainlit_audio_feature(self._host, Path(aria_home))
+        sync_chainlit_features(
+            Path(aria_home), host=self._host, vision_enabled=_vision_enabled()
+        )
 
         cmd = self._build_command()
         log_path = DebugConfig.logs_path

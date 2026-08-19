@@ -10,18 +10,9 @@ from aria.web import thread_titler
 
 
 def _patch_emitter(monkeypatch: pytest.MonkeyPatch) -> AsyncMock:
-    """Patch cl.context.emitter.emit so tests don't need a Chainlit session."""
+    """Patch the Chainlit emitter boundary so tests don't need a session."""
     mock_emit = AsyncMock()
-
-    class _FakeEmitter:
-        emit = mock_emit
-
-    class _FakeContext:
-        emitter = _FakeEmitter()
-
-    import chainlit as cl
-
-    monkeypatch.setattr(cl, "context", _FakeContext(), raising=False)
+    monkeypatch.setattr(thread_titler, "_emit_thread_name", mock_emit)
     return mock_emit
 
 
@@ -157,10 +148,7 @@ class TestMaybeTitleThread:
         mock_data_layer.update_thread.assert_awaited_once_with(
             thread_id="thread-1", name="Greeting Exchange"
         )
-        mock_emit.assert_awaited_once_with(
-            "first_interaction",
-            {"interaction": "Greeting Exchange", "thread_id": "thread-1"},
-        )
+        mock_emit.assert_awaited_once_with("thread-1", "Greeting Exchange")
 
     @pytest.mark.asyncio
     async def test_skips_update_on_empty_title(self, monkeypatch) -> None:

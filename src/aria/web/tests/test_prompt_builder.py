@@ -14,6 +14,12 @@ def _mock_message(**kwargs: Any) -> Any:
     return SimpleNamespace(**kwargs)
 
 
+def _patch_no_mcp_servers(monkeypatch: pytest.MonkeyPatch) -> None:
+    from aria.tools import mcp_bridge
+
+    monkeypatch.setattr(mcp_bridge, "connected_server_names", lambda: [])
+
+
 class TestDescribeImage:
     """Tests for the describe_image helper."""
 
@@ -110,6 +116,7 @@ class TestHandleMessageVision:
     async def test_appends_image_descriptions_when_vision_enabled(
         self, monkeypatch
     ) -> None:
+        _patch_no_mcp_servers(monkeypatch)
         monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", True)
         monkeypatch.setattr(
             pipeline,
@@ -140,6 +147,7 @@ class TestHandleMessageVision:
     async def test_omits_image_block_when_vision_off(self, monkeypatch) -> None:
         """When vision is disabled, image placeholders are NOT injected —
         a ``<vision disabled>`` notice would be noise the model can't act on."""
+        _patch_no_mcp_servers(monkeypatch)
         monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", False)
         monkeypatch.setattr(
             pipeline,
@@ -165,6 +173,7 @@ class TestHandleMessageVision:
 
     @pytest.mark.asyncio
     async def test_no_image_block_when_no_images(self, monkeypatch) -> None:
+        _patch_no_mcp_servers(monkeypatch)
         monkeypatch.setattr(pipeline, "extract_image_data", lambda msg: [])
         monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
 
@@ -183,6 +192,7 @@ class TestHandleMessageVision:
 
     @pytest.mark.asyncio
     async def test_fallback_when_vision_api_fails(self, monkeypatch) -> None:
+        _patch_no_mcp_servers(monkeypatch)
         monkeypatch.setattr(pipeline.VllmConfig, "vision_enabled", True)
         monkeypatch.setattr(
             pipeline,

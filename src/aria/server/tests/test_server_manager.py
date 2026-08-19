@@ -150,3 +150,154 @@ def test_sync_audio_preserves_other_sections(tmp_path: Path) -> None:
     assert _audio_enabled(text) is False
     assert "[features.spontaneous_file_upload]\nenabled = true" in text
     assert "[features.mcp]\nenabled = true" in text
+
+
+# ---------------------------------------------------------------------------
+# sync_chainlit_features — generalized (audio + upload accept)
+# ---------------------------------------------------------------------------
+
+from aria.server.manager import sync_chainlit_features  # noqa: E402
+
+_UPLOAD_CONFIG = (
+    "[features.spontaneous_file_upload]\n"
+    "enabled = true\n"
+    "accept = [\n"
+    '    "application/pdf",\n'
+    '    "text/plain",\n'
+    '    "image/png",\n'
+    '    "image/jpeg",\n'
+    '    "image/webp",\n'
+    '    "image/gif",\n'
+    '    "image/bmp",\n'
+    '    "image/tiff",\n'
+    "]\n"
+    "max_files = 1\n"
+)
+
+
+def _accept_image_count(text: str) -> int:
+    import re
+
+    block = re.search(
+        r"\[features\.spontaneous_file_upload\](.*?)(?=\n\[|\Z)",
+        text,
+        re.DOTALL,
+    )
+    assert block is not None
+    return len(re.findall(r'"image/', block.group(1)))
+
+
+def test_sync_features_vision_off_strips_images(tmp_path: Path) -> None:
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(_UPLOAD_CONFIG + "\n" + _AUDIO_CONFIG)
+
+    sync_chainlit_features(tmp_path, vision_enabled=False)
+
+    text = config.read_text()
+    assert _accept_image_count(text) == 0
+    # Non-image entries survive.
+    assert '"application/pdf"' in text
+    assert '"text/plain"' in text
+
+
+def test_sync_features_vision_on_restores_images(tmp_path: Path) -> None:
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    stripped = (
+        _UPLOAD_CONFIG.replace('    "image/png",\n', "")
+        .replace('    "image/jpeg",\n', "")
+        .replace('    "image/webp",\n', "")
+        .replace('    "image/gif",\n', "")
+        .replace('    "image/bmp",\n', "")
+        .replace('    "image/tiff",\n', "")
+    )
+    config.write_text(stripped)
+
+    sync_chainlit_features(tmp_path, vision_enabled=True)
+
+    assert _accept_image_count(config.read_text()) == 6
+
+
+def test_sync_features_vision_on_is_idempotent(tmp_path: Path) -> None:
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(_UPLOAD_CONFIG)
+
+    sync_chainlit_features(tmp_path, vision_enabled=True)
+    first = config.read_text()
+    sync_chainlit_features(tmp_path, vision_enabled=True)
+
+    assert config.read_text() == first  # no duplicate image block
+    assert _accept_image_count(first) == 6
+
+
+def test_sync_features_audio_and_vision_together(tmp_path: Path) -> None:
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(_UPLOAD_CONFIG + "\n" + _AUDIO_CONFIG)
+
+    from aria.config.api import Voice
+
+    original = Voice.enabled
+    try:
+        Voice.enabled = True
+        sync_chainlit_features(tmp_path, host="localhost", vision_enabled=False)
+    finally:
+        Voice.enabled = original
+
+    text = config.read_text()
+    assert _audio_enabled(text) is True
+    assert _accept_image_count(text) == 0
+
+
+def test_sync_features_skips_audio_when_host_empty(tmp_path: Path) -> None:
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(_UPLOAD_CONFIG + "\n" + _AUDIO_CONFIG)
+
+    sync_chainlit_features(tmp_path, vision_enabled=False)  # no host
+
+    text = config.read_text()
+    assert _audio_enabled(text) is True  # audio untouched (host unknown)
+    assert _accept_image_count(text) == 0
+
+
+def test_sync_features_skips_missing_config(tmp_path: Path) -> None:
+    sync_chainlit_features(tmp_path, vision_enabled=True)  # no file → no-op
+
+
+def test_sync_features_preserves_unrelated_sections(tmp_path: Path) -> None:
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    config.write_text(
+        '[project]\nallow_origins = ["*"]\n\n'
+        + _UPLOAD_CONFIG
+        + "\n[features.mcp]\nenabled = true\n"
+    )
+
+    sync_chainlit_features(tmp_path, vision_enabled=False)
+
+    text = config.read_text()
+    assert '[project]\nallow_origins = ["*"]' in text
+    assert "[features.mcp]\nenabled = true" in text
+    assert _accept_image_count(text) == 0
+
+
+def test_sync_features_leaves_reformatted_accept_untouched(tmp_path: Path) -> None:
+    """When the ``accept = [`` array is absent (user removed it or moved
+    uploads elsewhere), the sync must leave the section alone — fail-safe,
+    no data loss, same as the audio sync returning early on a missing file."""
+    config = tmp_path / ".chainlit" / "config.toml"
+    config.parent.mkdir(parents=True)
+    original = (
+        "[features.spontaneous_file_upload]\n"
+        "enabled = true\n"
+        "# accept array removed by user\n"
+        "max_files = 1\n"
+    )
+    config.write_text(original)
+
+    sync_chainlit_features(tmp_path, vision_enabled=False)
+
+    assert config.read_text() == original  # nothing matched → untouched

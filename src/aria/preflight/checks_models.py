@@ -85,7 +85,7 @@ def _check_models(checks: list[CheckResult]) -> None:
                     passed=False,
                     category="models",
                     error=f"not downloaded ({model_path})",
-                    hint=f"Run: aria models download --model {alias}",
+                    hint=f"Run: aria init  (or aria models download --model {alias})",
                 )
             )
 

@@ -9,9 +9,12 @@ the content-to-text mapping. The chainlit ``ClientSession`` is faked with
 from __future__ import annotations
 
 import json
+import sys
+from types import ModuleType
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from chainlit.context import ChainlitContextException
 from mcp.types import (
     CallToolResult,
     ImageContent,
@@ -33,6 +36,13 @@ from aria.tools.mcp_bridge import (
 
 def _decode(result: str) -> dict:
     return json.loads(result)
+
+
+@pytest.fixture(autouse=True)
+def _chainlit_module(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
+    module = ModuleType("chainlit")
+    monkeypatch.setitem(sys.modules, "chainlit", module)
+    return module
 
 
 def _make_client(
@@ -230,11 +240,9 @@ class TestResolveSession:
     """``resolve_session`` — ``cl.user_session`` lookup."""
 
     @pytest.fixture
-    def _fake_user_session(self, monkeypatch):
-        import chainlit as cl
-
+    def _fake_user_session(self, monkeypatch, _chainlit_module):
         store = MagicMock()
-        monkeypatch.setattr(cl, "user_session", store)
+        monkeypatch.setattr(_chainlit_module, "user_session", store, raising=False)
         return store
 
     def test_no_sessions_returns_none(self, _fake_user_session):
@@ -257,17 +265,16 @@ class TestResolveSession:
         assert resolve_session("whatsapp") is session
         assert resolve_session("WHATSAPP") is session
 
-    def test_no_chainlit_context_returns_none(self, monkeypatch):
+    def test_no_chainlit_context_returns_none(self, monkeypatch, _chainlit_module):
         """Outside a chainlit session (workers/CLI/tests) the lazy ``context``
         proxy raises ``ChainlitContextException`` — degrade to None, not an
         unhandled exception. This is the documented worker/CLI path (§11).
         """
-        import chainlit as cl
-        from chainlit.context import ChainlitContextException
-
         fake_session = MagicMock()
         fake_session.get.side_effect = ChainlitContextException
-        monkeypatch.setattr(cl, "user_session", fake_session)
+        monkeypatch.setattr(
+            _chainlit_module, "user_session", fake_session, raising=False
+        )
         assert resolve_session("any") is None
 
 
@@ -290,11 +297,10 @@ class TestConnectedServerNames:
         )
         assert sorted(connected_server_names()) == ["db", "github"]
 
-    def test_no_chainlit_context_returns_empty(self, monkeypatch):
-        import chainlit as cl
-        from chainlit.context import ChainlitContextException
-
+    def test_no_chainlit_context_returns_empty(self, monkeypatch, _chainlit_module):
         fake_session = MagicMock()
         fake_session.get.side_effect = ChainlitContextException
-        monkeypatch.setattr(cl, "user_session", fake_session)
+        monkeypatch.setattr(
+            _chainlit_module, "user_session", fake_session, raising=False
+        )
         assert connected_server_names() == []

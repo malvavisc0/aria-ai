@@ -210,10 +210,10 @@ def server_run():
 
     vLLM server processes are started automatically by the web_ui.
     Press Ctrl+C to stop.
-    """
-    _ensure_lightpanda_installed()
-    _ensure_models_downloaded()
 
+    Preflight verifies binaries and models are present — run ``aria init``
+    first to install and download them.
+    """
     result = run_preflight_checks()
     if not _print_preflight_result(result):
         raise typer.Exit(1)
@@ -243,35 +243,6 @@ def server_run():
 def _is_vllm_healthy() -> bool:
     """Check if the vLLM chat server is responding to health checks."""
     return is_vllm_healthy()
-
-
-def _ensure_lightpanda_installed() -> None:
-    """Download Lightpanda automatically if it is missing."""
-    from aria.config.api import Lightpanda
-    from aria.server.lifecycle import ensure_lightpanda_installed
-
-    if Lightpanda.is_available():
-        return
-
-    console.print("[dim]Lightpanda not installed — downloading...[/dim]")
-    try:
-        ensure_lightpanda_installed()
-    except Exception as e:
-        error_console.print(f"[red]Failed to install Lightpanda: {e}[/red]")
-        raise typer.Exit(1)
-
-    console.print("[green]✓[/green] Lightpanda installed")
-
-
-def _ensure_models_downloaded() -> None:
-    """Auto-download models from HuggingFace if they are missing."""
-    from aria.server.lifecycle import ensure_models_downloaded
-
-    try:
-        ensure_models_downloaded(progress=lambda m: console.print(f"[dim]{m}[/dim]"))
-    except Exception as e:
-        error_console.print(f"[red]{e}[/red]")
-        raise typer.Exit(1)
 
 
 def _ensure_endpoint_reachable() -> None:
@@ -341,10 +312,10 @@ def server_start(
     """Start the Aria webserver in background.
 
     vLLM server processes are started automatically by the web_ui.
-    """
-    _ensure_lightpanda_installed()
-    _ensure_models_downloaded()
 
+    Preflight verifies binaries and models are present — run ``aria init``
+    first to install and download them.
+    """
     result = run_preflight_checks()
     if not _print_preflight_result(result):
         raise typer.Exit(1)

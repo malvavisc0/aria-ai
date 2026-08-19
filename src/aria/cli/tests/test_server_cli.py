@@ -2,7 +2,7 @@ from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from aria.cli.server import _ensure_models_downloaded, app
+from aria.cli.server import app
 
 runner = CliRunner()
 
@@ -20,8 +20,6 @@ def _preflight_ok():
 
 def test_server_run_shows_clean_failure_panel() -> None:
     with (
-        patch("aria.cli.server._ensure_lightpanda_installed"),
-        patch("aria.cli.server._ensure_models_downloaded"),
         patch("aria.cli.server._ensure_endpoint_reachable"),
         patch(
             "aria.cli.server._get_captured_startup_error",
@@ -53,8 +51,6 @@ def test_server_run_shows_clean_failure_panel() -> None:
 
 def test_server_run_shows_captured_error_after_clean_return() -> None:
     with (
-        patch("aria.cli.server._ensure_lightpanda_installed"),
-        patch("aria.cli.server._ensure_models_downloaded"),
         patch("aria.cli.server._ensure_endpoint_reachable"),
         patch(
             "aria.cli.server._get_captured_startup_error",
@@ -81,8 +77,6 @@ def test_server_run_shows_captured_error_after_clean_return() -> None:
 
 def test_server_start_shows_clean_timeout_panel() -> None:
     with (
-        patch("aria.cli.server._ensure_lightpanda_installed"),
-        patch("aria.cli.server._ensure_models_downloaded"),
         patch("aria.cli.server._ensure_endpoint_reachable"),
         patch(
             "aria.cli.server._get_captured_startup_error",
@@ -109,9 +103,16 @@ def test_server_start_shows_clean_timeout_panel() -> None:
     assert "model load error" in result.output
 
 
-def test_ensure_models_downloaded_skips_chat_in_remote_mode() -> None:
-    """When ARIA_VLLM_REMOTE=true the chat model must never be downloaded."""
+def test_lifecycle_ensure_models_downloaded_skips_chat_in_remote_mode() -> None:
+    """When ARIA_VLLM_REMOTE=true the chat model must never be downloaded.
+
+    The CLI no longer calls this helper (init owns installs/downloads now),
+    but ``lifecycle.ensure_models_downloaded`` remains the shared building
+    block and must keep the remote-skip contract.
+    """
     import os
+
+    from aria.server.lifecycle import ensure_models_downloaded
 
     with (
         patch("aria.config.api.Vllm") as mock_vllm,
@@ -132,7 +133,7 @@ def test_ensure_models_downloaded_skips_chat_in_remote_mode() -> None:
         mock_chat.model_path = "/nonexistent/chat-model"
         mock_embed.model_path = "/nonexistent/embed-model"
 
-        _ensure_models_downloaded()
+        ensure_models_downloaded()
 
     # Only the embeddings repo id should have been downloaded — never chat.
     downloaded_repos = {call.kwargs["repo_id"] for call in mock_download.call_args_list}
@@ -142,8 +143,6 @@ def test_ensure_models_downloaded_skips_chat_in_remote_mode() -> None:
 
 def test_ensure_vllm_running_shows_clean_failure_panel() -> None:
     with (
-        patch("aria.cli.server._ensure_lightpanda_installed"),
-        patch("aria.cli.server._ensure_models_downloaded"),
         patch("aria.cli.server._ensure_endpoint_reachable"),
         patch(
             "aria.cli.server.run_preflight_checks",

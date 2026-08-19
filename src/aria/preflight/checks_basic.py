@@ -116,7 +116,7 @@ def _check_binaries(checks: list[CheckResult]) -> None:
                 passed=False,
                 category="binaries",
                 error="vLLM is not installed",
-                hint="Run: aria vllm install",
+                hint="Run: aria init  (or aria vllm install)",
             )
         )
 
@@ -142,7 +142,7 @@ def _check_lightpanda(checks: list[CheckResult]) -> None:
                 passed=False,
                 category="binaries",
                 error="Lightpanda is not installed",
-                hint="Run: aria lightpanda download",
+                hint="Run: aria init  (or aria lightpanda download)",
             )
         )
 
@@ -170,7 +170,7 @@ def _check_docling(checks: list[CheckResult]) -> None:
                 name="docling worker",
                 passed=True,
                 category="binaries",
-                details="not installed; run 'aria docling install' for PDF conversion",
+                details="not installed; run 'aria init' (or 'aria docling install') for PDF conversion",
                 warning=True,
             )
         )
@@ -251,7 +251,7 @@ def _check_voice(checks: list[CheckResult]) -> None:
                 passed=False,
                 category="binaries",
                 error="whisper.cpp binary not installed",
-                hint="Run: aria voice download",
+                hint="Run: aria init  (or aria voice download)",
             )
         )
 
@@ -272,7 +272,7 @@ def _check_voice(checks: list[CheckResult]) -> None:
                 passed=False,
                 category="binaries",
                 error=f"Whisper GGUF model not found at {whisper_model}",
-                hint="Run: aria voice download",
+                hint="Run: aria init  (or aria voice download)",
             )
         )
 
@@ -292,7 +292,7 @@ def _check_voice(checks: list[CheckResult]) -> None:
                 passed=False,
                 category="binaries",
                 error="kokoro TTS model not installed",
-                hint="Run: aria voice download",
+                hint="Run: aria init  (or aria voice download)",
             )
         )
 
@@ -313,7 +313,7 @@ def _check_voice(checks: list[CheckResult]) -> None:
                 passed=False,
                 category="binaries",
                 error=f"kokoro voices file not found at {kokoro_voices}",
-                hint="Run: aria voice download",
+                hint="Run: aria init  (or aria voice download)",
             )
         )
 
@@ -324,7 +324,7 @@ def _check_voice(checks: list[CheckResult]) -> None:
                 passed=False,
                 category="binaries",
                 error="kokoro-tts Python tool not installed",
-                hint="Run: aria voice download",
+                hint="Run: aria init  (or aria voice download)",
             )
         )
     else:
