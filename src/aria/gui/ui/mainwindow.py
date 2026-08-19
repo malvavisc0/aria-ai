@@ -70,8 +70,8 @@ class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
         if not MainWindow.objectName():
             MainWindow.setObjectName("MainWindow")
-        MainWindow.resize(800, 700)
-        MainWindow.setMinimumSize(QSize(940, 660))
+        MainWindow.resize(1200, 870)
+        MainWindow.setMinimumSize(QSize(1200, 870))
         MainWindow.setFocusPolicy(Qt.FocusPolicy.TabFocus)
         icon = QIcon(QIcon.fromTheme("emblem-system"))
         MainWindow.setWindowIcon(icon)
