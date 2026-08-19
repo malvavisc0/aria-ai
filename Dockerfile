@@ -37,4 +37,9 @@ WORKDIR /app
 EXPOSE 9876
 
 # ── Entrypoint ────────────────────────────────────────────────────────────────
-ENTRYPOINT ["aria", "server", "run"]
+# `aria init --non-interactive` bootstraps a fresh /app/data volume (env file,
+# dirs, binaries, models) on every boot — idempotent, so restarts with a
+# populated volume are no-ops. Then execs into `aria server run`.
+COPY packaging/docker-entrypoint.sh /usr/local/bin/aria-entrypoint.sh
+RUN chmod +x /usr/local/bin/aria-entrypoint.sh
+ENTRYPOINT ["/usr/local/bin/aria-entrypoint.sh"]

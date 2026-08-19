@@ -48,15 +48,23 @@
 git clone git@github.com:malvavisc0/aria-ai.git
 cd aria-ai
 uv sync   # pins CPU-only torch automatically (embeddings run on CPU; vLLM has its own isolated CUDA venv)
-aria server run
+aria init            # detect hardware, install binaries, download models (run once)
+aria server start    # start the web UI in the background
 # → Open http://localhost:9876
 ```
+
+`aria init` walks you through setup: it detects your GPU, picks a chat
+mode (local vLLM when an NVIDIA GPU is present, or a remote
+OpenAI-compatible endpoint), installs vLLM/Lightpanda/docling/voice as
+appropriate, and downloads the required models. Re-running it is safe —
+every step is idempotent and your `.env` customizations are preserved.
 
 ### Option B — Install from PyPI
 
 ```bash
 pip install aria-ai
-aria server run
+aria init
+aria server start
 # → Open http://localhost:9876
 ```
 
@@ -66,6 +74,12 @@ aria server run
 docker run -p 9876:9876 -v ./data:/app/data ghcr.io/malvavisc0/aria-ai-cuda:latest
 # → Open http://localhost:9876
 ```
+
+The container entrypoint runs `aria init --non-interactive` on every boot
+(idempotent — a populated `/app/data` volume makes it a no-op) before
+`aria server run`, so a fresh volume is bootstrapped automatically. Pass
+`ARIA_VLLM_REMOTE=true` plus `CHAT_OPENAI_API`/`ARIA_VLLM_API_KEY`/`CHAT_MODEL`
+via `--env-file .env` for remote mode.
 
 ### Option D — Desktop GUI
 
@@ -164,14 +178,21 @@ uv sync --extra gui
 
 ### First Run
 
-On first launch, Aria automatically:
-- Creates `.env` configuration with generated auth secrets
-- Sets up the SQLite database
-- Creates required directories
+Run `aria init` once to bootstrap ARIA_HOME, detect your hardware, pick a
+chat mode, and install/download everything needed:
 
 ```bash
-ax check preflight    # Verify installation
-aria server run       # Start the web server
+aria init            # interactive: detect, ask mode, install, download
+aria init --mode remote --remote-url https://api.openai.com/v1 --api-key sk-... --model gpt-4o
+aria init --dry-run  # print the plan, change nothing
+aria init --non-interactive  # derive everything from env vars (Docker)
+```
+
+Then start the server:
+
+```bash
+aria server start    # Start in background (preflight verifies, then serves)
+ax check preflight   # Verify installation
 ```
 
 ---
@@ -190,9 +211,13 @@ Aria ships with two CLI entry points:
 Human-facing commands for infrastructure and system management.
 
 ```bash
+# Setup (run once before starting the server)
+aria init               # Bootstrap, detect hardware, install binaries, download models
+aria init --mode remote # Configure a remote OpenAI-compatible endpoint
+
 # Server management
-aria server run       # Run in foreground
-aria server start     # Start in background
+aria server run       # Run in foreground (preflight verifies, then serves)
+aria server start     # Start in background (no auto-install — run `aria init` first)
 aria server stop      # Stop the server
 aria server status    # Check status
 

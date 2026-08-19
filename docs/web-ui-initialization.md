@@ -127,6 +127,33 @@ vLLM serves the chat model; embeddings load in-process via HuggingFace.
 | vLLM server(s) | configured per model | Chat LLM inference |
 | Embeddings | In-process | Text embeddings (loaded via HuggingFace) |
 
+### First-boot bootstrap (`aria init`)
+
+All initialization lives in the `aria init` command (and the GUI setup
+wizard, which is the GUI's init path). It runs once before `aria server
+start` and is idempotent — re-runs skip already-installed pieces and
+never overwrite user-set `.env` values. The flow:
+
+1. Bootstrap ARIA_HOME (`.env`, dirs, DB, assets, chainlit config).
+2. Detect hardware (NVIDIA-only this iteration; ROCm/Metal/CPU → remote).
+3. Choose chat mode (local vLLM with a GPU, or a remote OpenAI-compatible
+   endpoint). No GPU + no remote configured → abort (no CPU-vLLM mode).
+4. Apply the feature matrix to `.env` + `.chainlit/config.toml` (vision
+   image-upload MIME types, docling device, voice).
+5. Install binaries (Lightpanda always; vLLM local-chat only; docling
+   always; voice when enabled and a GPU is present).
+6. Download models (chat local-chat only; embeddings + docling always;
+   whisper/kokoro when voice is enabled).
+7. Warn on small GPUs (< 12 GB VRAM) when voice or docling CUDA is enabled.
+8. Verify via preflight; hard failures exit 1.
+9. Write `$ARIA_HOME/.init-completed.json` and print a summary.
+
+The `aria`, `ax`, and `aria-gui` entry points gate on that marker: non-init
+commands refuse to run until it exists (the GUI routes into the wizard
+instead of refusing). Existing installs have no marker — the first run
+after upgrade fires the gate and `aria init` completes in seconds (every
+step is a no-op for an already-provisioned ARIA_HOME) and writes it.
+
 ---
 
 ## Startup Sequence
@@ -251,12 +278,12 @@ per-turn embedding flushes on the UI critical path.
 |-------|---------|---------|------------|
 | Logging | Permission denied | Silent failure/crash | Check directory permissions |
 | Database | Cannot create file | Exception at startup | Verify `DATA_FOLDER` exists and is writable |
-| vLLM (local) | Not installed | startup failure | Run `aria vllm install` |
-| vLLM (local) | Missing model | Model load failure | Verify `CHAT_MODEL_PATH` |
+| vLLM (local) | Not installed | startup failure | Run `aria init` (or `aria vllm install`) |
+| vLLM (local) | Missing model | Model load failure | Run `aria init` (or `aria models download --model chat`) |
 | vLLM (local) | Port in use | Health-check timeout | Kill the process on the port |
 | vLLM (local) | GPU OOM | Server crash | Reduce `CHAT_CONTEXT_SIZE` or use a smaller model |
 | vLLM (remote) | Endpoint unreachable | startup abort | Check `CHAT_OPENAI_API` and network |
-| Embeddings | Not pre-downloaded | startup abort | `aria models download --model embeddings` |
+| Embeddings | Not pre-downloaded | startup abort | Run `aria init` (or `aria models download --model embeddings`) |
 | LLM | Connection refused | LLM stays `None` | Ensure vLLM is healthy |
 
 A failure in critical infra or vLLM/embeddings triggers `_abort_startup`:
@@ -334,7 +361,7 @@ insufficient GPU memory, port in use.
 lsof -i :9090     # port conflict
 nvidia-smi        # GPU memory
 aria vllm status   # installation
-aria vllm install  # if missing
+aria init          # install + download everything (idempotent)
 ```
 
 ### 3. Database Errors
@@ -363,7 +390,7 @@ Startup aborts with "Embeddings model not found locally". The embeddings
 model must be pre-downloaded; no auto-download happens at startup.
 
 ```bash
-aria models download --model embeddings
+aria init  # or: aria models download --model embeddings
 ```
 
 ### Health Check Endpoints

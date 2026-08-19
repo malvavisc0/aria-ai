@@ -66,6 +66,7 @@ aria = [
     "public/*.png",
     "public/avatars/*.png",
     "public/icons/*.svg",
+    "bootstrap/models.json",
 ]
 
 [dependency-groups]
@@ -111,7 +112,10 @@ typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
-addopts = "-n logical --dist loadscope --cov=src/aria --cov-report=term-missing"
+# Serial execution (no xdist): a minority of tests mutate shared env-driven
+# config class attributes (e.g. Vllm.vision_enabled) that leak across
+# workers, making parallel runs flaky. Serial keeps the suite deterministic.
+addopts = "--cov=src/aria --cov-report=term-missing"
 markers = [
     "voice: tests for whisper.cpp/kokoro-tts voice components (excluded from CI; too heavy for CI runners)",
 ]
