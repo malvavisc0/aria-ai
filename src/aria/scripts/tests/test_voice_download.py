@@ -6,7 +6,11 @@ from unittest.mock import patch
 
 import pytest
 
-from aria.scripts.voice import _detect_whisper_target, _whisper_download_url
+from aria.scripts.voice import (
+    _detect_whisper_target,
+    _extract_whisper_binary,
+    _whisper_download_url,
+)
 
 
 class TestDetectWhisperTarget:
@@ -52,6 +56,63 @@ class TestWhisperDownloadUrl:
         assert "whisper-bin-ubuntu-arm64.tar.gz" in url
 
 
+class TestExtractWhisperBinary:
+    """The prebuilt tarball nests whisper-server (+ libggml*.so) under a
+    release dir. Extraction must flatten to <dest>/whisper-server: the
+    runtime resolves only the flat path, and the libs must sit next to
+    the binary that dlopens them."""
+
+    def _make_bundle(self, tmp_path, nested: bool):
+        import tarfile
+
+        src = tmp_path / "src"
+        inner = src / "whisper-bin-ubuntu-x64" if nested else src
+        inner.mkdir(parents=True)
+        (inner / "whisper-server").write_bytes(b"\x7fELF fake")
+        (inner / "libggml.so").write_bytes(b"lib")
+        archive = tmp_path / "whisper.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(inner, arcname=inner.relative_to(src))
+        return archive
+
+    def test_flattens_nested_release_dir(self, tmp_path) -> None:
+        archive = self._make_bundle(tmp_path, nested=True)
+        dest = tmp_path / "whisper-cpp"
+        dest.mkdir()
+
+        binary = _extract_whisper_binary(archive, dest)
+
+        assert binary == dest / "whisper-server"
+        assert binary.is_file()
+        # libggml must be flattened next to the binary that loads it.
+        assert (dest / "libggml.so").is_file()
+        # The nested release dir is gone — no stale layout left behind.
+        assert not (dest / "whisper-bin-ubuntu-x64").exists()
+
+    def test_flat_archive_unchanged(self, tmp_path) -> None:
+        archive = self._make_bundle(tmp_path, nested=False)
+        dest = tmp_path / "whisper-cpp"
+        dest.mkdir()
+
+        binary = _extract_whisper_binary(archive, dest)
+
+        assert binary == dest / "whisper-server"
+        assert (dest / "libggml.so").is_file()
+
+    def test_missing_binary_raises(self, tmp_path) -> None:
+        import tarfile
+
+        src = tmp_path / "src"
+        src.mkdir()
+        (src / "README").write_text("no binary here")
+        archive = tmp_path / "whisper.tar.gz"
+        with tarfile.open(archive, "w:gz") as tar:
+            tar.add(src / "README", arcname="README")
+
+        with pytest.raises(RuntimeError, match="not found"):
+            _extract_whisper_binary(archive, tmp_path / "dest")
+
+
 class TestDownloadWhisperCppCudaFallback:
     """The CUDA build is hosted on Aria's own releases and may be absent
     (asset 404) for some versions. The download must fall back to the
@@ -81,6 +142,7 @@ class TestDownloadWhisperCppCudaFallback:
             calls.append(url)
             if "malvavisc0/aria-ai" in url:
                 raise RuntimeError("Failed to download from x: HTTP 404 Not Found")
+            dest.touch()  # the archive must exist for the post-extract cleanup
 
         mock_dl.side_effect = _fake_download
 
@@ -126,6 +188,7 @@ class TestDownloadWhisperModelDefault:
         binary = tmp_path / "whisper-server"
         binary.touch()
         _extract.return_value = binary
+        mock_dl.side_effect = lambda url, dest: dest.touch()
 
         v.download_whisper_cpp()
 

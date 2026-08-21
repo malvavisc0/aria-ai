@@ -48,8 +48,10 @@ class TestVoice:
             finally:
                 Voice.enabled = original
 
-    def test_available_with_nested_release_dir(self, tmp_path: Path) -> None:
-        """The extracted bundle nests whisper-server under a release dir."""
+    def test_nested_release_dir_is_not_accepted(self, tmp_path: Path) -> None:
+        """A nested leftover (un-flattened install) is a broken install:
+        reported missing so preflight/init surface it, never silently
+        accepted as the flat-layout contract requires."""
         import aria.config.folders as folders_mod
 
         with _patch_paths(folders_mod, tmp_path):
@@ -65,28 +67,10 @@ class TestVoice:
             original = Voice.enabled
             try:
                 Voice.enabled = True
-                assert Voice.is_available() is True
+                assert Voice.is_available() is False
             finally:
                 Voice.enabled = original
-            assert Voice.get_whisper_binary_path() == exe
-
-    def test_flat_path_preferred_over_nested(self, tmp_path: Path) -> None:
-        """A flat whisper-server wins over a legacy nested layout."""
-        import aria.config.folders as folders_mod
-
-        with _patch_paths(folders_mod, tmp_path):
-            nested = (
-                tmp_path
-                / "bin"
-                / "whisper-cpp"
-                / "whisper-bin-ubuntu-x64"
-                / "whisper-server"
-            )
-            nested.parent.mkdir(parents=True)
-            nested.touch()
-            flat = tmp_path / "bin" / "whisper-cpp" / "whisper-server"
-            flat.touch()
-            assert Voice.get_whisper_binary_path() == flat
+            assert Voice.get_whisper_binary_path() is None
 
     def test_kokoro_availability(self, tmp_path: Path) -> None:
         import aria.config.folders as folders_mod

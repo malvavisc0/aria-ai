@@ -293,18 +293,14 @@ class Voice:
     def get_whisper_binary_path(cls) -> Path | None:
         """Get the whisper.cpp server binary path, or None if not installed.
 
-        The binary lives flat at ``~/.aria/bin/whisper-cpp/whisper-server``
-        (a static build is self-contained, no companion libraries). A
-        legacy nested prebuilt layout (``whisper-cpp/<release-dir>/
-        whisper-server``) is still found as a fallback.
+        The binary lives flat at ``~/.aria/bin/whisper-cpp/whisper-server``;
+        the installer flattens the prebuilt's nested release dir so the
+        ``libggml*.so`` companions sit next to the binary it loads them
+        from. A nested leftover is a broken install — reported missing so
+        preflight/init surface it instead of silently accepting it.
         """
         flat = Bin.path / "whisper-cpp" / "whisper-server"
-        if flat.is_file():
-            return flat
-        for candidate in (Bin.path / "whisper-cpp").rglob("whisper-server"):
-            if candidate.is_file():
-                return candidate
-        return None
+        return flat if flat.is_file() else None
 
     @classmethod
     def get_whisper_model_path(cls) -> Path:

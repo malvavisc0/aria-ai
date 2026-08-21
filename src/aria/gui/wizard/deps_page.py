@@ -146,6 +146,7 @@ class _DependenciesPage(QWizardPage):
             if c.category in ("binaries", "models")
             and self._should_show_check(c, hardware, remote)
         ]
+        relevant = self._group_rows(relevant)
 
         if not relevant:
             self._info_label.setText("No dependencies to check.")
@@ -156,6 +157,36 @@ class _DependenciesPage(QWizardPage):
         self._all_ok = all(self._add_check_row(c) for c in relevant)
         self._info_label.setText(self._deps_summary(relevant))
         self.completeChanged.emit()
+
+    # Rows that share one install target are collapsed into a single row
+    # labeled for what the Download actually installs. Preflight emits 4
+    # voice rows (whisper STT binary/model, kokoro model/voices/tool) but
+    # the "voice" target installs whisper + kokoro together — showing them
+    # separately made a "whisper.cpp (STT)" button download kokoro too.
+    _VOICE_ROW = "voice assistant (whisper.cpp STT + kokoro TTS)"
+    _TARGET_LABELS = {
+        "lightpanda": "lightpanda",
+        "vllm": "vLLM",
+        "chat": "chat model",
+        "embeddings": "embeddings model",
+        "docling": "docling worker + model",
+        "voice": _VOICE_ROW,
+    }
+
+    @classmethod
+    def _group_rows(cls, checks: list) -> list:
+        """Collapse per-target multi-row checks into one accurately-labeled row."""
+        voice = [c for c in checks if cls._resolve_target(c.name) == "voice"]
+        if not voice:
+            return checks
+        rest = [c for c in checks if cls._resolve_target(c.name) != "voice"]
+        merged = (
+            next((c for c in voice if not c.passed), None)
+            or next((c for c in voice if c.warning), None)
+            or voice[0]
+        )
+        merged.name = cls._VOICE_ROW
+        return rest + [merged]
 
     @staticmethod
     def _deps_summary(relevant) -> str:
@@ -222,22 +253,18 @@ class _DependenciesPage(QWizardPage):
         row.addWidget(QLabel(text))
         if show_download:
             btn = QPushButton("Download")
-            btn.clicked.connect(
-                lambda checked=False, n=check.name: self._on_download(n)
-            )
+            btn.clicked.connect(lambda checked=False, t=target: self._on_download(t))
             row.addWidget(btn)
         self._status_layout.addLayout(row)
 
         return not block
 
-    def _on_download(self, name: str):
-        target = self._resolve_target(name)
-        if not target:
-            return
+    def _on_download(self, target: str):
+        label = self._TARGET_LABELS.get(target, target)
 
         self._downloading = True
         self._complete_changed()
-        self._info_label.setText(f"Downloading {name}\u2026")
+        self._info_label.setText(f"Downloading {label}\u2026")
 
         for i in range(self._status_layout.count()):
             row_item = self._status_layout.itemAt(i)

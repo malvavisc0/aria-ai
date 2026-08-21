@@ -8,6 +8,7 @@ vLLM's separated venv), with its model files fetched separately to
 """
 
 import platform
+import shutil
 import stat
 import subprocess
 import tarfile
@@ -89,6 +90,7 @@ def download_whisper_cpp(model: str | None = None) -> Path:
     dest_dir = Bin.path / "whisper-cpp"
     dest_dir.mkdir(parents=True, exist_ok=True)
     binary = _extract_whisper_binary(archive, dest_dir)
+    archive.unlink()
     if platform.system() != "Windows":
         binary.chmod(binary.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
@@ -195,21 +197,24 @@ def _whisper_download_url(target: str) -> str:
 
 
 def _extract_whisper_binary(archive: Path, dest_dir: Path) -> Path:
-    """Extract the whisper bundle and return the ``whisper-server`` executable.
+    """Extract the whisper bundle flat into ``dest_dir`` and return the binary.
 
-    whisper.cpp bundles a ``whisper-server`` executable plus the shared
-    libraries (``libggml*.so``) it loads from its own directory, so the
-    whole archive is extracted rather than a single file.
+    The prebuilt tarballs nest ``whisper-server`` (plus the ``libggml*.so``
+    it loads from its own directory) under a release dir such as
+    ``whisper-bin-ubuntu-x64/``. The runtime contract is the flat layout
+    ``<dest_dir>/whisper-server``, so the archive contents are flattened
+    into ``dest_dir`` — anything less silently breaks the path
+    ``Voice.get_whisper_binary_path()`` resolves.
 
     Args:
         archive: The downloaded tarball.
-        dest_dir: Directory to extract into.
+        dest_dir: Directory to install into (flat).
 
     Returns:
-        The path to the extracted whisper-server binary.
+        The path ``<dest_dir>/whisper-server``.
 
     Raises:
-        RuntimeError: If no binary is found in the archive.
+        RuntimeError: If the archive has no whisper-server binary.
     """
     try:
         with tarfile.open(archive, "r:gz") as tar:
@@ -217,8 +222,23 @@ def _extract_whisper_binary(archive: Path, dest_dir: Path) -> Path:
     except (tarfile.TarError, OSError) as e:
         raise RuntimeError(f"Failed to extract whisper.cpp archive: {e}") from e
 
-    for candidate in dest_dir.rglob("whisper-server"):
-        if candidate.is_file():
-            return candidate
+    binary = dest_dir / "whisper-server"
+    if binary.is_file():
+        return binary
+
+    for nested in sorted(dest_dir.rglob("whisper-server")):
+        if not nested.is_file():
+            continue
+        for sibling in nested.parent.iterdir():
+            if sibling.is_file():
+                sibling.rename(dest_dir / sibling.name)
+        nested_dir = nested.parent
+        try:
+            nested_dir.rmdir()
+        except OSError:
+            shutil.rmtree(nested_dir, ignore_errors=True)
+        if binary.is_file():
+            return binary
+        break
 
     raise RuntimeError("whisper-server binary not found in downloaded archive")
