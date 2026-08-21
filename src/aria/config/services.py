@@ -193,7 +193,7 @@ class Vllm:
     # sequence needs a Mamba cache block). Lower this if you see
     # "max_num_seqs exceeds available Mamba cache blocks" errors.
     max_num_seqs: int | None = (
-        int(v) if (v := get_optional_env("ARIA_VLLM_MAX_NUM_SEQS", "")) else None
+        int(v) if (v := get_optional_env("ARIA_VLLM_MAX_NUM_SEQS", "128")) else None
     )
 
 

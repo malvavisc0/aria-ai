@@ -21,6 +21,7 @@ import importlib.util
 import json
 import math
 import os
+import re
 import socket
 import subprocess
 import time
@@ -292,12 +293,16 @@ class VllmServerManager:
         managed_vram_mb = int(free_vram_mb * gpu_memory_utilization)
 
         # vLLM overhead: activation/scratch buffers and CUDA context.
-        # CUDA graph memory is profiled separately by vLLM v0.21+,
-        # so we only need to account for the non-profiled fixed costs.
         # Eager mode (--enforce-eager) skips graph capture entirely, so
         # its overhead is lower.  Keep in sync with
         # calculate_gpu_memory_utilization()'s defaults.
         overhead_mb = 768 if enforce_eager else 1536
+        # vLLM v0.21+ CUDA-graph profiling reserve (0 in eager mode) —
+        # subtract it or the KV budget is overestimated and vLLM fails
+        # to start with "KV cache smaller than one max_model_len request".
+        from aria.helpers.nvidia import cudagraph_reserve_mb
+
+        overhead_mb += cudagraph_reserve_mb(total_vram_mb, enforce_eager)
         tp = max(1, tensor_parallel_size)
 
         per_gpu_model_mb, _, _ = estimate_per_gpu_memory_mb(
@@ -307,6 +312,12 @@ class VllmServerManager:
             overhead_mb=overhead_mb,
         )
         available_kv_mb = managed_vram_mb - per_gpu_model_mb - overhead_mb
+        # vLLM's own KV accounting (block alignment, non-uniform layer
+        # metadata, activation scratch) is a few percent tighter than the
+        # architecture estimate. Shave a safety margin so the clamped
+        # context lands *under* vLLM's real ceiling — an overestimate here
+        # is exactly the "KV cache smaller than one request" startup crash.
+        available_kv_mb *= 0.97
         if available_kv_mb <= 0:
             return None
 
@@ -810,8 +821,66 @@ class VllmServerManager:
 
         procs, log_files = self._launch_servers(servers)
         self._save_pids()
-        self._await_ready(servers, procs, log_files)
+        try:
+            self._await_ready(servers, procs, log_files)
+        except RuntimeError:
+            # Hybrid Mamba+attention models size a fixed Mamba state cache
+            # per decode sequence; vLLM's default max_num_seqs (256) can
+            # exceed the blocks that fit, which only surfaces after CUDA
+            # graph capture. Retry once with max_num_seqs clamped to the
+            # reported capacity rather than leaving the user to hit the
+            # crash the config comment warns about.
+            retry_cmd = self._mamba_clamped_cmd(chat_cmd, log_files.get("chat"))
+            if retry_cmd is None:
+                raise
+            logger.warning(
+                "Retrying chat server with max_num_seqs clamped to Mamba "
+                "cache capacity."
+            )
+            servers = [("chat", retry_cmd, Chat.get_port())]
+            procs, log_files = self._launch_servers(servers)
+            self._save_pids()
+            self._await_ready(servers, procs, log_files)
         logger.info("All vLLM server instances are ready.")
+
+    @staticmethod
+    def _mamba_clamped_cmd(cmd: list[str], log_file: Path | None) -> list[str] | None:
+        """Return ``cmd`` with ``--max-num-seqs`` clamped to the Mamba cache
+        capacity parsed from a failed startup log, or ``None`` if the
+        failure was not the Mamba-cache error.
+
+        Only fires on the exact "max_num_seqs exceeds available Mamba cache
+        blocks (N)" error so an unrelated startup failure is never retried.
+        ``N`` (vLLM's own computed capacity) is authoritative — it already
+        accounts for the model's page-size alignment, so no re-derivation.
+        """
+        if log_file is None or not log_file.exists():
+            return None
+        match = re.search(
+            r"max_num_seqs \(\d+\) exceeds available Mamba cache blocks \((\d+)\)",
+            log_file.read_text(),
+        )
+        if match is None:
+            return None
+        capacity = int(match.group(1))
+        if capacity < 1:
+            return None
+
+        new_cmd = list(cmd)
+        flag = "--max-num-seqs"
+        if flag in new_cmd:
+            i = new_cmd.index(flag)
+            # Only clamp down — never raise a user-set value.
+            if int(new_cmd[i + 1]) <= capacity:
+                return None
+            new_cmd[i + 1] = str(capacity)
+        else:
+            new_cmd += [flag, str(capacity)]
+        logger.info(
+            f"Clamping --max-num-seqs to Mamba cache capacity {capacity} "
+            "(hybrid model state-cache limit)."
+        )
+        return new_cmd
 
     def _prepare_chat_cmd(self) -> list[str]:
         """Resolve hardware/context/KV-offload values and build the chat cmd."""

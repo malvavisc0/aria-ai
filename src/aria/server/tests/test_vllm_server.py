@@ -386,3 +386,55 @@ class TestPreflightPortCheck:
                 raise AssertionError("Should have raised RuntimeError")
             except RuntimeError as e:
                 assert "still in use" in str(e)
+
+
+class TestMambaClampedCmd:
+    """Tests for VllmServerManager._mamba_clamped_cmd() — the hybrid-model
+    max_num_seqs retry. The parser must only fire on the exact Mamba-cache
+    error and clamp using vLLM's own reported capacity."""
+
+    def _log(self, tmp_path, text: str):
+        f = tmp_path / "vllm.log"
+        f.write_text(text)
+        return f
+
+    def test_parses_capacity_and_appends_flag(self, tmp_path):
+        log = self._log(
+            tmp_path,
+            "ValueError: max_num_seqs (256) exceeds available Mamba cache "
+            "blocks (184). Each decode sequence requires one Mamba cache block.",
+        )
+        cmd = ["python", "-m", "vllm.entrypoints.openai.api_server", "--model", "m"]
+        out = VllmServerManager._mamba_clamped_cmd(cmd, log)
+        assert out is not None
+        i = out.index("--max-num-seqs")
+        assert out[i + 1] == "184"
+
+    def test_clamps_down_existing_flag(self, tmp_path):
+        log = self._log(
+            tmp_path,
+            "max_num_seqs (256) exceeds available Mamba cache blocks (184).",
+        )
+        cmd = ["python", "--max-num-seqs", "256"]
+        out = VllmServerManager._mamba_clamped_cmd(cmd, log)
+        assert out[out.index("--max-num-seqs") + 1] == "184"
+
+    def test_never_raises_a_lower_user_value(self, tmp_path):
+        """A user-set max_num_seqs already under capacity is left alone
+        (returns None → no retry, the failure was something else)."""
+        log = self._log(
+            tmp_path,
+            "max_num_seqs (256) exceeds available Mamba cache blocks (184).",
+        )
+        cmd = ["python", "--max-num-seqs", "128"]
+        assert VllmServerManager._mamba_clamped_cmd(cmd, log) is None
+
+    def test_ignores_unrelated_error(self, tmp_path):
+        log = self._log(tmp_path, "ValueError: some other startup failure")
+        cmd = ["python", "--model", "m"]
+        assert VllmServerManager._mamba_clamped_cmd(cmd, log) is None
+
+    def test_missing_log_returns_none(self, tmp_path):
+        cmd = ["python", "--model", "m"]
+        assert VllmServerManager._mamba_clamped_cmd(cmd, tmp_path / "nope.log") is None
+        assert VllmServerManager._mamba_clamped_cmd(cmd, None) is None

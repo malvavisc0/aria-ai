@@ -218,6 +218,7 @@ def _kv_cache_budget() -> _KVBudget:
     from aria.helpers.memory import detect_system_ram, get_model_file_size
     from aria.helpers.nvidia import (
         _estimate_kv_cache_mb,
+        cudagraph_reserve_mb,
         estimate_per_gpu_memory_mb,
         get_free_vram_per_gpu,
         get_per_gpu_vram_mb,
@@ -259,7 +260,10 @@ def _kv_cache_budget() -> _KVBudget:
     per_gpu_vram_mb = get_per_gpu_vram_mb()
     free_vram_list = get_free_vram_per_gpu()
     max_free_vram_mb = min(free_vram_list) if free_vram_list else per_gpu_vram_mb
-    overhead_mb = 1536
+    # Base overhead + vLLM v0.21+ CUDA-graph profiling reserve (0 in eager
+    # mode) — must match the launch-path budget or preflight passes a
+    # configuration that vLLM then fails to start.
+    overhead_mb = 1536 + cudagraph_reserve_mb(per_gpu_vram_mb, VllmConfig.enforce_eager)
     tp = max(1, VllmConfig.tensor_parallel_size)
 
     per_gpu_model_mb, per_gpu_kv_mb, vram_needed_mb = estimate_per_gpu_memory_mb(

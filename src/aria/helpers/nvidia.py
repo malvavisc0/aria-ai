@@ -551,6 +551,31 @@ def _kv_bytes_per_elem(kv_cache_dtype: str) -> float:
     return 2.0  # default: fp16/bf16
 
 
+# Fraction of total per-GPU VRAM that vLLM v0.21+ reserves for CUDA-graph
+# capture when graph memory profiling is enabled (the default). Calibrated
+# against vLLM's profiling output: on a 16 GiB GPU at util 0.95 the engine
+# reports the profiling makes util 0.95 equivalent to 0.8385 without it,
+# i.e. ~0.111 × total; measured end-to-end (managed − weights − available
+# KV) it's ~0.114 × total. Eager mode (--enforce-eager) skips graph
+# capture, so this reserve is 0 there.
+_CUDAGRAPH_RESERVE_FRACTION = 0.114
+
+
+def cudagraph_reserve_mb(total_vram_mb: int, enforce_eager: bool) -> int:
+    """VRAM vLLM reserves for CUDA-graph capture (0 in eager mode).
+
+    vLLM v0.21+ profiles and pre-allocates CUDA-graph memory at startup,
+    subtracting it from the KV-cache budget. Aria's fixed overhead never
+    modeled this, so on mid-size GPUs the auto-calculated budget
+    overestimated available KV memory and vLLM failed to start (KV cache
+    smaller than one max_model_len request). Scales with total VRAM
+    because the engine sizes its reserve against what it may manage.
+    """
+    if enforce_eager or total_vram_mb <= 0:
+        return 0
+    return int(total_vram_mb * _CUDAGRAPH_RESERVE_FRACTION)
+
+
 def _fallback_kv_estimate(
     model_size_mb: int, context_size: int, kv_cache_dtype: str
 ) -> int:
@@ -805,6 +830,10 @@ def calculate_gpu_memory_utilization(
         )
         return FALLBACK
 
+    # vLLM v0.21+ CUDA-graph profiling reserve (0 in eager mode) — without
+    # it the budget overestimates available KV memory and vLLM OOMs/fails.
+    cudagraph_mb = cudagraph_reserve_mb(total_vram_mb, enforce_eager)
+
     model_size_mb = _resolve_model_size_mb(model_path, DEFAULT_MODEL_SIZE_MB)
     kv_cache_mb = _estimate_kv_cache_mb(model_path, context_size, kv_cache_dtype)
     kv_source = "config.json"
@@ -816,7 +845,7 @@ def calculate_gpu_memory_utilization(
         model_weights_mb=model_size_mb,
         kv_cache_mb=kv_cache_mb,
         tensor_parallel_size=tensor_parallel_size,
-        overhead_mb=vllm_overhead_mb + headroom_mb,
+        overhead_mb=vllm_overhead_mb + cudagraph_mb + headroom_mb,
     )
     tp = max(1, tensor_parallel_size)
     needed_mb = int(raw_needed_mb * safety_factor)
@@ -837,6 +866,7 @@ def calculate_gpu_memory_utilization(
         "  KV cache estimate: {kv:>8,} MiB  ({per_gpu_kv:>8,.0f} MiB/GPU)  "
         "(ctx={ctx:,}, dtype={kv_dtype}, source={src})\n"
         "  vLLM overhead:     {over:>8,} MiB\n"
+        "  CUDA-graph reserve:{cg:>8,} MiB\n"
         "  Headroom:          {head:>8,} MiB\n"
         "  Raw needed/GPU:    {raw:>8,.0f} MiB\n"
         "  With safety (×{sf}): {needed:>8,.0f} MiB\n"
@@ -852,6 +882,7 @@ def calculate_gpu_memory_utilization(
         kv_dtype=kv_cache_dtype,
         src=kv_source,
         over=vllm_overhead_mb,
+        cg=cudagraph_mb,
         head=headroom_mb,
         raw=raw_needed_mb,
         sf=safety_factor,

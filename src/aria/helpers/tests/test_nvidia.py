@@ -827,21 +827,22 @@ class TestCalculateGpuMemoryUtilization:
     def test_33gb_gpu_128k_fp8(self):
         """Test 33 GB GPU, default model, 128k context, fp8 KV.
 
-        model=4096, kv=4096×4×0.5=8192, overhead=1536, headroom=1024
-        raw=14848, needed=14848×1.2=17818
-        utilization=17818/34120 ≈ 0.52
+        model=4096, kv=4096×4×0.5=8192, overhead=1536, cudagraph=0.22×34120≈7506,
+        headroom=1024
+        raw=18937, needed=18937×1.2=22724
+        utilization=22724/34120 ≈ 0.67
         """
         result = calculate_gpu_memory_utilization(
             34120, context_size=131072, kv_cache_dtype="fp8"
         )
-        assert 0.50 <= result <= 0.60
+        assert 0.60 <= result <= 0.72
 
     def test_33gb_gpu_32k_fp8(self):
         """Test 33 GB GPU, default model, 32k context, fp8 KV.
 
-        model=4096, kv=4096×1×0.5=2048, overhead=1536, headroom=1024
-        raw=8704, needed=8704×1.2=9216
-        utilization=10445/34120 ≈ 0.31 → clamped to 0.50
+        model=4096, kv=4096×1×0.5=2048, overhead=1536, cudagraph≈7506, headroom=1024
+        raw=12793, needed=12793×1.2=15351
+        utilization=15351/34120 ≈ 0.45 → clamped to 0.50
         """
         result = calculate_gpu_memory_utilization(
             34120, context_size=32768, kv_cache_dtype="fp8"
@@ -851,14 +852,15 @@ class TestCalculateGpuMemoryUtilization:
     def test_24gb_gpu_128k_fp8(self):
         """Test 24 GB GPU, default model, 128k context, fp8 KV.
 
-        model=4096, kv=4096×4×0.5=8192, overhead=1536, headroom=1024
-        raw=14848, needed=14848×1.2=16588
-        utilization=17818/24576 ≈ 0.72
+        model=4096, kv=4096×4×0.5=8192, overhead=1536, cudagraph=0.22×24576≈5406,
+        headroom=1024
+        raw=17657, needed=17657×1.2=21188
+        utilization=21188/24576 ≈ 0.86
         """
         result = calculate_gpu_memory_utilization(
             24576, context_size=131072, kv_cache_dtype="fp8"
         )
-        assert 0.60 <= result <= 0.80
+        assert 0.80 <= result <= 0.92
 
     def test_large_gpu_low_utilization(self):
         """Test that a large GPU with a small model gets low utilization.
@@ -881,9 +883,9 @@ class TestCalculateGpuMemoryUtilization:
             kv_cache_dtype="fp8",
             safety_factor=1.50,
         )
-        # raw=14848, needed=14848×1.5=20736
-        # utilization=22272/34120 ≈ 0.65
-        assert 0.55 <= result <= 0.70
+        # raw=18937 (incl. cudagraph≈3889), needed=18937×1.5=28405
+        # utilization=28405/34120 ≈ 0.83
+        assert 0.78 <= result <= 0.88
 
     def test_custom_overhead(self):
         """Test with a custom vLLM overhead."""
@@ -893,10 +895,10 @@ class TestCalculateGpuMemoryUtilization:
             kv_cache_dtype="fp8",
             vllm_overhead_mb=2048,
         )
-        # model=4096, kv=8192, overhead=2048, headroom=1024
-        # raw=15360, needed=15360×1.2=18432
-        # utilization=18432/34120 ≈ 0.54
-        assert 0.50 <= result <= 0.60
+        # model=4096, kv=8192, overhead=2048, cudagraph≈3889, headroom=1024
+        # raw=19449, needed=19449×1.2=23338
+        # utilization=23338/34120 ≈ 0.68
+        assert 0.62 <= result <= 0.74
 
     def test_fp8_halves_kv_cache(self):
         """Test that fp8 KV cache produces lower utilization than auto."""
@@ -942,14 +944,15 @@ class TestCalculateGpuMemoryUtilization:
     def test_huge_gpu_with_huge_context(self):
         """Test 96 GB GPU with 512k context — should fit comfortably.
 
-        model=4096, kv=4096×16×0.5=32768, overhead=1536, headroom=1024
-        raw=38400, needed=38400×1.2=46080
-        utilization=46080/98304 ≈ 0.47 → clamped to 0.50
+        model=4096, kv=4096×16×0.5=32768, overhead=1536,
+        cudagraph=0.114×98304≈11206, headroom=1024
+        raw=50630, needed=50630×1.2=60756
+        utilization=60756/98304 ≈ 0.62
         """
         result = calculate_gpu_memory_utilization(
             98304, context_size=524288, kv_cache_dtype="fp8"
         )
-        assert 0.50 <= result <= 0.55
+        assert 0.56 <= result <= 0.68
 
     def test_no_model_path_uses_default(self):
         """Test that missing model path uses default 4096 MiB estimate."""
@@ -993,9 +996,9 @@ class TestArchitectureAwareKvEstimation:
         """9B GQA model (40 layers, 8 KV heads, head_dim=128) at 128k fp8.
 
         KV = 2 × 40 × 8 × 128 × 131072 × 1 byte = 10,240 MiB
-        raw = 5000 + 10240 + 512 + 1024 = 16,776
-        needed = 16776 × 1.2 = 20,131
-        On 33 GiB GPU: util ≈ 20131/33400 ≈ 0.60
+        raw = 5000 + 10240 + 1536 + cudagraph(0.114×33400≈3807) + 1024 = 21,607
+        needed = 21607 × 1.2 = 25,928
+        On 33 GiB GPU: util ≈ 25928/33400 ≈ 0.78
         """
         model_path = self._make_model_dir(tmp_path, qwen_9b_config)
         with patch("aria.helpers.memory.get_model_file_size", return_value=5000):
@@ -1005,7 +1008,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=131072,
                 kv_cache_dtype="fp8",
             )
-        assert 0.55 <= result <= 0.70
+        assert 0.72 <= result <= 0.84
 
     def test_9b_gqa_model_128k_fp16(self, tmp_path, qwen_9b_config):
         """fp16 KV doubles the KV estimate → should use more VRAM.
@@ -1028,9 +1031,9 @@ class TestArchitectureAwareKvEstimation:
         """7B MHA model (32 layers, 32 KV heads, head_dim=128) at 32k fp8.
 
         KV = 2 × 32 × 32 × 128 × 32768 × 1 = 8,192 MiB
-        raw = 4000 + 8192 + 1536 = 13,728
-        needed = 13728 × 1.2 = 16,473
-        On 24 GiB GPU: util ≈ 16473/24576 ≈ 0.67
+        raw = 4000 + 8192 + 1536 + cudagraph(0.114×24576≈2801) + 1024 = 17,553
+        needed = 17553 × 1.2 = 21,063
+        On 24 GiB GPU: util ≈ 21063/24576 ≈ 0.86
         """
         model_path = self._make_model_dir(
             tmp_path,
@@ -1048,7 +1051,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=32768,
                 kv_cache_dtype="fp8",
             )
-        assert 0.60 <= result <= 0.80
+        assert 0.80 <= result <= 0.92
 
     def test_config_with_explicit_head_dim(self, tmp_path):
         """Model config that specifies head_dim directly."""
@@ -1069,7 +1072,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=131072,
                 kv_cache_dtype="fp8",
             )
-        assert 0.55 <= result <= 0.70
+        assert 0.72 <= result <= 0.84
 
     def test_missing_config_falls_back_to_heuristic(self, tmp_path):
         """Without config.json, should use the fallback heuristic."""
@@ -1085,9 +1088,9 @@ class TestArchitectureAwareKvEstimation:
                 kv_cache_dtype="fp8",
             )
         # Heuristic fallback: kv = 5000 * 4 * 0.5 = 10000
-        # raw = 5000 + 10000 + 1536 = 16536, needed = 19843
-        # util = 19843/33400 ≈ 0.59
-        assert 0.50 <= result <= 0.70
+        # raw = 5000 + 10000 + 1536 + cudagraph≈3807 + 1024 = 21367,
+        # needed = 25640, util = 25640/33400 ≈ 0.77
+        assert 0.70 <= result <= 0.83
 
     def test_fp8_vs_auto_with_config(self, tmp_path, qwen_9b_config):
         """fp8 KV should produce lower utilization than auto/fp16."""
@@ -1206,9 +1209,9 @@ class TestArchitectureAwareKvEstimation:
 
         34 layers, 8 kv_heads, head_dim=128, 131072 ctx, fp8
         KV = 2 × 34 × 8 × 128 × 131072 × 1 = 9,113,600,000 B ≈ 8,691 MiB
-        raw = 5000 + 8691 + 512 + 1024 = 15227
-        needed = 15227 × 1.2 = 18272
-        On 33 GB GPU: util ≈ 18272/33400 ≈ 0.55
+        raw = 5000 + 8691 + 1536 + cudagraph(0.114×33400≈3807) + 1024 = 20,058
+        needed = 20058 × 1.2 = 24,069
+        On 33 GB GPU: util ≈ 24069/33400 ≈ 0.72
         """
         text_config = {
             "num_hidden_layers": 34,
@@ -1225,7 +1228,7 @@ class TestArchitectureAwareKvEstimation:
                 context_size=131072,
                 kv_cache_dtype="fp8",
             )
-        assert 0.50 <= result <= 0.70
+        assert 0.66 <= result <= 0.78
 
     def test_multimodal_with_only_hidden_size_and_heads(self, tmp_path):
         """text_config with no head_dim (derived from hidden_size / num_heads)."""
@@ -1245,9 +1248,9 @@ class TestArchitectureAwareKvEstimation:
                 kv_cache_dtype="fp8",
             )
         # Same KV as qwen_9b_config: 2×40×8×128×131072×1 = 10240 MiB
-        # raw = 5000 + 10240 + 1536 = 16776, needed = 20131
-        # util = 20131/33400 ≈ 0.60
-        assert 0.55 <= result <= 0.70
+        # raw = 5000 + 10240 + 1536 + cudagraph≈3807 + 1024 = 21607,
+        # needed = 25928, util = 25928/33400 ≈ 0.78
+        assert 0.72 <= result <= 0.84
 
     def test_top_level_params_take_precedence_over_text_config(self, tmp_path):
         """When both top-level and text_config have params, top-level wins."""
@@ -1276,8 +1279,8 @@ class TestArchitectureAwareKvEstimation:
                 kv_cache_dtype="fp8",
             )
         # Top-level: KV = 2×20×4×64×131072×1 = 2,684,354,560 B ≈ 2560 MiB
-        # raw = 5000 + 2560 + 1536 = 9096, needed = 10915
-        # util = 10915/33400 ≈ 0.33 → clamped to 0.50
+        # raw = 5000 + 2560 + 1536 + cudagraph≈3807 + 1024 = 13927,
+        # needed = 16712, util = 16712/33400 ≈ 0.50
         assert result == 0.50
 
     def test_multimodal_empty_text_config_uses_fallback(self, tmp_path):
@@ -1301,7 +1304,8 @@ class TestArchitectureAwareKvEstimation:
                 kv_cache_dtype="fp8",
             )
         # Heuristic fallback: kv = 5000 × 4 × 0.5 = 10000
-        assert 0.50 <= result <= 0.70
+        # raw = 5000 + 10000 + 1536 + cudagraph≈3807 + 1024 = 21367 → util ≈ 0.77
+        assert 0.70 <= result <= 0.83
 
 
 # ============================================================================
