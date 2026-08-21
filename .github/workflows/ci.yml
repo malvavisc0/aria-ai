@@ -23,7 +23,7 @@ jobs:
         run: uv python install
 
       - name: Sync dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --all-extras
 
       - name: Ruff check
         run: uv run ruff check src/
@@ -48,7 +48,7 @@ jobs:
         run: uv python install
 
       - name: Sync dependencies
-        run: uv sync --group dev
+        run: uv sync --group dev --all-extras
 
       - name: Run tests
         run: uv run pytest -m "not voice"

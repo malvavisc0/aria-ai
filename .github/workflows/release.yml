@@ -159,7 +159,7 @@ jobs:
         run: uv python install
 
       - name: Sync dependencies (gui + dev)
-        run: uv sync --extra gui --group dev
+        run: uv sync --group dev --all-extras
 
       - name: Run PyInstaller
         run: uv run pyinstaller packaging/aria-gui.spec --noconfirm
@@ -197,7 +197,7 @@ jobs:
         run: uv python install
 
       - name: Sync dependencies (gui + dev)
-        run: uv sync --extra gui --group dev
+        run: uv sync --group dev --all-extras
 
       - name: Run PyInstaller
         run: uv run pyinstaller packaging/aria-gui.spec --noconfirm
