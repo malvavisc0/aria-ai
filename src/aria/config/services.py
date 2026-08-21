@@ -35,7 +35,7 @@ class Vllm:
     # e.g. ``v0.24.0`` → ``0.24.0``).  The prebuilt PyPI wheel is
     # installed into a separate venv at ``~/.aria/venvs/vllm`` so
     # Aria's own dependency tree stays clean.
-    version: str = get_optional_env("ARIA_VLLM_VERSION", "0.26.0")
+    version: str = get_optional_env("ARIA_VLLM_VERSION", "0.27.1")
 
     @classmethod
     def get_venv_path(cls) -> Path:
