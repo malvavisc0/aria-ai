@@ -33,7 +33,7 @@ class MainWindow(
         self.ui.setupUi(self)
 
         # Comfortable minimum size (reconciled with mainwindow.ui)
-        self.setMinimumSize(940, 660)
+        self.setMinimumSize(1200, 870)
 
         # Make form fields expand to fill available width
         from PySide6.QtWidgets import QFormLayout
