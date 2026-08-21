@@ -15,7 +15,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from aria.bootstrap.features import FeatureChoices
-from aria.gui.wizard.flow import _finalize_init
+from aria.gui.wizard.flow import _finalize_init, apply_features
 
 
 def _hw(vram: int):
@@ -164,3 +164,53 @@ def test_finalize_never_overwrites_user_chat_model_path(
         _finalize_init(_page("local", FeatureChoices()))
 
     assert _read_env(tmp_path, "CHAT_MODEL_PATH") == "my-org/my-custom-model"
+
+
+def test_apply_features_makes_preflight_reflect_checkboxes(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The deps page applies feature choices before preflight (CLI-parity
+    order): ticking voice+vision on the connection page must flip
+    ``Voice.enabled``/``Vllm.vision_enabled`` so preflight no longer shows
+    the stale "Disabled" informational rows."""
+    from aria.config.api import Vllm, Voice
+    from aria.preflight import run_preflight_checks
+
+    monkeypatch.setenv("ARIA_HOME", str(tmp_path))
+    _seed_aria_home(tmp_path)
+
+    with patch("aria.bootstrap.detect.detect_hardware", return_value=_hw(24576)):
+        apply_features(_page("local", FeatureChoices(vision=True, voice=True)))
+
+    assert Voice.enabled is True
+    assert Vllm.vision_enabled is True
+
+    names = [c.name for c in run_preflight_checks().checks]
+    assert "vision" in names
+    # Voice enabled → the short-circuit "Disabled" row must NOT appear;
+    # instead the whisper/kokoro install checks run.
+    assert not any(
+        c.name == "voice" and c.informational for c in run_preflight_checks().checks
+    )
+    assert "whisper.cpp (STT)" in names
+
+
+def test_apply_features_disabled_keeps_informational_rows(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Unticked voice+vision (GPU present) → the informational Disabled
+    rows remain (no install offered)."""
+    from aria.config.api import Vllm, Voice
+    from aria.preflight import run_preflight_checks
+
+    monkeypatch.setenv("ARIA_HOME", str(tmp_path))
+    _seed_aria_home(tmp_path)
+
+    with patch("aria.bootstrap.detect.detect_hardware", return_value=_hw(24576)):
+        apply_features(_page("local", FeatureChoices(vision=False, voice=False)))
+
+    assert Voice.enabled is False
+    assert Vllm.vision_enabled is False
+    checks = {c.name: c for c in run_preflight_checks().checks}
+    assert checks["vision"].informational is True
+    assert checks["voice"].informational is True

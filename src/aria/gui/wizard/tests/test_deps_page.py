@@ -53,3 +53,76 @@ def test_gpu_keeps_voice_check_row() -> None:
         )
         is True
     )
+
+
+def test_optional_installable_check_offers_download_but_does_not_block() -> None:
+    """A missing-but-warning check (docling) offers a Download and stays
+    skippable: show=True, block=False."""
+    block, show = _DependenciesPage._install_shown(
+        "docling",
+        SimpleNamespace(name="docling worker", passed=True, warning=True),
+    )
+    assert show is True
+    assert block is False
+
+
+def test_missing_hard_requirement_blocks_and_offers_download() -> None:
+    block, show = _DependenciesPage._install_shown(
+        "vllm", SimpleNamespace(name="vLLM package", passed=False)
+    )
+    assert show is True
+    assert block is True
+
+
+def test_clean_pass_offers_no_download() -> None:
+    block, show = _DependenciesPage._install_shown(
+        "docling", SimpleNamespace(name="docling worker", passed=True, warning=False)
+    )
+    assert show is False
+    assert block is False
+
+
+def test_unknown_target_offers_no_download() -> None:
+    block, show = _DependenciesPage._install_shown(
+        None, SimpleNamespace(name="docling worker", passed=False, warning=True)
+    )
+    assert show is False
+    assert block is False
+
+
+def test_icon_for_fail() -> None:
+    assert (
+        _DependenciesPage._icon_for(
+            SimpleNamespace(name="x", passed=False, warning=False, informational=False)
+        )
+        == "❌"
+    )
+
+
+def test_icon_for_warning() -> None:
+    assert (
+        _DependenciesPage._icon_for(
+            SimpleNamespace(name="x", passed=True, warning=True, informational=False)
+        )
+        == "⚠️"
+    )
+
+
+def test_icon_for_informational() -> None:
+    assert (
+        _DependenciesPage._icon_for(
+            SimpleNamespace(
+                name="voice", passed=True, warning=False, informational=True
+            )
+        )
+        == "ℹ️"
+    )
+
+
+def test_icon_for_pass() -> None:
+    assert (
+        _DependenciesPage._icon_for(
+            SimpleNamespace(name="x", passed=True, warning=False, informational=False)
+        )
+        == "✅"
+    )

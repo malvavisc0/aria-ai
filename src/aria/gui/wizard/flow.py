@@ -10,6 +10,8 @@ from aria.gui.wizard.db import _has_admin_user, _is_model_downloaded
 from aria.gui.wizard.pages import SetupWizard, _ConnectionPage, _UserPage
 
 if TYPE_CHECKING:
+    from aria.bootstrap.detect import HardwareProfile
+    from aria.bootstrap.features import FeatureChoices
     from aria.gui.windows.main_window import MainWindow
 
 
@@ -116,15 +118,41 @@ def _finalize_init(conn_page: _ConnectionPage) -> None:
     import os
     from pathlib import Path
 
-    from aria.bootstrap import apply_mode_to_env, write_init_completed_marker
+    from aria.bootstrap import write_init_completed_marker
     from aria.bootstrap.defaults import resolve_defaults
+    from aria.bootstrap.features import CHAT_MODE_LOCAL
+    from aria.server.manager import sync_chainlit_features
+
+    aria_home = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria"))
+    mode, hardware, _choices, vision = apply_features(conn_page)
+    sync_chainlit_features(aria_home, vision_enabled=vision)
+    tier = resolve_defaults(hardware) if mode == CHAT_MODE_LOCAL else None
+    write_init_completed_marker(mode, tier)
+
+
+def apply_features(
+    conn_page: _ConnectionPage,
+) -> tuple[str, HardwareProfile, FeatureChoices, bool]:
+    """Mirror the CLI's init step 4: write the feature matrix to ``.env``
+    then reload env from disk.
+
+    Called before the deps page runs preflight (so the checks read the
+    live checkbox state — voice/vision enabled flags, chat mode, tier)
+    and again at finalize (idempotent — the same single writer). Returns
+    ``(mode, hardware, choices, vision)`` for ``config.toml`` sync and
+    the completion marker.
+    """
+    import os
+    from pathlib import Path
+
+    from aria.bootstrap import apply_mode_to_env
     from aria.bootstrap.detect import detect_hardware
     from aria.bootstrap.features import (
         CHAT_MODE_LOCAL,
         CHAT_MODE_REMOTE,
         vision_enabled_for_config,
     )
-    from aria.server.manager import sync_chainlit_features
+    from aria.config import reload_env
 
     aria_home = Path(os.environ.get("ARIA_HOME", Path.home() / ".aria"))
     mode = (
@@ -135,7 +163,6 @@ def _finalize_init(conn_page: _ConnectionPage) -> None:
     hardware = detect_hardware()
     choices = conn_page.feature_choices()
     apply_mode_to_env(aria_home / ".env", mode, hardware, choices)
+    reload_env()
     vision = vision_enabled_for_config(hardware, mode, choices)
-    sync_chainlit_features(aria_home, vision_enabled=vision)
-    tier = resolve_defaults(hardware) if mode == CHAT_MODE_LOCAL else None
-    write_init_completed_marker(mode, tier)
+    return mode, hardware, choices, vision

@@ -202,7 +202,8 @@ def _check_voice(checks: list[CheckResult]) -> None:
     missing, but STT alone still depends on the whisper binary. A missing
     whisper binary or kokoro tool/model is a hard preflight failure.
 
-    Skipped entirely when voice is disabled via ``ARIA_VOICE_ENABLED=false``.
+    Reports an informational row (no install, no block) when voice is
+    disabled via ``ARIA_VOICE_ENABLED=false`` (the default).
     """
     from aria.config.api import Voice
 
@@ -212,7 +213,8 @@ def _check_voice(checks: list[CheckResult]) -> None:
                 name="voice",
                 passed=True,
                 category="binaries",
-                details="Disabled via ARIA_VOICE_ENABLED=false",
+                details="Disabled (enable with ARIA_VOICE_ENABLED=true)",
+                informational=True,
             )
         )
         return
@@ -334,5 +336,38 @@ def _check_voice(checks: list[CheckResult]) -> None:
                 passed=True,
                 category="binaries",
                 details="uv tool env ready",
+            )
+        )
+
+
+def _check_vision(checks: list[CheckResult]) -> None:
+    """Report the vision (image upload) state as an informational row.
+
+    Vision is opt-in (``ARIA_VLLM_VISION_ENABLED=true``) and gates
+    ``image/*`` uploads in the Chainlit UI. It has no installable
+    artifact — it depends on the chat model supporting vision — so the
+    row is purely informational and never blocks or offers a download.
+    Both the GUI wizard deps page and ``aria check preflight`` render it.
+    """
+    from aria.config.api import Vllm as VllmConfig
+
+    if VllmConfig.vision_enabled:
+        checks.append(
+            CheckResult(
+                name="vision",
+                passed=True,
+                category="binaries",
+                details="Enabled (image uploads accepted)",
+                informational=True,
+            )
+        )
+    else:
+        checks.append(
+            CheckResult(
+                name="vision",
+                passed=True,
+                category="binaries",
+                details="Disabled (enable with ARIA_VLLM_VISION_ENABLED=true)",
+                informational=True,
             )
         )

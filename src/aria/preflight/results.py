@@ -16,6 +16,9 @@ class CheckResult:
         details: Optional extra info to display on success (e.g. "24 GB available").
         warning: True for a non-blocking degradation (passed is still True,
             but the UI should render it as a warning, not a clean pass).
+        informational: True for a purely informational note that is neither a
+            pass nor a failure (e.g. a feature disabled by config). The UI
+            renders it with a neutral icon; it never blocks or offers install.
     """
 
     name: str
@@ -25,6 +28,7 @@ class CheckResult:
     hint: str = ""
     details: str = ""
     warning: bool = False
+    informational: bool = False
 
 
 @dataclass

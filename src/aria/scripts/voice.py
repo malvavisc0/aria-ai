@@ -34,7 +34,7 @@ _ARIA_RELEASES = "https://github.com/malvavisc0/aria-ai/releases/download"
 _MIN_CUDA_VERSION_FOR_GPU = (12, 6)
 
 
-def download_whisper_cpp(model: str = "base.en") -> Path:
+def download_whisper_cpp(model: str | None = None) -> Path:
     """Fetch the whisper.cpp server binary plus the GGUF model.
 
     Detects the hardware and downloads the appropriate build:
@@ -43,7 +43,9 @@ def download_whisper_cpp(model: str = "base.en") -> Path:
     - No NVIDIA GPU -> official CPU prebuilt from whisper.cpp releases.
 
     Args:
-        model: HuggingFace GGUF model name (e.g. ``base.en``).
+        model: HuggingFace GGUF model name (e.g. ``large-v3-turbo-q5_0``).
+            Defaults to the configured ``Voice.whisper_model`` so the
+            downloaded file matches the preflight check's expected path.
 
     Returns:
         The whisper-server binary path.
@@ -53,13 +55,36 @@ def download_whisper_cpp(model: str = "base.en") -> Path:
     """
     Bin.path.mkdir(parents=True, exist_ok=True)
 
+    if model is None:
+        from aria.config.api import Voice
+
+        model = Voice.whisper_model
+
     target = _detect_whisper_target()
     url = _whisper_download_url(target)
     asset_name = url.rsplit("/", 1)[-1]
     archive = Bin.path / asset_name
 
     console.print(f"[cyan]Downloading[/cyan] whisper-server ({target} build)...")
-    _download_file(url, archive)
+    try:
+        _download_file(url, archive)
+    except RuntimeError as exc:
+        # The CUDA build is hosted on Aria's own releases and may not be
+        # published for every version (asset 404). Fall back to the
+        # official CPU prebuilt so the install still succeeds for both
+        # the GUI wizard and `aria init` — parity by construction.
+        if target != "cuda" or "404" not in str(exc):
+            raise
+        logger.warning(
+            "CUDA whisper build unavailable ({}); falling back to CPU build",
+            exc,
+        )
+        target = "cpu"
+        url = _whisper_download_url(target)
+        asset_name = url.rsplit("/", 1)[-1]
+        archive = Bin.path / asset_name
+        console.print(f"[cyan]Downloading[/cyan] whisper-server ({target} build)...")
+        _download_file(url, archive)
 
     dest_dir = Bin.path / "whisper-cpp"
     dest_dir.mkdir(parents=True, exist_ok=True)

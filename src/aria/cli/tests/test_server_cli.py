@@ -171,3 +171,62 @@ def test_ensure_vllm_running_shows_clean_failure_panel() -> None:
     assert result.exit_code == 1
     assert "Startup failed" in result.output
     assert "model load error" in result.output
+
+
+# ── _format_check_line parity with the GUI wizard _icon_for ────────────────
+
+
+def _check(**kw) -> "object":
+    """Build a minimal check stand-in for _format_check_line tests."""
+    from types import SimpleNamespace
+
+    base = dict(
+        name="x",
+        passed=True,
+        warning=False,
+        informational=False,
+        details="",
+        error="",
+        hint="",
+    )
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_format_check_line_fail() -> None:
+    from aria.cli.server import _format_check_line
+
+    line = _format_check_line(_check(passed=False, error="missing", hint="fix"))
+    assert "✗" in line
+    assert "x" in line
+    assert "missing" in line
+    assert "fix" in line
+
+
+def test_format_check_line_warning() -> None:
+    from aria.cli.server import _format_check_line
+
+    line = _format_check_line(_check(passed=True, warning=True, details="degraded"))
+    assert "⚠" in line
+    assert "degraded" in line
+
+
+def test_format_check_line_informational_renders_info_icon() -> None:
+    """A disabled-feature check renders as ℹ (neutral), not ✓ (pass)."""
+    from aria.cli.server import _format_check_line
+
+    line = _format_check_line(
+        _check(passed=True, informational=True, details="Disabled")
+    )
+    assert "ℹ" in line
+    assert "Disabled" in line
+    assert "✓" not in line
+
+
+def test_format_check_line_clean_pass() -> None:
+    from aria.cli.server import _format_check_line
+
+    line = _format_check_line(_check(passed=True, details="ok"))
+    assert "✓" in line
+    assert "ℹ" not in line
+    assert "⚠" not in line

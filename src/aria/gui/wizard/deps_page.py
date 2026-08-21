@@ -52,10 +52,29 @@ class _DependenciesPage(QWizardPage):
 
         self._all_ok = False
         self._downloading = False
+        # Bumped on every (re)entry; stored per async op so a late callback
+        # (download/preflight finishing after the user navigated away)
+        # is dropped instead of touching widgets off the GUI thread.
+        self._generation = 0
+        self._preflight_gen = -1
+        self._download_gen = -1
 
     # -- Qt overrides -------------------------------------------------------
 
     def initializePage(self):
+        # Apply the connection-page choices to .env + reload BEFORE
+        # preflight (mirrors `aria init` step 4 → steps 5-8): otherwise
+        # the checks read the stale on-disk config and voice/vision show
+        # "Disabled" even when the user just ticked them on page 0.
+        from aria.gui.wizard.flow import apply_features
+
+        # Reset any in-flight download so re-entry (Back → change choices
+        # → Next) starts clean: otherwise ``_downloading`` stays True and
+        # the page is stuck, and a late download callback would clobber
+        # the freshly applied state.
+        self._abort_download()
+        self._generation += 1
+        apply_features(self._conn_page())
         self._info_label.setText("Checking dependencies\u2026")
         self._run_preflight()
 
@@ -70,11 +89,28 @@ class _DependenciesPage(QWizardPage):
 
     # -- Internal -----------------------------------------------------------
 
+    def _abort_download(self) -> None:
+        """Mark any in-flight download stale so its late ``finished``
+        callback (a bound-method, queued to the GUI thread) is dropped by
+        the generation guard in ``_on_download_done``. We must NOT
+        disconnect ``finished`` — that would also drop ``thread.quit``/
+        ``worker.deleteLater`` and leak the thread. The urllib download
+        can't be interrupted cleanly; letting it finish and ignoring the
+        result is enough."""
+        self._downloading = False
+        self._complete_changed()
+
     def _run_preflight(self):
+        self._preflight_gen = self._generation
         self._thread = QThread()
         self._worker = _PreflightWorker()
         self._worker.moveToThread(self._thread)
         self._thread.started.connect(self._worker.run)
+        # Bound method → queued connection → runs on the GUI thread (the
+        # page is a GUI-thread QObject). Connecting to a plain closure
+        # instead makes PySide6 pick a direct connection and run the
+        # callback on the worker thread, where creating QLabels/Buttons
+        # triggers cross-thread setParent errors.
         self._worker.finished.connect(self._on_preflight_done)
         self._worker.finished.connect(self._thread.quit)
         self._worker.finished.connect(self._worker.deleteLater)
@@ -99,6 +135,8 @@ class _DependenciesPage(QWizardPage):
                             cw.deleteLater()
 
     def _on_preflight_done(self, result):
+        if self._preflight_gen != self._generation:
+            return  # a newer page entry supersedes this result
         self._clear_status_layout()
 
         hardware, remote = self._connection_context()
@@ -130,18 +168,47 @@ class _DependenciesPage(QWizardPage):
             return f"Dependencies are ready. Optional components missing: {names}."
         return "All dependencies are ready."
 
-    def _connection_context(self):
-        """Read hardware + remote flag from the connection page (page 0)."""
+    def _conn_page(self):
+        """The connection page (page 0) — owns mode + feature checkboxes."""
         from aria.gui.wizard.pages import SetupWizard as _SetupWizard
         from aria.gui.wizard.pages import _ConnectionPage as _ConnPage
 
         wizard = cast(_SetupWizard, self.wizard())
-        conn_page = cast(_ConnPage, wizard.page(0))
+        return cast(_ConnPage, wizard.page(0))
+
+    def _connection_context(self):
+        """Read hardware + remote flag from the connection page (page 0)."""
+        conn_page = self._conn_page()
         return conn_page._hardware, conn_page.get_connection_mode() == "remote"
+
+    @staticmethod
+    def _install_shown(target: str | None, check) -> tuple[bool, bool]:
+        """Return ``(block, show_download)`` for a check with a known target.
+
+        ``block`` is True only for a hard requirement that is missing
+        (``passed=False``): those block progression. An optional-but-
+        installable check (``warning`` + ``passed``, e.g. docling) offers a
+        Download button but never blocks.
+        """
+        can_install = target is not None
+        block = can_install and not check.passed
+        show_download = can_install and (not check.passed or check.warning)
+        return block, show_download
+
+    @staticmethod
+    def _icon_for(check) -> str:
+        """Icon for a check: ❌ fail, ⚠️ warning, ℹ️ informational, ✅ pass."""
+        if not check.passed:
+            return "❌"
+        if check.warning:
+            return "⚠️"
+        if check.informational:
+            return "ℹ️"
+        return "✅"
 
     def _add_check_row(self, check) -> bool:
         target = self._resolve_target(check.name)
-        icon = "❌" if not check.passed else ("⚠️" if check.warning else "✅")
+        icon = self._icon_for(check)
         text = f"{icon}  {check.name}"
         if check.passed:
             if check.details:
@@ -149,11 +216,11 @@ class _DependenciesPage(QWizardPage):
         elif check.hint and target is None:
             text += f"  ({check.hint})"
 
-        download_required = target is not None and not check.passed
+        block, show_download = self._install_shown(target, check)
 
         row = QHBoxLayout()
         row.addWidget(QLabel(text))
-        if download_required:
+        if show_download:
             btn = QPushButton("Download")
             btn.clicked.connect(
                 lambda checked=False, n=check.name: self._on_download(n)
@@ -161,7 +228,7 @@ class _DependenciesPage(QWizardPage):
             row.addWidget(btn)
         self._status_layout.addLayout(row)
 
-        return not download_required
+        return not block
 
     def _on_download(self, name: str):
         target = self._resolve_target(name)
@@ -169,7 +236,7 @@ class _DependenciesPage(QWizardPage):
             return
 
         self._downloading = True
-        self.completeChanged.emit()
+        self._complete_changed()
         self._info_label.setText(f"Downloading {name}\u2026")
 
         for i in range(self._status_layout.count()):
@@ -184,10 +251,12 @@ class _DependenciesPage(QWizardPage):
                 if isinstance(w, QPushButton):
                     w.setEnabled(False)
 
+        self._download_gen = self._generation
         self._dl_thread = QThread()
         self._dl_worker = _DownloadWorker(target)
         self._dl_worker.moveToThread(self._dl_thread)
         self._dl_thread.started.connect(self._dl_worker.run)
+        # Bound method (queued → GUI thread); see _run_preflight.
         self._dl_worker.finished.connect(self._on_download_done)
         self._dl_worker.finished.connect(self._dl_thread.quit)
         self._dl_worker.finished.connect(self._dl_worker.deleteLater)
@@ -195,12 +264,18 @@ class _DependenciesPage(QWizardPage):
         self._dl_thread.start()
 
     def _on_download_done(self, ok: bool, message: str):
+        if self._download_gen != self._generation:
+            return  # user navigated away; drop the stale result
         self._downloading = False
         if ok:
             self._info_label.setText(f"\u2705 {message}")
         else:
             self._info_label.setText(f"\u274c Download failed: {message}")
         self._run_preflight()
+
+    def _complete_changed(self) -> None:
+        """Re-evaluate the Next button (``isComplete``) without re-running checks."""
+        self.completeChanged.emit()
 
     @staticmethod
     def _resolve_target(name: str) -> str | None:

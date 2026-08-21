@@ -157,3 +157,72 @@ class TestCheckInstructions:
         assert result.exit_code == 0
         mock_pe.assert_called_once()
         assert "PE prompt" in result.output
+
+
+# ── _print_category parity with the GUI wizard _icon_for ──────────────────
+
+
+def _ck(**kw) -> "object":
+    """Build a minimal check stand-in for _print_category tests."""
+    from types import SimpleNamespace
+
+    base = dict(
+        name="x",
+        passed=True,
+        warning=False,
+        informational=False,
+        details="",
+        error="",
+        hint="",
+    )
+    base.update(kw)
+    return SimpleNamespace(**base)
+
+
+def test_print_category_informational_renders_info_icon() -> None:
+    """A disabled-feature check renders as ℹ (neutral), not ✓ (pass)."""
+    from aria.cli.check import _print_category, console
+
+    with console.capture() as cap:
+        _print_category("binaries", [_ck(informational=True, details="Disabled")])
+
+    out = cap.get()
+    assert "ℹ" in out
+    assert "x" in out
+    assert "Disabled" in out
+    assert "✓" not in out
+
+
+def test_print_category_warning_renders_warn_icon() -> None:
+    from aria.cli.check import _print_category, console
+
+    with console.capture() as cap:
+        _print_category("binaries", [_ck(warning=True, details="degraded")])
+
+    out = cap.get()
+    assert "⚠" in out
+    assert "degraded" in out
+
+
+def test_print_category_clean_pass_renders_tick() -> None:
+    from aria.cli.check import _print_category, console
+
+    with console.capture() as cap:
+        _print_category("binaries", [_ck(details="ok")])
+
+    out = cap.get()
+    assert "✓" in out
+    assert "ℹ" not in out
+    assert "⚠" not in out
+
+
+def test_print_category_failure_renders_cross() -> None:
+    from aria.cli.check import _print_category, console
+
+    with console.capture() as cap:
+        _print_category("binaries", [_ck(passed=False, error="missing", hint="fix")])
+
+    out = cap.get()
+    assert "✗" in out
+    assert "missing" in out
+    assert "fix" in out

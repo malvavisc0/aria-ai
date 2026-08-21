@@ -125,6 +125,11 @@ def _format_check_line(check) -> str:
         if check.details:
             text += f"  [yellow]{check.details}[/yellow]"
         return f"  [yellow]⚠[/yellow]  {text}"
+    if check.informational:
+        text = check.name
+        if check.details:
+            text += f"  [cyan]{check.details}[/cyan]"
+        return f"  [cyan]ℹ[/cyan]  {text}"
     text = check.name
     if check.details:
         text += f"  [dim]{check.details}[/dim]"

@@ -311,3 +311,54 @@ class TestCheckDocling:
         assert checks[0].passed is True
         assert "installed" in checks[0].details
         assert "device=cpu" in checks[0].details
+
+
+class TestCheckVoiceDisabled:
+    """Voice is opt-in (default off): a disabled voice reports an
+    informational row with a clean, user-facing message — never blocks."""
+
+    @patch("aria.config.api.Voice.enabled", False)
+    def test_disabled_is_informational_with_clean_message(self) -> None:
+        from aria.preflight import _check_voice
+
+        checks: list = []
+        _check_voice(checks)
+        assert len(checks) == 1
+        assert checks[0].passed is True
+        assert checks[0].informational is True
+        assert checks[0].warning is False
+        assert checks[0].category == "binaries"
+        # No raw env-var leak; the message must read as a status note.
+        assert "ARIA_VOICE_ENABLED=false" not in checks[0].details
+        assert "ARIA_VOICE_ENABLED=true" in checks[0].details
+
+
+class TestCheckVision:
+    """Vision is opt-in and has no installable artifact: the check is
+    purely informational in both states (mirrors the GUI wizard row and
+    ``aria check preflight`` CLI rendering — parity)."""
+
+    @patch("aria.config.api.Vllm.vision_enabled", True)
+    def test_enabled_is_informational_enabled_message(self) -> None:
+        from aria.preflight import _check_vision
+
+        checks: list = []
+        _check_vision(checks)
+        assert len(checks) == 1
+        assert checks[0].passed is True
+        assert checks[0].informational is True
+        assert checks[0].category == "binaries"
+        assert "Enabled" in checks[0].details
+
+    @patch("aria.config.api.Vllm.vision_enabled", False)
+    def test_disabled_is_informational_with_clean_message(self) -> None:
+        from aria.preflight import _check_vision
+
+        checks: list = []
+        _check_vision(checks)
+        assert len(checks) == 1
+        assert checks[0].passed is True
+        assert checks[0].informational is True
+        assert checks[0].category == "binaries"
+        assert "ARIA_VLLM_VISION_ENABLED=false" not in checks[0].details
+        assert "ARIA_VLLM_VISION_ENABLED=true" in checks[0].details

@@ -27,6 +27,7 @@ from aria.preflight.checks_basic import (
     _check_docling,
     _check_env_vars,
     _check_lightpanda,
+    _check_vision,
     _check_voice,
 )
 from aria.preflight.checks_hardware import (
@@ -63,13 +64,14 @@ def run_preflight_checks() -> PreflightResult:
         5. Docling worker is installed
         6. Voice components (whisper.cpp STT + kokoro TTS) are installed
            (skipped when ARIA_VOICE_ENABLED=false)
-        7. Chat model is configured and downloaded
-        8. Embeddings model is configured and downloaded
-        9. Token limit is within context bounds
-       10. Memory requirements fit available hardware
-       11. LLM server connectivity (informational)
-       12. Knowledge database access
-       13. Tool loading
+        7. Vision (image upload) state — informational, never blocks
+        8. Chat model is configured and downloaded
+        9. Embeddings model is configured and downloaded
+       10. Token limit is within context bounds
+       11. Memory requirements fit available hardware
+       12. LLM server connectivity (informational)
+       13. Knowledge database access
+       14. Tool loading
 
     Returns:
         PreflightResult with pass/fail status and all check details.
@@ -82,6 +84,7 @@ def run_preflight_checks() -> PreflightResult:
     _check_lightpanda(checks)
     _check_docling(checks)
     _check_voice(checks)
+    _check_vision(checks)
     _check_models(checks)
     _check_token_limit(checks)
     _check_memory_requirements(checks)

@@ -83,7 +83,10 @@ def _print_category(category: str, checks: list) -> tuple[int, int]:
 
     for check in checks:
         if check.passed:
-            if check.warning:
+            if check.informational:
+                details = f" [cyan]({check.details})[/cyan]" if check.details else ""
+                console.print(f"   [cyan]ℹ[/cyan] {check.name}{details}")
+            elif check.warning:
                 details = (
                     f" [yellow]({check.details})[/yellow]" if check.details else ""
                 )
