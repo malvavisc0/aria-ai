@@ -28,6 +28,7 @@ from aria.tools.mcp_bridge import (
     _content_to_text,
     call_tool,
     connected_server_names,
+    connected_tool_map,
     list_servers,
     list_tools,
     resolve_session,
@@ -87,7 +88,6 @@ class TestListServers:
         entry = data["servers"][0]
         assert entry["server"] == "github"
         assert entry["tools"] == 2
-        assert entry["sample"] == "a, b"
 
     @pytest.mark.asyncio
     async def test_index_records_server_error(self, monkeypatch):
@@ -304,3 +304,49 @@ class TestConnectedServerNames:
             _chainlit_module, "user_session", fake_session, raising=False
         )
         assert connected_server_names() == []
+
+
+class TestConnectedToolMap:
+    """``connected_tool_map`` — per-server tool names for the per-turn nudge."""
+
+    @pytest.mark.asyncio
+    async def test_no_sessions_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(mcp_bridge, "_connected_sessions", lambda: None)
+        assert await connected_tool_map() == {}
+
+    @pytest.mark.asyncio
+    async def test_empty_sessions_returns_empty(self, monkeypatch):
+        monkeypatch.setattr(mcp_bridge, "_connected_sessions", lambda: {})
+        assert await connected_tool_map() == {}
+
+    @pytest.mark.asyncio
+    async def test_returns_names_and_descriptions(self, monkeypatch):
+        client = _make_client(
+            tools=[
+                _make_tool("groups-list", "List groups"),
+                _make_tool("chats-list", "List chats"),
+            ]
+        )
+        monkeypatch.setattr(
+            mcp_bridge, "_connected_sessions", lambda: {"whatsapp": client}
+        )
+        out = await connected_tool_map()
+        assert sorted(out) == ["whatsapp"]
+        assert [t["name"] for t in out["whatsapp"]] == ["groups-list", "chats-list"]
+        assert out["whatsapp"][0]["description"] == "List groups"
+
+    @pytest.mark.asyncio
+    async def test_description_truncated_and_stripped(self, monkeypatch):
+        client = _make_client(tools=[_make_tool("a", "  desc with trailing spaces  ")])
+        monkeypatch.setattr(mcp_bridge, "_connected_sessions", lambda: {"srv": client})
+        out = await connected_tool_map()
+        assert out["srv"][0]["description"] == "desc with trailing spaces"
+
+    @pytest.mark.asyncio
+    async def test_server_error_is_skipped(self, monkeypatch):
+        client = _make_client()
+        client.list_tools.side_effect = RuntimeError("disconnected")
+        monkeypatch.setattr(
+            mcp_bridge, "_connected_sessions", lambda: {"broken": client}
+        )
+        assert await connected_tool_map() == {}

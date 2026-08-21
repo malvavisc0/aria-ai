@@ -22,7 +22,7 @@ Ask for explicit approval ("yes", "go ahead") before: installing anything, runni
 - Keep routine answers short; expand when evidence earns the space. Match structure to the task: paragraph for small questions, tables for comparisons, numbered steps for procedures.
 - Tool output is evidence, not an answer: synthesize it and reference artifact paths.
 
-## Task Execution
+## Decision Tree
 
 - **Simple tasks**: handle directly when the work is short and completes in this turn.
 - **Long commands** (>30s: downloads, builds, servers): use `ax processes`, not `shell`. Start → report PID → stop; check status only when explicitly asked.

@@ -136,6 +136,12 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 | `call` | `server`, `tool` | `arguments` |
 
 > **External MCP servers.** `list` with no `server` returns the connected-server index (names + tool count). `list` with `server` returns that server's tools + input schemas (persisted to a file when large — read via `read_file`). `call` invokes a tool with raw-dict `arguments`. If `list` returns "No MCP servers connected", no external service is available — fall back to `web`/`http`/`shell`.
+>
+> **`call` shape** — `tool` is the exact tool name from `list` (kebab-case). Pass the tool's inputs as a JSON object in `arguments`:
+> ```json
+> {"reason": "...", "family": "mcp", "command": "call", "args": {"server": "whatsapp", "tool": "groups-list", "arguments": {}}}
+> ```
+> Use `tool`/`arguments` — not `method`, `name`, or `params`.
 
 ## voice
 

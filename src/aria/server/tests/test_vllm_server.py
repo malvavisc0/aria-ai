@@ -417,6 +417,7 @@ class TestMambaClampedCmd:
         )
         cmd = ["python", "--max-num-seqs", "256"]
         out = VllmServerManager._mamba_clamped_cmd(cmd, log)
+        assert out is not None
         assert out[out.index("--max-num-seqs") + 1] == "184"
 
     def test_never_raises_a_lower_user_value(self, tmp_path):

@@ -88,12 +88,42 @@ def connected_server_names() -> list[str]:
     return list(sessions.keys())
 
 
+async def connected_tool_map() -> dict[str, list[dict[str, str]]]:
+    """Return ``{server: [{name, description}, ...]}`` for connected servers.
+
+    The per-turn prompt nudge injects these names so the agent can pick a
+    tool directly instead of calling ``ax mcp list`` and reading a large
+    persisted schema. Enumeration is cheap (a local server just returns its
+    registered tool list) but done per turn because servers can connect
+    mid-session. Degrades to ``{}`` outside a chainlit session or when a
+    server errors.
+    """
+    sessions = _connected_sessions()
+    if not sessions:
+        return {}
+    out: dict[str, list[dict[str, str]]] = {}
+    for name, client in sessions.items():
+        try:
+            tools = await client.list_tools()
+        except Exception:
+            continue
+        out[name] = [
+            {
+                "name": t.name,
+                "description": (t.description or "").strip()[:100],
+            }
+            for t in tools.tools
+        ]
+    return out
+
+
 async def list_servers() -> str:
     """Return the connected-server index for ``ax mcp list`` (no server arg).
 
-    Cheap one-liner per server (name + tool count + first-line description),
-    so a small model sees what's connected in a single call without pulling
-    full schemas. This is the discovery entry point.
+    Cheap one-liner per server (name + tool count) so a small model sees
+    what's connected in a single call without pulling full schemas. This is
+    the discovery entry point. Tool names are surfaced per turn by
+    :func:`connected_tool_map`, so the index does not repeat them.
     """
     sessions = _connected_sessions()
     if not sessions:
@@ -113,7 +143,6 @@ async def list_servers() -> str:
                 {
                     "server": name,
                     "tools": len(tools.tools),
-                    "sample": ", ".join(t.name for t in tools.tools[:5]),
                 }
             )
         except Exception as exc:
