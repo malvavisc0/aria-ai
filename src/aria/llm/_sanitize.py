@@ -467,16 +467,17 @@ class SanitizedOpenAILike(OpenAILike):
                         message_additional_kwargs["tool_calls"] = tool_calls
                         for tool_call in tool_calls:
                             if tool_call.function:
-                                # Keep tool_kwargs as JSON string
-                                # (wire format). Fallback to "{}"
-                                # not {} (dict) to avoid repr issues.
+                                # Keep tool_kwargs as a JSON string (wire format),
+                                # matching the non-streaming paths. Fallback to
+                                # "{}" (string, not dict) to avoid repr issues.
+                                # Parsing/cleanup is deferred to
+                                # get_tool_calls_from_response (same-turn) and
+                                # _sanitize_messages (next-turn replay).
                                 raw_args = tool_call.function.arguments or "{}"
                                 blocks.append(
                                     ToolCallBlock(
                                         tool_call_id=tool_call.id,
-                                        tool_kwargs=_sanitize_tool_call_arguments_json(
-                                            raw_args
-                                        ),
+                                        tool_kwargs=raw_args,
                                         tool_name=(tool_call.function.name or ""),
                                     )
                                 )

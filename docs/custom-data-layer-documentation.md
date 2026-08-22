@@ -235,14 +235,20 @@ The `LocalStorageClient` provides local filesystem storage for Chainlit elements
 2. **Async File Operations**
    - Uses `aiofiles` for non-blocking I/O
    - Compatible with Chainlit's async architecture
-   - Efficient for concurrent operations
+   - Usable as an async context manager (`async with`)
 
-3. **Flexible URL Generation**
-   - Configurable base URL for file access
-   - Supports `file://` protocol for local access
-   - Can use HTTP URLs if serving files via web server
+3. **Same-Origin HTTP URLs**
+   - URLs are generated as browser-relative HTTP paths (e.g.
+     `/storage/image.png`) from the configured base URL prefix
+   - The `/storage/` route is registered on the Chainlit/FastAPI app at
+     startup ([`lifecycle.py`](../src/aria/web/lifecycle.py)) so these
+     paths resolve to files on disk — no CORS, no `file://` URLs
 
-4. **Overwrite Control**
+4. **Object-Key Validation**
+   - Absolute object keys and path traversal outside the storage
+     directory are rejected with `ValueError`
+
+5. **Overwrite Control**
    - Optional overwrite protection
    - Raises `FileExistsError` when overwrite=False
    - Prevents accidental file replacement
@@ -254,16 +260,18 @@ The `LocalStorageClient` provides local filesystem storage for Chainlit elements
 ```python
 def __init__(
     self,
-    storage_path: str = ".files/storage",
-    base_url: str = "file://"
+    storage_path: str | Path,
+    base_url: str = "/storage"
 )
 ```
 
 **Purpose:** Initializes the local storage client.
 
 **Parameters:**
-- `storage_path`: Directory path for storing files (default: `.files/storage`)
-- `base_url`: Base URL for file access (default: `file://`)
+- `storage_path`: Directory path for storing files (required, str or Path)
+- `base_url`: URL prefix for file access (default: `/storage`, producing
+  browser-relative HTTP URLs; use a full URL like
+  `http://localhost:9876/storage` if absolute URLs are needed)
 
 **Behavior:**
 - Creates storage directory if it doesn't exist
@@ -272,12 +280,12 @@ def __init__(
 
 **Example:**
 ```python
-# Development setup with file:// URLs
-client = LocalStorageClient(storage_path=".files/storage")
+# Same-origin setup used by Aria (see web/hooks.py):
+client = LocalStorageClient(storage_path=storage_dir, base_url="/storage")
 
-# Production setup with HTTP URLs
+# Absolute URLs, e.g. when serving from another origin:
 client = LocalStorageClient(
-    storage_path="/var/www/files", base_url="https://example.com/files"
+    storage_path="/var/www/files", base_url="http://localhost:9876/storage"
 )
 ```
 
@@ -305,14 +313,18 @@ async def upload_file(
 
 **Returns:**
 - Dictionary with `object_key` and `url`
-- Empty dict on error
+
+**Raises:**
+- `ValueError`: If object_key is an absolute path or escapes the storage directory
+- `FileExistsError`: If the file exists and overwrite=False
+- `TypeError`: If data is neither bytes nor str
 
 **Behavior:**
+- Validates the object key (no absolute paths, no path traversal)
 - Creates parent directories if needed
 - Checks for existing files when overwrite=False
 - Writes bytes or string data appropriately
-- Generates URL for file access
-- Logs upload details
+- Generates URL as `{base_url}/{object_key}`
 
 **Example:**
 ```python
@@ -320,7 +332,7 @@ async def upload_file(
 result = await client.upload_file(
     object_key="images/avatar.png", data=image_bytes, mime="image/png"
 )
-# Returns: {'object_key': 'images/avatar.png', 'url': 'file://...'}
+# Returns: {'object_key': 'images/avatar.png', 'url': '/storage/images/avatar.png'}
 
 # Upload text file
 result = await client.upload_file(
@@ -341,13 +353,15 @@ async def delete_file(self, object_key: str) -> bool
 
 **Returns:**
 - `True` if file was deleted
-- `False` if file not found or error occurred
+- `False` if file not found
+
+**Raises:**
+- `ValueError`: If object_key is invalid (path traversal)
 
 **Behavior:**
 - Checks if file exists and is a file (not directory)
 - Deletes file using `Path.unlink()`
 - Logs deletion details
-- Handles errors gracefully
 
 **Example:**
 ```python
@@ -368,19 +382,21 @@ async def get_read_url(self, object_key: str) -> str
 - `object_key`: Unique identifier for the file
 
 **Returns:**
-- URL to access the file
-- Returns object_key if file not found or error
+- Browser-relative HTTP URL to access the file (e.g. `/storage/image.png`)
+
+**Raises:**
+- `ValueError`: If object_key is invalid (path traversal)
+- `FileNotFoundError`: If the file does not exist on disk
 
 **Behavior:**
-- Checks if file exists
-- Generates URL using base_url and file path
-- Logs warnings for missing files
-- Returns object_key as fallback
+- Validates the object key
+- Checks that the file exists
+- Generates URL as `{base_url}/{object_key}`
 
 **Example:**
 ```python
 url = await client.get_read_url("images/avatar.png")
-# Returns: "file:///path/to/.files/storage/images/avatar.png"
+# Returns: "/storage/images/avatar.png"
 ```
 
 ##### `close()`
@@ -876,7 +892,7 @@ engine = create_engine(sync_url)
 Base.metadata.create_all(engine)
 
 # Create storage client
-storage_client = LocalStorageClient(storage_path=".files/storage")
+storage_client = LocalStorageClient(storage_path=".files/storage", base_url="/storage")
 
 # Create data layer
 data_layer = SQLiteSQLAlchemyDataLayer(
@@ -1012,45 +1028,40 @@ else:
 ### Chainlit Integration
 
 ```python
+import json
+
 import chainlit as cl
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-
-@cl.on_chat_start
-async def start():
-    # Data layer is automatically available via cl.user_session
-    # Threads are automatically created and managed by Chainlit
-
-    # Send a message (automatically creates a step)
-    await cl.Message(
-        content="Hello! How can I help you today?", author="Assistant"
-    ).send()
-
-    # Upload an image element
-    image = cl.Image(name="diagram", path="./images/architecture.png", display="inline")
-    await cl.Message(
-        content="Here's the architecture diagram:", elements=[image]
-    ).send()
+from aria.db.auth import verify_password
+from aria.db.models import User
+from aria.web.state import _state
 
 
 @cl.password_auth_callback
-async def auth_callback(username: str, password: str):
-    """Authenticate user against database."""
-    # Get data layer
-    data_layer = cl.user_session.get("data_layer")
+async def auth_callback(username: str, password: str) -> cl.User | None:
+    """Authenticate a user against the users table."""
+    with Session(_state.db_engine) as session:
+        user = session.execute(
+            select(User).where(User.identifier == username)
+        ).scalar_one_or_none()
 
-    # Fetch user from database
-    user = await data_layer.get_user(username)
-    if not user:
+        if not user:
+            return None
+
+        stored_password = str(user.password)
+        if stored_password and verify_password(password, stored_password):
+            metadata = json.loads(str(user.metadata_))
+            return cl.User(identifier=str(user.identifier), metadata=metadata)
+
         return None
-
-    # Verify password
-    if verify_password(password, user.get("password", "")):
-        return cl.User(
-            identifier=username, metadata=json.loads(user.get("metadata", "{}"))
-        )
-
-    return None
 ```
+
+This mirrors the production implementation in
+[`src/aria/web/hooks.py`](../src/aria/web/hooks.py)
+(`auth_callback_handler`), which additionally re-raises unexpected
+backend errors instead of masking them as failed logins.
 
 ## Testing Strategy
 
@@ -1080,9 +1091,12 @@ The implementation includes comprehensive tests covering:
 
 - [`test_sqlite_data_layer.py`](../src/aria/db/tests/test_sqlite_data_layer.py) - Data layer tests
 - [`test_local_storage_client.py`](../src/aria/db/tests/test_local_storage_client.py) - Storage client tests
+- [`test_json_helpers.py`](../src/aria/db/tests/test_json_helpers.py) - JSON helper function tests
 - [`test_storage_integration.py`](../src/aria/db/tests/test_storage_integration.py) - Integration tests
 - [`test_auth_integration.py`](../src/aria/db/tests/test_auth_integration.py) - Authentication tests
 - [`test_models.py`](../src/aria/db/tests/test_models.py) - Model tests
+
+Shared fixtures live in [`conftest.py`](../src/aria/db/tests/conftest.py).
 
 ### Running Tests
 
@@ -1219,7 +1233,7 @@ try:
 finally:
     await storage_client.close()
 
-# Or use async context manager pattern (if implemented)
+# Or use the async context manager pattern
 async with LocalStorageClient(storage_path=".files/storage") as client:
     await client.upload_file(...)
 ```

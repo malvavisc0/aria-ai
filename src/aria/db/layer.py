@@ -12,8 +12,10 @@ for the ``metadata`` column).
 Workarounds:
 1. Assistant messages are promoted to root level (parentId=NULL) on read in
    ``get_all_user_threads`` (the display path) because Chainlit only shows
-   root messages in thread history. ``get_thread`` keeps the raw parent-child
-   tree so ``restore_chat_history`` can collect all user/assistant steps.
+   root messages in thread history. ``get_thread`` skips promotion so
+   ``restore_chat_history`` sees every step as stored. Steps are returned
+   as one flat list ordered by ``createdAt`` (Chainlit 2.x does not nest
+   child steps), so consumers filter by ``type``.
 2. ``get_all_user_threads`` infers ``user_id`` from the Chainlit session
    context when not provided, for multi-user support.
 """
@@ -213,9 +215,10 @@ class SQLiteSQLAlchemyDataLayer(SQLAlchemyDataLayer):
         """Return thread data without promoting assistant messages.
 
         Unlike ``get_all_user_threads`` (sidebar display), this returns the
-        raw parent-child tree. Promotion is skipped so the resume path
-        (``restore_chat_history``) can collect all user/assistant steps
-        regardless of parent, and to avoid mutating the dict Chainlit reuses.
+        steps as stored (flat, ``createdAt``-ordered, parentId intact).
+        Promotion is skipped so the resume path (``restore_chat_history``)
+        can collect all user/assistant steps by type, and to avoid mutating
+        the dict Chainlit reuses.
         """
         # Bypass our get_all_user_threads override (which promotes messages).
         user_threads = await SQLAlchemyDataLayer.get_all_user_threads(

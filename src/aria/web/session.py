@@ -673,9 +673,9 @@ async def restore_chat_history(thread: ThreadDict) -> BackgroundFlushMemory:
     Creates memory for the thread and populates it with messages
     from the thread's history.
 
-    Steps are collected regardless of their ``parentId`` because
-    ``get_thread()`` returns the raw parent-child structure where
-    assistant messages are children of user messages (not root-level).
+    Steps are collected by ``type`` rather than position because
+    ``get_thread()`` returns every persisted step (thinking/tool/run
+    steps included) as one flat list ordered by ``createdAt``.
     The history is then sanitised to guarantee strictly alternating
     ``user → assistant`` roles required by the LLM API.
 

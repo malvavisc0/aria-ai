@@ -32,7 +32,7 @@ _PLACEHOLDER_RE = re.compile(r"\{\{[^}]+\}\}")
 # budgets = post-cleanup baseline + 15% headroom. Measured on resident
 # content only so the guardrail tracks markdown bloat, not environment-
 # dependent extras (managed binaries / venv table).
-ARIA_BUDGET_WORDS = 1225  # resident baseline 1065
+ARIA_BUDGET_WORDS = 1545  # resident baseline 1344 (capability map added)
 WORKER_BUDGET_WORDS = 615  # resident baseline 534
 PROMPT_ENHANCER_BUDGET_WORDS = 584  # resident baseline 507
 
