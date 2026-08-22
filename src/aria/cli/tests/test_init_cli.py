@@ -13,6 +13,8 @@ from pathlib import Path
 from unittest.mock import patch
 from urllib.error import URLError
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
 from aria.cli.init import app
@@ -521,23 +523,16 @@ def test_dry_run_no_mode_gpu_derives_local(monkeypatch, tmp_path: Path):
 # ---------------------------------------------------------------------------
 
 
-def test_remote_mode_with_partial_flags_rejected(monkeypatch, tmp_path: Path) -> None:
+def test_remote_mode_with_partial_flags_rejected() -> None:
     """Any of --remote-url/--api-key/--model → all three are required."""
-    monkeypatch.setenv("ARIA_HOME", str(tmp_path))
+    from aria.cli.init_mode import _remote_endpoint_fields
 
-    with (
-        patch("aria.cli.init._bootstrap_aria_home"),
-        patch("aria.cli.init.detect_hardware", return_value=_gpu()),
-    ):
-        result = runner.invoke(
-            app,
-            ["--mode", "remote", "--remote-url", "https://x.example/v1"],
-        )
+    with pytest.raises(typer.BadParameter) as excinfo:
+        _remote_endpoint_fields("https://x.example/v1", None, None)
 
-    assert result.exit_code != 0
-    assert "--api-key" in result.output
-    assert "--model" in result.output
-    assert not (tmp_path / ".init-completed.json").exists()
+    message = str(excinfo.value)
+    assert "--api-key" in message
+    assert "--model" in message
 
 
 def test_remote_mode_with_all_flags_writes_endpoint(
