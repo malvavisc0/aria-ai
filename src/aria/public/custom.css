@@ -333,11 +333,6 @@ button:disabled,
   background: hsl(var(--sidebar-accent)) !important;
 }
 
-.cl-thread-item.active {
-  border-left: 2px solid hsl(var(--sidebar-primary));
-  background: hsl(var(--sidebar-accent)) !important;
-}
-
 /* Supporting content stays calm and legible. */
 .cl-message-content pre,
 .cl-code {
@@ -492,7 +487,6 @@ html.light main {
 
 [data-sidebar="menu-button"][data-active="true"] {
   background: hsl(var(--sidebar-accent)) !important;
-  box-shadow: inset 2px 0 0 hsl(var(--sidebar-primary));
 }
 
 #message-composer {
