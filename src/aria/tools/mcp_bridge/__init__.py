@@ -18,6 +18,15 @@ from aria.tools.utils import tool_response
 _PERSIST_THRESHOLD = 2000  # chars
 
 
+def _unwrap_client(entry: ClientSession | Any) -> ClientSession:
+    """Extract the ``ClientSession`` from a chainlit ``McpSession`` wrapper."""
+    try:
+        from chainlit.session import McpSession
+    except ImportError:
+        return entry
+    return entry.client if isinstance(entry, McpSession) else entry
+
+
 def resolve_session(server: str) -> ClientSession | None:
     """Return the connected ClientSession for *server* in this chainlit session.
 
@@ -25,24 +34,21 @@ def resolve_session(server: str) -> ClientSession | None:
     the UI is not something the LLM can be trusted to reproduce).
 
     Returns None outside a chainlit session (workers, CLI) or when the
-    named server is not connected. Uses cl.user_session (per-session, no
-    module-level global) -- see AGENTS.md "No mutable module-level globals".
+    named server is not connected. Uses ``context.session.mcp_sessions``
+    (chainlit's in-memory, never-persisted store) rather than
+    ``cl.user_session`` — storing live ``ClientSession`` objects in
+    ``cl.user_session`` leaks them into thread metadata and breaks JSON
+    serialization on resume.
     """
-    import chainlit as cl
-    from chainlit.context import ChainlitContextException
-
-    try:
-        sessions: dict[str, ClientSession] | None = cl.user_session.get("_mcp_sessions")
-    except ChainlitContextException:
-        return None
+    sessions = _connected_sessions()
     if not sessions:
         return None
     if server in sessions:
-        return sessions[server]
+        return _unwrap_client(sessions[server])
     lowered = server.lower()
-    for name, client in sessions.items():
+    for name, entry in sessions.items():
         if name.lower() == lowered:
-            return client
+            return _unwrap_client(entry)
     return None
 
 
@@ -58,21 +64,27 @@ def _content_to_text(result: CallToolResult) -> str:
     return "\n".join(parts) or "[empty result]"
 
 
-def _connected_sessions() -> dict[str, ClientSession] | None:
+def _connected_sessions() -> dict[str, Any] | None:
     """Return the per-session map of connected MCP servers, or None.
 
+    Each value is chainlit's ``McpSession`` wrapper (accessed via
+    :func:`_unwrap_client`); the mapping itself lives on
+    ``context.session.mcp_sessions`` — an in-memory struct chainlit never
+    JSON-serializes.
+
     Returns None outside a chainlit session (workers, CLI, tests) —
-    ``cl.user_session`` raises ``ChainlitContextException`` there because
-    the lazy ``context`` proxy can't resolve a session. That's the
-    documented degradation path for non-web contexts, not an error.
+    the lazy ``context`` proxy raises ``ChainlitContextException`` there.
+    That's the documented degradation path for non-web contexts, not an
+    error.
     """
     import chainlit as cl
     from chainlit.context import ChainlitContextException
 
     try:
-        return cl.user_session.get("_mcp_sessions")
+        session = cl.context.session
     except ChainlitContextException:
         return None
+    return getattr(session, "mcp_sessions", None)
 
 
 def connected_server_names() -> list[str]:
@@ -107,9 +119,9 @@ async def list_servers() -> str:
             },
         )
     index = []
-    for name, client in sessions.items():
+    for name, entry in sessions.items():
         try:
-            tools = await client.list_tools()
+            tools = await _unwrap_client(entry).list_tools()
             index.append(
                 {
                     "server": name,

@@ -15,7 +15,6 @@ import io
 import json
 import re
 import wave
-from typing import Any
 
 import chainlit as cl
 import numpy as np
@@ -214,22 +213,6 @@ async def on_chat_resume_handler(thread: ThreadDict) -> None:
         await ensure_watching(thread["id"], elements=thread.get("elements"))
     except Exception as e:
         logger.exception(f"Failed to restore chat history: {e}")
-
-
-async def on_mcp_connect_handler(connection: Any, client_session: Any) -> None:
-    """Register a connected MCP server's ClientSession on the user session."""
-    sessions: dict = cl.user_session.get("_mcp_sessions") or {}
-    sessions[connection.name] = client_session
-    cl.user_session.set("_mcp_sessions", sessions)
-    logger.info(f"MCP server connected: {connection.name}")
-
-
-async def on_mcp_disconnect_handler(name: str, client_session: Any) -> None:
-    """Drop a disconnected MCP server from the user session."""
-    sessions: dict = cl.user_session.get("_mcp_sessions") or {}
-    sessions.pop(name, None)
-    cl.user_session.set("_mcp_sessions", sessions)
-    logger.info(f"MCP server disconnected: {name}")
 
 
 MIN_AUDIO_DURATION_S = 0.5

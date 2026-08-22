@@ -236,44 +236,58 @@ class TestContentToText:
 
 
 class TestResolveSession:
-    """``resolve_session`` — ``cl.user_session`` lookup."""
+    """``resolve_session`` — ``context.session.mcp_sessions`` lookup."""
 
     @pytest.fixture
-    def _fake_user_session(self, monkeypatch, _chainlit_module):
-        store = MagicMock()
-        monkeypatch.setattr(_chainlit_module, "user_session", store, raising=False)
-        return store
+    def _fake_mcp_sessions(self, monkeypatch, _chainlit_module):
+        session = MagicMock()
+        context = MagicMock()
+        context.session = session
+        monkeypatch.setattr(_chainlit_module, "context", context, raising=False)
+        return session
 
-    def test_no_sessions_returns_none(self, _fake_user_session):
-        _fake_user_session.get.return_value = None
+    def test_no_sessions_returns_none(self, _fake_mcp_sessions):
+        _fake_mcp_sessions.mcp_sessions = None
         assert resolve_session("any") is None
 
-    def test_missing_server_returns_none(self, _fake_user_session):
-        _fake_user_session.get.return_value = {"other": object()}
+    def test_missing_server_returns_none(self, _fake_mcp_sessions):
+        _fake_mcp_sessions.mcp_sessions = {"other": object()}
         assert resolve_session("missing") is None
 
-    def test_found_returns_session(self, _fake_user_session):
+    def test_found_returns_session(self, _fake_mcp_sessions):
         session = object()
-        _fake_user_session.get.return_value = {"github": session}
+        _fake_mcp_sessions.mcp_sessions = {"github": session}
         assert resolve_session("github") is session
 
-    def test_case_insensitive_match(self, _fake_user_session):
+    def test_unwraps_mcp_session_wrapper(self, _fake_mcp_sessions):
+        from chainlit.session import McpSession
+        from mcp import ClientSession
+
+        client = AsyncMock(spec=ClientSession)
+        _fake_mcp_sessions.mcp_sessions = {
+            "github": McpSession(
+                name="github",
+                client=client,
+                task=MagicMock(),
+            )
+        }
+        assert resolve_session("github") is client
+
+    def test_case_insensitive_match(self, _fake_mcp_sessions):
         """The LLM is not trusted to reproduce the user's exact casing."""
         session = object()
-        _fake_user_session.get.return_value = {"Whatsapp": session}
+        _fake_mcp_sessions.mcp_sessions = {"Whatsapp": session}
         assert resolve_session("whatsapp") is session
         assert resolve_session("WHATSAPP") is session
 
     def test_no_chainlit_context_returns_none(self, monkeypatch, _chainlit_module):
         """Outside a chainlit session (workers/CLI/tests) the lazy ``context``
         proxy raises ``ChainlitContextException`` — degrade to None, not an
-        unhandled exception. This is the documented worker/CLI path (§11).
+        unhandled exception. This is the documented worker/CLI path.
         """
-        fake_session = MagicMock()
-        fake_session.get.side_effect = ChainlitContextException
-        monkeypatch.setattr(
-            _chainlit_module, "user_session", fake_session, raising=False
-        )
+        context = MagicMock()
+        context.session.side_effect = ChainlitContextException
+        monkeypatch.setattr(_chainlit_module, "context", context, raising=False)
         assert resolve_session("any") is None
 
 
@@ -297,9 +311,7 @@ class TestConnectedServerNames:
         assert sorted(connected_server_names()) == ["db", "github"]
 
     def test_no_chainlit_context_returns_empty(self, monkeypatch, _chainlit_module):
-        fake_session = MagicMock()
-        fake_session.get.side_effect = ChainlitContextException
-        monkeypatch.setattr(
-            _chainlit_module, "user_session", fake_session, raising=False
-        )
+        context = MagicMock()
+        context.session.side_effect = ChainlitContextException
+        monkeypatch.setattr(_chainlit_module, "context", context, raising=False)
         assert connected_server_names() == []

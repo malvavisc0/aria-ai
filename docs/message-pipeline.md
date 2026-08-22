@@ -501,7 +501,13 @@ The pipeline depends on state established by the lifecycle handlers
 | `on_chat_start` | Drains stale memory, clears it, sets `thread_titled = False`, registers the `Knowledge` and `Enhance` commands. |
 | `on_chat_resume` | Sets `thread_titled = True` (never re-title resumed threads), waits up to 30 s for app initialization, sets the session thread id to the resumed thread so every message lands in it, restores memory via `restore_chat_history()`, re-arms supervision watchers. |
 | `on_chat_end` | Cancels all supervision watchers, drains and clears memory. |
-| `on_mcp_connect/disconnect` | Maintains the `_mcp_sessions` map backing the per-turn MCP prompt block. |
+
+Connected MCP servers are tracked by Chainlit itself on the in-memory
+`context.session.mcp_sessions` map (no `on_mcp_connect/disconnect`
+handlers are registered — storing live `ClientSession` objects on
+`cl.user_session` would leak them into JSON-serialized thread metadata).
+`mcp_bridge.connected_server_names()` reads that map for the per-turn
+MCP prompt block.
 
 ---
 
