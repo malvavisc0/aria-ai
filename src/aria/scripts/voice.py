@@ -87,7 +87,7 @@ def download_whisper_cpp(model: str | None = None) -> Path:
         console.print(f"[cyan]Downloading[/cyan] whisper-server ({target} build)...")
         _download_file(url, archive)
 
-    dest_dir = Bin.path / "whisper-cpp"
+    dest_dir = Bin.path
     dest_dir.mkdir(parents=True, exist_ok=True)
     binary = _extract_whisper_binary(archive, dest_dir)
     archive.unlink()

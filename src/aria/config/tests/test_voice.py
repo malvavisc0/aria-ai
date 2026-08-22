@@ -23,8 +23,8 @@ class TestVoice:
         import aria.config.folders as folders_mod
 
         with _patch_paths(folders_mod, tmp_path):
-            exe = tmp_path / "bin" / "whisper-cpp" / "whisper-server"
-            exe.parent.mkdir(parents=True)
+            exe = tmp_path / "bin" / "whisper-server"
+            exe.parent.mkdir(parents=True, exist_ok=True)
             exe.touch()
             original = Voice.enabled
             try:
@@ -37,8 +37,8 @@ class TestVoice:
         import aria.config.folders as folders_mod
 
         with _patch_paths(folders_mod, tmp_path):
-            exe = tmp_path / "bin" / "whisper-cpp" / "whisper-server"
-            exe.parent.mkdir(parents=True)
+            exe = tmp_path / "bin" / "whisper-server"
+            exe.parent.mkdir(parents=True, exist_ok=True)
             exe.touch()
             original = Voice.enabled
             try:
@@ -58,7 +58,6 @@ class TestVoice:
             exe = (
                 tmp_path
                 / "bin"
-                / "whisper-cpp"
                 / "whisper-bin-ubuntu-x64"
                 / "whisper-server"
             )

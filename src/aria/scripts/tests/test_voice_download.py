@@ -77,7 +77,7 @@ class TestExtractWhisperBinary:
 
     def test_flattens_nested_release_dir(self, tmp_path) -> None:
         archive = self._make_bundle(tmp_path, nested=True)
-        dest = tmp_path / "whisper-cpp"
+        dest = tmp_path / "bin"
         dest.mkdir()
 
         binary = _extract_whisper_binary(archive, dest)
@@ -91,7 +91,7 @@ class TestExtractWhisperBinary:
 
     def test_flat_archive_unchanged(self, tmp_path) -> None:
         archive = self._make_bundle(tmp_path, nested=False)
-        dest = tmp_path / "whisper-cpp"
+        dest = tmp_path / "bin"
         dest.mkdir()
 
         binary = _extract_whisper_binary(archive, dest)

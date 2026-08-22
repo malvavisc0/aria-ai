@@ -102,6 +102,27 @@ jobs:
           git clone --depth 1 --branch v1.9.2 \
             https://github.com/ggml-org/whisper.cpp /tmp/whisper.cpp
 
+      - name: Prune non-server examples (v1.9.2 unconditionally builds all examples)
+        run: |
+          # v1.9.2's examples/CMakeLists.txt adds every example unconditionally;
+          # WHISPER_BUILD_EXAMPLES=OFF would drop the server too (it lives under
+          # examples/), so patch the file to keep only add_subdirectory(server).
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path("/tmp/whisper.cpp/examples/CMakeLists.txt")
+          text = p.read_text()
+          lines = text.splitlines()
+          keep = {"add_subdirectory(server)"}
+          out = []
+          for line in lines:
+              stripped = line.strip()
+              if stripped.startswith("add_subdirectory(") and stripped not in keep:
+                  continue
+              out.append(line)
+          p.write_text("\n".join(out) + "\n")
+          PY
+          grep -n 'add_subdirectory(' /tmp/whisper.cpp/examples/CMakeLists.txt
+
       - name: Configure (static CUDA build)
         run: |
           cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build \
@@ -112,12 +133,17 @@ jobs:
             -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE \
             -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90" \
             -DWHISPER_BUILD_SERVER=ON \
+            -DWHISPER_BUILD_TESTS=OFF \
+            -DGGML_BUILD_TESTS=OFF \
+            -DGGML_BUILD_EXAMPLES=OFF \
             -DBUILD_SHARED_LIBS=OFF \
             -DGGML_STATIC=ON \
             -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build /tmp/whisper.cpp/build --config Release -j
+        # Cap parallelism: nvcc fattn-vec templates eat ~3-4 GB RAM each
+        # across 5 CUDA architectures. Unbounded -j OOM-kills the runner.
+        run: cmake --build /tmp/whisper.cpp/build --config Release -j2
 
       - name: Verify binary is static (no ggml .so deps)
         run: |
@@ -126,10 +152,8 @@ jobs:
 
       - name: Package
         run: |
-          mkdir -p staging
-          cp /tmp/whisper.cpp/build/bin/whisper-server staging/
           tar -czf whisper-server-cuda-12.6-x86_64.tar.gz \
-            -C staging whisper-server
+            -C /tmp/whisper.cpp/build/bin whisper-server
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
