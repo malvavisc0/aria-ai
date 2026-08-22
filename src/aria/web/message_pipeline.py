@@ -75,12 +75,14 @@ async def _mark_message_processed(
     try:
         data_layer = get_data_layer_handler()
         step_dict = message.to_dict()
-        step_dict["metadata"] = {
+        metadata = {
             **(message.metadata or {}),
             **_DEFAULT_METADATA,
             **(extra_metadata or {}),
             _PROCESSED_KEY: processed,
         }
+        step_dict["metadata"] = metadata
+        message.metadata = metadata
         await data_layer.create_step(step_dict)
     except Exception:
         logger.warning(
@@ -152,40 +154,55 @@ async def _stream_and_finalize(
         if _run_succeeded:
             clean_answer = strip_model_sources(answer_text)
             output.answer_text = clean_answer  # type: ignore[attr-defined]
-            elements, sources = await create_render_elements(
-                *extract_renderable_items(clean_answer)
-            )
-            # Footer goes into content (what send() ships); answer_text
-            # stays clean for the TTS side-channel. Only override the
-            # streamed content when there's something to change.
-            if sources:
-                output.content = clean_answer + sources_footer(sources)
-            elif clean_answer != answer_text:
-                output.content = clean_answer
-            if elements:
-                output.elements = elements
-            await output.send()
+            await _apply_render_elements(output, clean_answer, answer_text)
+            try:
+                await output.send()
+            except Exception:
+                logger.error("Failed to persist assistant message", exc_info=True)
             await _mark_message_processed(
                 message, extra_metadata={**pipeline_meta, **stream_meta}
             )
             from aria.web.supervisor import ensure_watching
 
-            await ensure_watching(message.thread_id, for_id=output.id)
+            try:
+                await ensure_watching(message.thread_id, for_id=output.id)
+            except Exception:
+                logger.warning("ensure_watching failed", exc_info=True)
         elif partial:
             clean_partial = strip_model_sources(partial)
-            elements, sources = await create_render_elements(
-                *extract_renderable_items(clean_partial)
-            )
-            if sources:
-                output.content = clean_partial + sources_footer(sources)
-            elif clean_partial != partial:
-                output.content = clean_partial
-            if elements:
-                output.elements = elements
+            await _apply_render_elements(output, clean_partial, partial)
             await output.send()
         elif output.streaming:
             await output.remove()
     return stream_meta
+
+
+async def _apply_render_elements(
+    output: cl.Message,
+    raw_answer: str,
+    streamed_content: str,
+) -> None:
+    """Build render elements/sources for *raw_answer* and apply to *output*.
+
+    Element building is best-effort: a failure leaves empty elements and no
+    sources so the plain answer still ships. The footer goes into content
+    (what ``send()`` ships) while ``answer_text`` stays clean for the TTS
+    side-channel; the streamed content is only overridden when there is
+    something concrete to change.
+    """
+    try:
+        elements, sources = await create_render_elements(
+            *extract_renderable_items(raw_answer)
+        )
+    except Exception:
+        logger.warning("Render-element build failed", exc_info=True)
+        elements, sources = [], []
+    if sources:
+        output.content = raw_answer + sources_footer(sources)
+    elif raw_answer != streamed_content:
+        output.content = raw_answer
+    if elements:
+        output.elements = elements
 
 
 async def _fail_turn(
@@ -211,7 +228,7 @@ async def _fail_turn(
         extra_metadata={**pipeline_meta, "error": str(error)},
         processed=False,
     )
-    await cl.Message(content=user_message).send()
+    await cl.ErrorMessage(content=user_message).send()
 
 
 def _context_overflow_message() -> str:
@@ -247,7 +264,7 @@ def _maybe_rename_thread(message: cl.Message, output: cl.Message) -> None:
         maybe_title_thread(
             thread_id=message.thread_id,
             user_message=message.content,
-            assistant_reply=output.content,
+            assistant_reply=getattr(output, "answer_text", None) or output.content,
         )
     )
     cl.user_session.set("_pending_title_task", task)

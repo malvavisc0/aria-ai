@@ -251,6 +251,54 @@ async def test_process_audio_full_flow(
 
 
 @pytest.mark.asyncio
+async def test_process_audio_passes_same_echo_to_handler(
+    user_session: _UserSession, monkeypatch: pytest.MonkeyPatch, patch_cl: None
+) -> None:
+    """The sent echo message is the same object handed to the pipeline,
+    so only one user_message step is persisted for the turn.
+
+    Args:
+        user_session: injected cl.user_session fake.
+        monkeypatch: pytest monkeypatch fixture.
+        patch_cl: patches cl.Message/cl.Audio.
+    """
+    await hooks_mod.on_audio_start_handler()
+    for _ in range(10):
+        await hooks_mod.on_audio_chunk_handler(_chunk(100.0))
+
+    monkeypatch.setattr(
+        hooks_mod, "_speech_to_text", AsyncMock(return_value="hello there")
+    )
+    monkeypatch.setattr(
+        hooks_mod, "_text_to_speech", AsyncMock(return_value=b"RIFFaudio")
+    )
+
+    sent: list[Any] = []
+    base_message = hooks_mod.cl.Message
+
+    class _CapturingMessage(base_message):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            sent.append(self)
+
+    monkeypatch.setattr(hooks_mod.cl, "Message", _CapturingMessage)
+
+    handler = AsyncMock()
+    handler.return_value.answer_text = "And hello to you"
+    monkeypatch.setattr("aria.web.message_pipeline.on_message_handler", handler)
+
+    await hooks_mod.process_audio()
+
+    assert len(sent) == 1
+    handler.assert_awaited_once()
+    call = handler.await_args
+    assert call is not None
+    received = call.args[0]
+    assert received is sent[0]
+    assert received.kwargs["metadata"]["voice"] is True
+
+
+@pytest.mark.asyncio
 async def test_process_audio_skips_tts_when_no_output(
     user_session: _UserSession, monkeypatch: pytest.MonkeyPatch, patch_cl: None
 ) -> None:

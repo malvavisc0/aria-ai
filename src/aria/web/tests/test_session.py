@@ -252,3 +252,22 @@ class TestResetMemoryForEdit:
             await pipeline._reset_memory_for_edit("ghost-thread")
 
         mock_vector_db.delete_collection.assert_called_once_with("ghost-thread")
+
+
+class TestStepToChatMessage:
+    """Tests for _step_to_chat_message error handling."""
+
+    def test_returns_none_for_error_step(self) -> None:
+        """A persisted error notice must not enter restored memory."""
+        assert (
+            pipeline._step_to_chat_message({"isError": True, "output": "err"}) is None
+        )
+
+    def test_returns_message_for_normal_step(self) -> None:
+        from llama_index.core.base.llms.types import MessageRole
+
+        msg = pipeline._step_to_chat_message(
+            {"type": "assistant_message", "output": "hi"}
+        )
+        assert msg is not None
+        assert msg.role == MessageRole.ASSISTANT

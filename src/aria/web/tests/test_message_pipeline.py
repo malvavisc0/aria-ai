@@ -84,6 +84,72 @@ class TestEditDetection:
         assert meta["error"] == ""
 
     @pytest.mark.asyncio
+    async def test_mark_message_processed_writes_flag_in_memory(
+        self, monkeypatch
+    ) -> None:
+        """The processed flag is written onto the in-memory message too.
+
+        Chainlit's ``edit_message`` mutates the same object and re-invokes
+        ``on_message``, so the flag must live on ``message.metadata`` for a
+        same-session edit to be detected.
+        """
+        mock_data_layer = MagicMock()
+        mock_data_layer.create_step = AsyncMock()
+        monkeypatch.setattr(pipeline, "get_data_layer_handler", lambda: mock_data_layer)
+
+        message = MagicMock()
+        message.id = "msg-1"
+        message.metadata = {"location": "http://localhost"}
+        message.to_dict.return_value = {"id": "msg-1", "metadata": {}}
+
+        await pipeline._mark_message_processed(message)
+
+        assert message.metadata["processed"] is True
+        assert message.metadata["location"] == "http://localhost"
+
+    @pytest.mark.asyncio
+    async def test_workflow_init_takes_edit_branch_when_flag_in_memory(
+        self, monkeypatch
+    ) -> None:
+        """``_workflow_init`` reads the flag off ``message.metadata``, so a
+        same-session redelivery (flag already written in-memory) triggers
+        the edit reset."""
+        reset_called: list[str] = []
+
+        async def mock_reset(thread_id: str) -> Any:
+            reset_called.append(thread_id)
+            return MagicMock()
+
+        monkeypatch.setattr(pipeline, "_reset_memory_for_edit", mock_reset)
+        monkeypatch.setattr(pipeline, "_sanitize_memory", AsyncMock())
+        monkeypatch.setattr(
+            pipeline, "handle_message", AsyncMock(return_value=("prompt", {}))
+        )
+
+        mock_memory = MagicMock()
+        mock_memory.session_id = "thread-1"
+        mock_session = {"memory": mock_memory}
+        monkeypatch.setattr(
+            pipeline.cl,
+            "user_session",
+            SimpleNamespace(
+                get=lambda k: mock_session.get(k),
+                set=lambda k, v: mock_session.__setitem__(k, v),
+            ),
+        )
+
+        message = _mock_message(
+            id="msg-1",
+            content="Edited",
+            thread_id="thread-1",
+            metadata={"processed": True},
+        )
+
+        await pipeline._workflow_init(message)
+
+        assert reset_called == ["thread-1"]
+
+    @pytest.mark.asyncio
     async def test_edit_detected_when_processed_flag_set(self, monkeypatch) -> None:
         """on_message_handler detects edit via _aria_processed metadata."""
         # Track whether _reset_memory_for_edit was called
@@ -149,6 +215,11 @@ class TestEditDetection:
             pipeline.cl,
             "Message",
             lambda **kw: mock_output,
+        )
+        monkeypatch.setattr(
+            pipeline.cl,
+            "ErrorMessage",
+            lambda **kw: SimpleNamespace(send=AsyncMock()),
         )
 
         # Create message WITH processed (simulating edit)
@@ -219,6 +290,11 @@ class TestEditDetection:
             pipeline.cl,
             "Message",
             lambda **kw: mock_output,
+        )
+        monkeypatch.setattr(
+            pipeline.cl,
+            "ErrorMessage",
+            lambda **kw: SimpleNamespace(send=AsyncMock()),
         )
 
         # First message — no processed in metadata
@@ -406,6 +482,7 @@ class TestEditDetection:
             return m
 
         monkeypatch.setattr(pipeline.cl, "Message", _make_message)
+        monkeypatch.setattr(pipeline.cl, "ErrorMessage", _make_message)
 
         message = _mock_message(
             id="msg-1",
@@ -477,6 +554,7 @@ class TestEditDetection:
             return error_msg
 
         monkeypatch.setattr(pipeline.cl, "Message", _make_message)
+        monkeypatch.setattr(pipeline.cl, "ErrorMessage", _make_message)
 
         message = _mock_message(
             id="msg-1",
@@ -559,3 +637,108 @@ class TestOnMessageHandlerReturn:
         monkeypatch.setattr(pipeline, "_warn_not_initialized", AsyncMock())
         result = await pipeline.on_message_handler(MagicMock())
         assert result is None
+
+
+class TestStreamAndFinalize:
+    """Tests for the success/finalization semantics of the message pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_render_failure_still_marks_processed(self, monkeypatch) -> None:
+        """A streamed-complete answer is a successful turn even if element
+        building fails: the message is still marked processed so a retry
+        does not re-run against already-completed memory.
+
+        Args:
+            monkeypatch: pytest monkeypatch fixture.
+        """
+        monkeypatch.setattr(pipeline, "ChatConfig", SimpleNamespace(max_iteration=10))
+        monkeypatch.setattr(pipeline, "_rollback_memory", AsyncMock())
+        monkeypatch.setattr(pipeline._state, "agents_workflow", MagicMock())
+        monkeypatch.setattr(
+            pipeline._state.__class__, "validate_initialized", lambda self: None
+        )
+        monkeypatch.setattr(
+            pipeline, "handle_message", AsyncMock(return_value=("prompt", {}))
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "stream_agent_response",
+            AsyncMock(return_value=(True, {}, "The answer")),
+        )
+        monkeypatch.setattr(
+            pipeline,
+            "create_render_elements",
+            AsyncMock(side_effect=RuntimeError("network down")),
+        )
+        monkeypatch.setattr("aria.web.supervisor.ensure_watching", AsyncMock())
+        monkeypatch.setattr(
+            pipeline.cl,
+            "user_session",
+            SimpleNamespace(
+                get=lambda k: MagicMock(
+                    session_id="thread-1",
+                    aget=AsyncMock(return_value=[]),
+                    aget_all=AsyncMock(return_value=[]),
+                ),
+                set=lambda k, v: None,
+            ),
+        )
+
+        output = MagicMock()
+        output.send = AsyncMock()
+        output.update = AsyncMock()
+        output.remove = AsyncMock()
+        monkeypatch.setattr(pipeline.cl, "Message", lambda **kw: output)
+
+        message = _mock_message(
+            id="msg-1",
+            content="who built vllm",
+            command=None,
+            thread_id="thread-1",
+            elements=[],
+            metadata={},
+        )
+
+        # Must not raise despite the render failure.
+        await pipeline.on_message_handler(message)
+
+        assert output.answer_text == "The answer"
+        output.send.assert_awaited_once()
+
+
+class TestMaybeRenameThread:
+    """Tests for the titler's answer source."""
+
+    @pytest.mark.asyncio
+    async def test_uses_clean_answer_text_not_content(self, monkeypatch) -> None:
+        """The titler receives the clean ``answer_text`` (no ``**Sources:**``
+        footer that lives only in ``output.content``)."""
+        captured: list[dict] = []
+
+        async def fake_title(**kwargs: Any) -> None:
+            captured.append(kwargs)
+
+        monkeypatch.setattr(pipeline, "maybe_title_thread", fake_title)
+
+        user_session: dict[str, Any] = {}
+        monkeypatch.setattr(
+            pipeline.cl,
+            "user_session",
+            SimpleNamespace(
+                get=lambda k: user_session.get(k),
+                set=lambda k, v: user_session.__setitem__(k, v),
+            ),
+        )
+
+        output = MagicMock()
+        output.content = "The answer **Sources:** Inferact"
+        output.answer_text = "The answer"
+        message = _mock_message(id="msg-1", content="q", thread_id="t1", metadata={})
+
+        pipeline._maybe_rename_thread(message, output)
+
+        task = user_session["_pending_title_task"]
+        await task
+
+        assert captured[0]["assistant_reply"] == "The answer"
+        assert "Sources" not in captured[0]["assistant_reply"]

@@ -57,7 +57,7 @@ There are exactly two ways a message enters the pipeline:
 | Entry | Wiring | Message shape |
 |-------|--------|---------------|
 | Typed chat message | `@cl.on_message` in [`web_ui.py`](../src/aria/web_ui.py) → `on_message_handler` | `cl.Message` as sent by the UI (may carry `command` = `Enhance`/`Knowledge`) |
-| Voice turn | `process_audio()` in [`hooks.py`](../src/aria/web/hooks.py) calls `on_message_handler` directly | `cl.Message(content=transcription, metadata={"voice": True})` |
+| Voice turn | `process_audio()` in [`hooks.py`](../src/aria/web/hooks.py) calls `on_message_handler` directly | The echoed `cl.Message` (same object handed to the handler; `metadata={"voice": True}`) |
 
 The handler returns the assistant `cl.Message` on success (the voice
 pipeline reads its `answer_text` attribute for TTS) or `None` on error.
@@ -174,14 +174,18 @@ edited content, and re-invokes `on_message`. The pipeline distinguishes
 - Key absent or false → the delivery is handled like a fresh turn
   (a failed turn wrote `processed: false`, making re-delivery a retry).
 
-Because `_mark_message_processed()` writes the flag straight to the data
-layer without emitting it to the frontend, a redelivered message only
-carries `processed: true` through the resume path: `on_chat_resume`
-rebuilds Chainlit's `chat_context` from persisted steps, and
-`Message.from_dict()` includes their deserialized DB metadata. A
-**same-session edit** therefore re-delivers the original object without
-the flag and runs as a new turn against live memory; an **edit after a
-resume** triggers the full reset below.
+`_mark_message_processed()` writes the flag both to the data layer and
+onto the in-memory `message.metadata`. A redelivered message therefore
+carries `processed: true` through **either** path:
+
+- **Resume** — `on_chat_resume` rebuilds Chainlit's `chat_context` from
+  persisted steps, and `Message.from_dict()` includes their deserialized
+  DB metadata.
+- **Same-session edit** — Chainlit's `edit_message` handler mutates the
+  *same* in-memory object in place and re-invokes `on_message`, so the
+  flag written onto `message.metadata` travels with it.
+
+Both now trigger the full edit reset below.
 
 ### Memory Lifecycle
 
@@ -219,7 +223,8 @@ Memory is a `BackgroundFlushMemory`
    as one flat `createdAt`-ordered list; non-conversation types are
    filtered out here.
 2. Convert to `ChatMessage`s (`user_message` → USER, else ASSISTANT;
-   empty outputs skipped).
+    empty or error (`isError`) outputs skipped — a persisted
+    `cl.ErrorMessage` must never enter restored memory).
 3. Sanitize with `drop_trailing_user=False` (a resumed thread keeps its
    last user message in context).
 4. Trim to the embedding queue budget:
@@ -229,9 +234,11 @@ Memory is a `BackgroundFlushMemory`
    newest-first, always starts the result on a user message, and
    force-keeps the newest user→assistant pair even over budget.
 5. `memory.aset(trimmed)` replaces the chat store, then
-   `memory.schedule_embed(dropped)` re-embeds the trimmed-off tail in
-   the background — idempotent because vector node IDs are SHA-256
-   hashes of the content.
+    `memory.schedule_embed(dropped)` re-embeds the trimmed-off tail in
+    the background — idempotent because each vector node is keyed by a
+    SHA-256 hash of its own message text (`IdempotentVectorMemoryBlock`
+    builds one node per message, so identical content hashes to the same
+    ID regardless of how the batch is chunked).
 
 ### History Sanitization
 
@@ -310,7 +317,12 @@ the partial answer instead of discarding the turn.
 ## Stage 4 — Rendering and Finalization
 
 Back in `_stream_and_finalize()`'s `finally` block, the success path
-(`stream_agent_response` returned normally):
+(`stream_agent_response` returned normally) runs a fixed sequence. The
+element-building and persistence steps are **best-effort**; marking the
+message processed is **guaranteed** — a streamed-complete answer is a
+successful turn even if element building or the final `send()` fails, so
+it is never retried against memory that already holds the exchange.
+This work lives in `_apply_render_elements()`:
 
 1. **Clean the answer** — `strip_model_sources()` removes a trailing
    model-generated `**Sources:**` line (the model imitates the pipeline
@@ -328,7 +340,9 @@ Back in `_stream_and_finalize()`'s `finally` block, the success path
      (trailing punctuation/emphasis wrappers trimmed; unbalanced
      parentheses preserved for Wikipedia-style URLs) — all citation
      candidates.
-3. **Build elements** — `create_render_elements()`:
+3. **Build elements** — `create_render_elements()` (best-effort: a
+   failure is logged and leaves no elements, so the plain answer still
+   ships):
    - local images → `cl.Image` inline; PDFs → `cl.Pdf` side; text/code →
      `cl.Text` side with a language hint; anything else → `cl.File` side,
    - remote image URLs → inline `cl.Image` (`<img>` needs no CORS),
@@ -346,18 +360,21 @@ Back in `_stream_and_finalize()`'s `finally` block, the success path
    `output.answer_text` stays clean for TTS. When there are no
    citations but cleaning changed the text, content is overridden with
    the clean answer. Elements are attached when non-empty.
-5. **Ship it** — `await output.send()` persists the assistant message.
+5. **Ship it** — `await output.send()` persists the assistant message
+    (best-effort: a persistence failure is logged, never fatal).
 6. **Mark processed** — `_mark_message_processed()` rewrites the user
-   message's step in the data layer with the full metadata schema:
-   defaults + `pipeline_meta` (enhancement/attachments/knowledge) +
-   `stream_meta` (tools_called/has_thinking) + `processed: true`.
-   The write is an upsert (`create_step` → `ON CONFLICT (id) DO
-   UPDATE`), so retries and edits keep exactly one row per user message.
-   Failure to persist is logged, never fatal.
+    message's step in the data layer with the full metadata schema:
+    defaults + `pipeline_meta` (enhancement/attachments/knowledge) +
+    `stream_meta` (tools_called/has_thinking) + `processed: true`.
+    The write is an upsert (`create_step` → `ON CONFLICT (id) DO
+    UPDATE`), so retries and edits keep exactly one row per user message.
+    Runs **unconditionally** even if element building or send() failed;
+    failure to persist is logged, never fatal.
 7. **Supervision** — `ensure_watching(thread_id, for_id=output.id)`
-   ([`supervisor.py`](../src/aria/web/supervisor.py)) arms a watcher
-   task per supervised worker found in the thread so their tasklists
-   keep updating (see `docs/worker-tasklist-supervision.md`).
+    ([`supervisor.py`](../src/aria/web/supervisor.py)) arms a watcher
+    task per supervised worker found in the thread so their tasklists
+    keep updating (see `docs/worker-tasklist-supervision.md`). Best-effort:
+    a watcher failure is logged and never unprocesses a completed turn.
 
 The **failure path** inside `finally` (stream raised):
 
@@ -381,12 +398,14 @@ On success, `on_message_handler` calls `_maybe_rename_thread()`:
   `False` by `on_chat_start`, `True` by `on_chat_resume`) — so resumed
   conversations are never re-titled.
 - Fire-and-forget `asyncio.create_task(maybe_title_thread(...))`
-  ([`thread_titler.py`](../src/aria/web/thread_titler.py)): a
-  `utility_completion` call (max 6 words, 50 tokens, 15 s timeout)
-  generates a title from the first user/assistant exchange, persists it
-  via `data_layer.update_thread()`, and pushes a `first_interaction`
-  socket event so the sidebar updates live. Any failure keeps the
-  Chainlit-default name (first message verbatim).
+   ([`thread_titler.py`](../src/aria/web/thread_titler.py)): a
+   `utility_completion` call (max 6 words, 50 tokens, 15 s timeout)
+   generates a title from the first user/assistant exchange — the
+   assistant reply is the clean `answer_text` (the `**Sources:**` footer
+   lives only in `output.content` and is not passed on) — persists it
+   via `data_layer.update_thread()`, and pushes a `first_interaction`
+   socket event so the sidebar updates live. Any failure keeps the
+   Chainlit-default name (first message verbatim).
 
 The handler returns the assistant `cl.Message` (voice pipeline reads
 `answer_text` for TTS).
@@ -407,7 +426,9 @@ user_message, log_level)`:
    `error: str(error)` plus the pipeline metadata with `processed`
    false, so re-delivery of the same message is a **retry**, not an
    edit.
-4. Send the user-facing explanation.
+4. Send the user-facing explanation as a `cl.ErrorMessage` — it renders
+   as an error bubble in the UI and is excluded from restored memory
+   (see [Memory Lifecycle](#memory-lifecycle)).
 
 Routing table:
 
@@ -439,9 +460,11 @@ the message (e.g. `location`) survive: the merge order is
 | `error` | `str` | Empty on success; the exception text on failure. |
 | `knowledge_grounded` | `bool` *(extra)* | Knowledge-hub retrieval ran. |
 
-`_mark_message_processed()` writes this dict onto the user message's
-step via `data_layer.create_step(message.to_dict())`. Persistence
-failures are logged and swallowed — the turn's outcome is unaffected.
+`_mark_message_processed()` writes this dict both onto the user message's
+step (`data_layer.create_step(message.to_dict())`) and onto the
+in-memory `message.metadata`, so a same-session edit re-delivered by
+Chainlit carries the flag too. Persistence failures are logged and
+swallowed — the turn's outcome is unaffected.
 
 ---
 
@@ -455,9 +478,10 @@ Voice turns reuse this pipeline unchanged
 2. PCM → WAV → whisper.cpp STT (non-speech tags stripped; empty
    transcription aborts). The transcription is echoed to the UI as a
    user message.
-3. `on_message_handler(cl.Message(content=transcription,
-   metadata={"voice": True}))` — the `voice` key triggers
-   `VOICE_MODE_INSTRUCTION` in prompt building.
+3. The echoed `cl.Message` is sent to the UI and then passed to
+   `on_message_handler` **as the same object**, so a single
+   `user_message` step is persisted for the turn. The `voice` key
+   triggers `VOICE_MODE_INSTRUCTION` in prompt building.
 4. On success the handler's returned message carries `answer_text`
    (clean, thinking-free). It is reduced to plain text
    (`_strip_markdown_for_tts` — fenced code first, then inline code,
@@ -475,7 +499,7 @@ The pipeline depends on state established by the lifecycle handlers
 | Handler | Pipeline-relevant work |
 |---------|------------------------|
 | `on_chat_start` | Drains stale memory, clears it, sets `thread_titled = False`, registers the `Knowledge` and `Enhance` commands. |
-| `on_chat_resume` | Sets `thread_titled = True` (never re-title resumed threads), waits up to 30 s for app initialization, restores memory via `restore_chat_history()`, re-arms supervision watchers. |
+| `on_chat_resume` | Sets `thread_titled = True` (never re-title resumed threads), waits up to 30 s for app initialization, sets the session thread id to the resumed thread so every message lands in it, restores memory via `restore_chat_history()`, re-arms supervision watchers. |
 | `on_chat_end` | Cancels all supervision watchers, drains and clears memory. |
 | `on_mcp_connect/disconnect` | Maintains the `_mcp_sessions` map backing the per-turn MCP prompt block. |
 
@@ -496,4 +520,4 @@ The pipeline depends on state established by the lifecycle handlers
 | [`web/state.py`](../src/aria/web/state.py) | `AppState` singleton; initialization validation. |
 | [`web/hooks.py`](../src/aria/web/hooks.py) | Lifecycle handlers, data-layer cache, voice pipeline. |
 | [`web/supervisor.py`](../src/aria/web/supervisor.py) | `ensure_watching` — arm worker tasklist watchers after a turn. |
-| [`llm/memory.py`](../src/aria/llm/memory.py) | `BackgroundFlushMemory` (off-critical-path embedding waterfall), idempotent vector nodes, `drain`/`schedule_embed`. |
+| [`llm/memory.py`](../src/aria/llm/memory.py) | `BackgroundFlushMemory` (off-critical-path embedding waterfall), idempotent per-message vector nodes, `drain`/`schedule_embed`. |

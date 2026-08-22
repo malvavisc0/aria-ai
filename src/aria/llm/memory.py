@@ -71,10 +71,7 @@ class IdempotentVectorMemoryBlock(VectorMemoryBlock):
     """
 
     async def _aput(self, messages: list[ChatMessage]) -> None:
-        if not messages:
-            return
-
-        texts: list[str] = []
+        nodes: list[TextNode] = []
         session_id = None
         for message in messages:
             text = self._get_text_from_messages([message])
@@ -90,19 +87,23 @@ class IdempotentVectorMemoryBlock(VectorMemoryBlock):
                 text += f"\nAdditional Info: ({message.additional_kwargs!s})"
 
             text = f"<message role='{message.role.value}'>{text}</message>"
-            texts.append(text)
+            nodes.append(
+                TextNode(
+                    text=text,
+                    metadata={"session_id": session_id},
+                    id_=_hash_node_id(text),
+                )
+            )
 
-        if not texts:
+        if not nodes:
             return
 
-        joined = "\n".join(texts)
-        text_node = TextNode(
-            text=joined,
-            metadata={"session_id": session_id},
-            id_=_hash_node_id(joined),
+        embeddings = await self.embed_model.aget_text_embedding_batch(
+            [n.text for n in nodes]
         )
-        text_node.embedding = await self.embed_model.aget_text_embedding(text_node.text)
-        await self.vector_store.async_add([text_node])
+        for node, emb in zip(nodes, embeddings):
+            node.embedding = emb
+        await self.vector_store.async_add(nodes)
 
 
 class BackgroundFlushMemory:

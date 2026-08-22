@@ -206,6 +206,7 @@ async def on_chat_resume_handler(thread: ThreadDict) -> None:
                 )
                 return
 
+        cl.context.session.thread_id = thread["id"]
         memory = await restore_chat_history(thread)
         cl.user_session.set("memory", memory)
         from aria.web.supervisor import ensure_watching
@@ -430,17 +431,17 @@ async def process_audio() -> None:
 
     logger.info(f"Transcription: {transcription}")
 
-    await cl.Message(
+    echo = cl.Message(
         content=transcription,
         author="You",
         type="user_message",
-    ).send()
+        metadata={"voice": True},
+    )
+    await echo.send()
 
     from aria.web.message_pipeline import on_message_handler
 
-    output = await on_message_handler(
-        cl.Message(content=transcription, metadata={"voice": True})
-    )
+    output = await on_message_handler(echo)
     answer = getattr(output, "answer_text", "") if output else ""
     if not answer.strip():
         logger.warning("No answer text from message pipeline")

@@ -139,14 +139,14 @@ class TestIdempotentVectorBlock:
 
     @pytest.mark.asyncio
     async def test_text_matches_base_vector_block(self) -> None:
-        """Guard: the override's joined text must match the base class.
+        """Guard: each per-message node text must match the base class.
 
-        ``IdempotentVectorMemoryBlock._aput`` reimplements the base
-        extraction loop to inject a hash-based node ID.  If the text
-        formatting drifts from upstream ``VectorMemoryBlock._aput``,
-        dedup and retrieval consistency break silently.  This test
-        asserts the node text is byte-identical for representative
-        inputs.
+        ``IdempotentVectorMemoryBlock._aput`` builds one node per message
+        with a hash-based node ID, reimplementing the base extraction
+        loop.  If the text formatting drifts from upstream
+        ``VectorMemoryBlock._aput``, dedup and retrieval consistency break
+        silently.  This test asserts each node text is byte-identical to
+        the base class's per-message node for representative inputs.
         """
         msgs = [
             _msg(MessageRole.USER, "hello world"),
@@ -168,12 +168,39 @@ class TestIdempotentVectorBlock:
             embed_model=_FakeEmbedding(),
         )
 
-        await base_block._aput([msgs[0], msgs[1]])
-        await idem_block._aput([msgs[0], msgs[1]])
+        for msg in msgs:
+            await base_block._aput([msg])
+            await idem_block._aput([msg])
 
-        assert len(base_store.nodes) == 1
-        assert len(idem_store.nodes) == 1
-        assert base_store.nodes[0].text == idem_store.nodes[0].text
+        assert len(idem_store.nodes) == 2
+        for base_node, idem_node in zip(base_store.nodes, idem_store.nodes):
+            assert base_node.text == idem_node.text
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_ids_across_batches(self) -> None:
+        """Same content yields the same node ID across different batches.
+
+        A batch flush and a replay of the same turns as a different-sized
+        list must hash to identical IDs so Chroma's idempotent ``add``
+        drops the re-insert instead of appending a duplicate.
+        """
+        store = _RecordingVectorStore()
+        block = IdempotentVectorMemoryBlock(
+            name="vector_memory",
+            vector_store=store,  # type: ignore[arg-type]
+            embed_model=_FakeEmbedding(),
+        )
+        user = _msg(MessageRole.USER, "same turn")
+        assistant = _msg(MessageRole.ASSISTANT, "same reply")
+
+        await block._aput([user, assistant])
+        await block._aput([user])
+        await block._aput([assistant])
+
+        ids = [n.node_id for n in store.nodes]
+        assert len(set(ids)) == 2
+        assert ids[0] == ids[2]
+        assert ids[1] == ids[3]
 
 
 class TestBackgroundFlushMemory:

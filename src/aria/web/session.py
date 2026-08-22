@@ -656,6 +656,8 @@ def _collect_conversation_steps(chat_steps: list) -> list:
 
 
 def _step_to_chat_message(step) -> ChatMessage | None:
+    if step.get("isError"):
+        return None
     content = step.get("output", "")
     if not content:
         return None
