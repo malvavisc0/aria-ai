@@ -110,37 +110,31 @@ async def append_files_block(prompt: str, file_paths: list[str]) -> str:
     return f"{prompt}\n\n[Uploaded files]:\n" + "\n".join(lines)
 
 
-async def append_mcp_block(prompt: str) -> str:
+def append_mcp_block(prompt: str) -> str:
     """Append a `[Connected MCP servers]` block when servers are connected.
 
-    Per-turn injection so the agent knows which external services are
-    available and the exact tool names to call, without having to run
-    ``ax mcp list`` and read a large persisted schema first — servers
-    connect mid-session via the UI after the system prompt is fixed at
-    startup. Returns the prompt unchanged when no servers are connected
-    (no noise).
+    Names only, sync and cheap (session-store keys, no ``list_tools``
+    round-trip) — a 100+-tool server costs one line per turn, not its
+    whole tool list. The agent discovers individual tools on demand via
+    ``ax mcp list``, which persists large schemas to a file. Returns the
+    prompt unchanged when no servers are connected (no noise).
     """
-    from aria.tools.mcp_bridge import connected_tool_map
+    from aria.tools.mcp_bridge import connected_server_names
 
-    tool_map = await connected_tool_map()
-    if not tool_map:
+    names = connected_server_names()
+    if not names:
         return prompt
-    logger.debug(f"Appended {len(tool_map)} MCP server(s) to prompt")
-    lines = []
-    for server, tools in tool_map.items():
-        if not tools:
-            lines.append(f"- {server} (no tools exposed)")
-            continue
-        detail = "\n".join(f"    - {t['name']}: {t['description']}" for t in tools)
-        lines.append(f"- {server}:\n{detail}")
+    logger.debug(f"Appended {len(names)} MCP server(s) to prompt")
+    lines = "\n".join(f"- {name}" for name in sorted(names))
     usage = (
-        '\n\nTo call a tool, use family="mcp", command="call" — never the '
-        "server as a family. Put the exact tool name from the block into "
-        "args.tool, keeping its hyphens:\n"
+        "\n\nTo call an MCP tool, first get its exact tool name with\n"
+        '  ax(family="mcp", command="list", args={"server": "<server name>"})\n'
+        "then:\n"
         '  ax(family="mcp", command="call", '
-        'args={"server": "<server name>", "tool": "<exact tool name above>", "arguments": {}})'
+        'args={"server": "<server name>", "tool": "<exact tool name>", '
+        '"arguments": {}})'
     )
-    return f"{prompt}\n\n[Connected MCP servers]\n" + "\n".join(lines) + usage
+    return f"{prompt}\n\n[Connected MCP servers]\n{lines}{usage}"
 
 
 async def append_images_block(prompt: str, image_data: list[dict]) -> str:
@@ -237,7 +231,7 @@ async def handle_message(
 
     prompt = await append_files_block(prompt, file_paths)
     prompt = await append_images_block(prompt, image_data)
-    prompt = await append_mcp_block(prompt)
+    prompt = append_mcp_block(prompt)
 
     if message.command == "Knowledge":
         prompt = await retrieve_knowledge(prompt)

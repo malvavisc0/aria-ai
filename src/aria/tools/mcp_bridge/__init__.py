@@ -88,35 +88,6 @@ def connected_server_names() -> list[str]:
     return list(sessions.keys())
 
 
-async def connected_tool_map() -> dict[str, list[dict[str, str]]]:
-    """Return ``{server: [{name, description}, ...]}`` for connected servers.
-
-    The per-turn prompt nudge injects these names so the agent can pick a
-    tool directly instead of calling ``ax mcp list`` and reading a large
-    persisted schema. Enumeration is cheap (a local server just returns its
-    registered tool list) but done per turn because servers can connect
-    mid-session. Degrades to ``{}`` outside a chainlit session or when a
-    server errors.
-    """
-    sessions = _connected_sessions()
-    if not sessions:
-        return {}
-    out: dict[str, list[dict[str, str]]] = {}
-    for name, client in sessions.items():
-        try:
-            tools = await client.list_tools()
-        except Exception:
-            continue
-        out[name] = [
-            {
-                "name": t.name,
-                "description": (t.description or "").strip()[:100],
-            }
-            for t in tools.tools
-        ]
-    return out
-
-
 async def list_servers() -> str:
     """Return the connected-server index for ``ax mcp list`` (no server arg).
 

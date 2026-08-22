@@ -224,37 +224,27 @@ class TestHandleMessageVision:
 class TestAppendMcpBlock:
     """Tests for the per-turn connected-MCP-servers prompt injection."""
 
-    @pytest.mark.asyncio
-    async def test_no_servers_leaves_prompt_unchanged(self, monkeypatch) -> None:
+    def test_no_servers_leaves_prompt_unchanged(self, monkeypatch) -> None:
         from aria.tools import mcp_bridge
 
-        monkeypatch.setattr(
-            mcp_bridge, "connected_tool_map", AsyncMock(return_value={})
-        )
-        assert await pipeline.append_mcp_block("hello") == "hello"
+        monkeypatch.setattr(mcp_bridge, "connected_server_names", lambda: [])
+        assert pipeline.append_mcp_block("hello") == "hello"
 
-    @pytest.mark.asyncio
-    async def test_appends_server_and_tool_names(self, monkeypatch) -> None:
+    def test_appends_server_names_only(self, monkeypatch) -> None:
         from aria.tools import mcp_bridge
 
         monkeypatch.setattr(
             mcp_bridge,
-            "connected_tool_map",
-            AsyncMock(
-                return_value={
-                    "github": [{"name": "list-repos", "description": "List repos"}],
-                    "db": [{"name": "query", "description": "Run SQL"}],
-                }
-            ),
+            "connected_server_names",
+            lambda: ["github", "db"],
         )
-        out = await pipeline.append_mcp_block("hello")
+        out = pipeline.append_mcp_block("hello")
         assert "[Connected MCP servers]" in out
-        assert "- github:" in out
-        assert "- list-repos: List repos" in out
-        assert "- db:" in out
-        assert "- query: Run SQL" in out
+        assert "- github" in out
+        assert "- db" in out
+        assert "list-repos" not in out
         assert 'command="call"' in out
-        assert '"tool": "<exact tool name above>"' in out
+        assert '"tool": "<exact tool name>"' in out
 
     @pytest.mark.asyncio
     async def test_handle_message_appends_mcp_block(self, monkeypatch) -> None:
@@ -264,12 +254,8 @@ class TestAppendMcpBlock:
         monkeypatch.setattr(pipeline, "extract_file_paths", lambda msg: [])
         monkeypatch.setattr(
             mcp_bridge,
-            "connected_tool_map",
-            AsyncMock(
-                return_value={
-                    "github": [{"name": "list-repos", "description": "List repos"}]
-                }
-            ),
+            "connected_server_names",
+            lambda: ["github"],
         )
         message = _mock_message(
             content="do something",
@@ -279,8 +265,7 @@ class TestAppendMcpBlock:
         )
         prompt, meta = await pipeline.handle_message(message)
         assert "[Connected MCP servers]" in prompt
-        assert "- github:" in prompt
-        assert "- list-repos: List repos" in prompt
+        assert "- github" in prompt
         assert meta == {}
 
 
