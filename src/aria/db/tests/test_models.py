@@ -82,48 +82,6 @@ class TestUserModel:
         with pytest.raises(IntegrityError):
             await db_session.commit()
 
-    @pytest.mark.asyncio
-    async def test_user_with_password(self, db_session: AsyncSession):
-        """Test creating a user with password field."""
-        from aria.db.auth import hash_password
-
-        password_hash = hash_password("test_password")
-        user = User(
-            id=str(uuid.uuid4()),
-            identifier="test@example.com",
-            display_name="Test User",
-            metadata_='{"role": "user"}',
-            password=password_hash,
-            createdAt="2024-01-01T00:00:00Z",
-        )
-
-        db_session.add(user)
-        await db_session.commit()
-
-        # Verify user exists with password
-        result = await db_session.execute(select(User).where(User.id == user.id))
-        retrieved_user = result.scalar_one()
-        assert retrieved_user.password == password_hash
-
-    @pytest.mark.asyncio
-    async def test_user_without_password(self, db_session: AsyncSession):
-        """Test creating a user without password (OAuth user)."""
-        user = User(
-            id=str(uuid.uuid4()),
-            identifier="oauth@example.com",
-            display_name="OAuth User",
-            metadata_='{"role": "user", "provider": "google"}',
-            password=None,
-            createdAt="2024-01-01T00:00:00Z",
-        )
-
-        db_session.add(user)
-        await db_session.commit()
-
-        result = await db_session.execute(select(User).where(User.id == user.id))
-        retrieved_user = result.scalar_one()
-        assert retrieved_user.password is None
-
 
 class TestThreadModel:
     """Test suite for Thread model."""

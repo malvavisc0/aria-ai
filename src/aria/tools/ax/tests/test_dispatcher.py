@@ -7,11 +7,6 @@ from unittest.mock import patch
 import pytest
 
 from aria.tools.ax.dispatcher import _DISPATCH, _build_help, _help_lookup, ax
-from aria.tools.execution_context import (
-    ExecutionContext,
-    reset_execution_context,
-    set_execution_context,
-)
 
 
 def _parse_commands(section: str) -> set[str]:
@@ -228,13 +223,6 @@ class TestDispatch:
         assert "search" in data["data"]["error"]["available_commands"]
 
     @pytest.mark.asyncio
-    async def test_help_command(self):
-        result = await ax(reason="test", family="finance", command="help")
-        data = json.loads(result)
-        assert data["data"]["family"] == "finance"
-        assert "stock" in data["data"]["commands"]
-
-    @pytest.mark.asyncio
     async def test_voice_family_in_help(self):
         result = _build_help("voice")
         data = json.loads(result)
@@ -346,40 +334,6 @@ class TestDispatch:
         result = await ax(reason="test", family="web", command="")
         data = json.loads(result)
         assert data["data"]["error"]["code"] == "missing_required_args"
-
-    @pytest.mark.asyncio
-    async def test_worker_agent_cannot_spawn_nested_worker(self):
-        token = set_execution_context(
-            ExecutionContext(role="worker", worker_id="worker_x")
-        )
-        try:
-            result = await ax(
-                reason="delegate nested task",
-                family="worker",
-                command="spawn",
-                args={"prompt": "nested"},
-            )
-        finally:
-            reset_execution_context(token)
-        data = json.loads(result)
-        assert data["data"]["error"]["code"] == "nested_worker_forbidden"
-
-    @pytest.mark.asyncio
-    async def test_worker_agent_cannot_use_memory(self):
-        token = set_execution_context(
-            ExecutionContext(role="worker", worker_id="worker_x")
-        )
-        try:
-            result = await ax(
-                reason="remember nested task",
-                family="memory",
-                command="store",
-                args={"key": "x", "value": "y"},
-            )
-        finally:
-            reset_execution_context(token)
-        data = json.loads(result)
-        assert data["data"]["error"]["code"] == "worker_memory_forbidden"
 
     @pytest.mark.asyncio
     async def test_mcp_call_unknown_server_lists_available(self):

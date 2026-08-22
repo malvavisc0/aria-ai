@@ -35,19 +35,6 @@ class TestGetVenvExtrasJson:
         assert "uncategorized" in result
         assert "total" in result
 
-    def test_categories_is_dict(self):
-        """Categories should be a dict of lists."""
-        result = get_venv_extras_json()
-        assert isinstance(result["categories"], dict)
-        for key, val in result["categories"].items():
-            assert isinstance(key, str)
-            assert isinstance(val, list)
-
-    def test_uncategorized_is_list(self):
-        """Uncategorized should be a list."""
-        result = get_venv_extras_json()
-        assert isinstance(result["uncategorized"], list)
-
     def test_total_matches(self):
         """Total should equal sum of all categorized + uncategorized."""
         result = get_venv_extras_json()

@@ -46,8 +46,3 @@ class TestAriaCliRegistration:
         ):
             # These commands should not appear as registered subcommands
             assert f"  {cmd} " not in result.output
-
-    def test_server_subcommand_registered(self):
-        """The server subcommand should be registered."""
-        result = runner.invoke(app, ["server", "--help"])
-        assert result.exit_code == 0

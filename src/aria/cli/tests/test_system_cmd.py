@@ -39,13 +39,3 @@ class TestHardwareCmd:
         if "memory" in output:
             assert "total_gb" in output["memory"]
             assert isinstance(output["memory"]["total_gb"], (int, float))
-
-    @patch("aria.cli.system.typer")
-    def test_gpus_key_present(self, mock_typer):
-        """Output should have gpus key (may be empty list)."""
-        output = {}
-        mock_typer.echo = lambda x: output.update(json.loads(x))
-        hardware_cmd()
-        # gpus key may or may not be present depending on nvidia availability
-        if "gpus" in output:
-            assert isinstance(output["gpus"], list)

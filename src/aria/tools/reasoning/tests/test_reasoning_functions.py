@@ -512,3 +512,84 @@ def test_invalid_action(test_agent_id, test_db):
     )
     assert result["status"] == "error"
     assert result["error"]["code"] == "INVALID_ACTION"
+
+
+def test_add_step_with_invalid_cognitive_mode_defaults(test_agent_id, test_db):
+    """An invalid cognitive_mode defaults to 'analysis'."""
+    reasoning("Testing reason", action="start", agent_id=test_agent_id)
+    result = _result(
+        reasoning(
+            "Testing reason",
+            action="step",
+            content="Testing with invalid mode",
+            cognitive_mode="invalid_mode",
+            reasoning_type="deductive",
+            confidence=0.8,
+            agent_id=test_agent_id,
+        )
+    )
+    assert result["status"] == "success"
+    assert result["data"]["cognitive_mode"] == "analysis"
+    reasoning("Testing reason", action="end", agent_id=test_agent_id)
+
+
+def test_add_step_with_invalid_reasoning_type_defaults(test_agent_id, test_db):
+    """An invalid reasoning_type defaults to 'deductive'."""
+    reasoning("Testing reason", action="start", agent_id=test_agent_id)
+    result = _result(
+        reasoning(
+            "Testing reason",
+            action="step",
+            content="Testing with invalid type",
+            cognitive_mode="analysis",
+            reasoning_type="invalid_type",
+            confidence=0.8,
+            agent_id=test_agent_id,
+        )
+    )
+    assert result["status"] == "success"
+    assert result["data"]["reasoning_type"] == "deductive"
+    reasoning("Testing reason", action="end", agent_id=test_agent_id)
+
+
+def test_bias_detection_on_overconfident_step(test_agent_id, test_db):
+    """Steps with overconfident language get biases_detected populated."""
+    reasoning("Testing reason", action="start", agent_id=test_agent_id)
+    result = _result(
+        reasoning(
+            "Testing reason",
+            action="step",
+            content="This definitely proves my point",
+            evidence=["Obviously this is correct"],
+            confidence=0.9,
+            agent_id=test_agent_id,
+        )
+    )
+    assert result["status"] == "success"
+    assert len(result["data"]["biases_detected"]) > 0
+    reasoning("Testing reason", action="end", agent_id=test_agent_id)
+
+
+def test_evaluate_with_low_confidence_recommends_evidence(test_agent_id, test_db):
+    """evaluate flags low average confidence with a recommendation."""
+    reasoning("Testing reason", action="start", agent_id=test_agent_id)
+    reasoning(
+        "Testing reason",
+        action="step",
+        content="Step 1",
+        confidence=0.5,
+        agent_id=test_agent_id,
+    )
+    reasoning(
+        "Testing reason",
+        action="step",
+        content="Step 2",
+        confidence=0.55,
+        agent_id=test_agent_id,
+    )
+    result = _result(
+        reasoning("Testing reason", action="evaluate", agent_id=test_agent_id)
+    )
+    assert result["status"] == "success"
+    assert any("Low confidence" in r for r in result["data"]["recommendations"])
+    reasoning("Testing reason", action="end", agent_id=test_agent_id)

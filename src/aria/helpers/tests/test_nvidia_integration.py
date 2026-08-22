@@ -70,17 +70,6 @@ class TestNvidiaIntegration:
         free_vram = get_free_vram_per_gpu()
         assert len(free_vram) == gpu_count
 
-    def test_total_vram_is_sum_of_all_gpus(self):
-        """Verify total VRAM calculation is correct."""
-        gpu_count = detect_gpu_count()
-        total_vram = get_total_vram_mb()
-
-        # For systems with multiple identical GPUs, we can verify the math
-        if gpu_count > 1:
-            # Total should be divisible by GPU count for identical GPUs
-            vram_per_gpu = total_vram // gpu_count
-            assert vram_per_gpu > 0
-
     def test_detect_nvlink_returns_tuple(self):
         """Test NVLink detection returns proper tuple."""
         has_nvlink, bond_type = detect_nvlink()

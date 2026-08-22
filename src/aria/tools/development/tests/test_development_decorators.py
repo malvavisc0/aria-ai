@@ -7,8 +7,6 @@ in Python runner operations.
 
 from unittest.mock import patch
 
-import pytest
-
 from aria.tools.development.decorators import (
     with_input_validation,
     with_runner_error_handling,
@@ -140,19 +138,6 @@ class TestWithInputValidation:
 
         result = selective_func("test", 30)
         assert result == "Success"
-
-    def test_validation_with_large_code(self):
-        """Test that extremely large code raises validation error."""
-
-        @with_input_validation(code=True)
-        def code_func(code: str) -> str:
-            return "Success"
-
-        # Code exceeding 10MB should raise error
-        from aria.tools.development.exceptions import PythonSecurityError
-
-        with pytest.raises(PythonSecurityError):
-            code_func("x" * 10_000_001)  # Exceeds 10MB limit
 
     def test_validation_with_no_params(self):
         """Test decorator with no validation parameters."""

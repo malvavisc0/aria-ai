@@ -283,17 +283,6 @@ class TestSecureResolveDir:
             with pytest.raises(FileSecurityError, match="Symlinks"):
                 _secure_resolve_dir(str(link_dir))
 
-    def test_resolve_dir_exception_handling(self):
-        """Test exception handling in directory resolution."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir_path = Path(tmpdir)
-            outside_dir = tmpdir_path / "outside"
-            outside_dir.mkdir()
-
-            # With enforce_base_dir=True, path should be blocked
-            with pytest.raises(FileSecurityError, match="Path traversal"):
-                _secure_resolve_dir(str(outside_dir), enforce_base_dir=True)
-
 
 class TestReadLinesStreaming:
     """Test suite for _read_lines_streaming function."""

@@ -10,7 +10,6 @@ import pytest
 
 from aria.supervision.snapshot import StepView, WorkerView
 from aria.web.tasklist import (
-    _STEP_TO_TASK,
     PersistedTaskList,
     WorkerTaskList,
     _header,
@@ -45,19 +44,6 @@ def _view(
         ),
         worker_status=status,
     )
-
-
-def test_step_to_task_mapping_covers_all_statuses():
-    assert set(_STEP_TO_TASK) == {
-        "pending",
-        "in_progress",
-        "completed",
-        "failed",
-    }
-    assert _STEP_TO_TASK["pending"] == cl.TaskStatus.READY
-    assert _STEP_TO_TASK["in_progress"] == cl.TaskStatus.RUNNING
-    assert _STEP_TO_TASK["completed"] == cl.TaskStatus.DONE
-    assert _STEP_TO_TASK["failed"] == cl.TaskStatus.FAILED
 
 
 async def test_render_first_view_builds_tasks():

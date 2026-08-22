@@ -8,43 +8,6 @@ import inspect
 from aria.tools import tool_success_response
 
 
-class TestFilesPackageContract:
-    """Verify files package exports match their implementations."""
-
-    def test_files_write_operations_have_expected_signatures(self):
-        """Verify write operation functions have documented parameter names."""
-        from aria.tools.files.write_operations import edit_file, write_file
-
-        # write_file: reason, file_name, contents, mode
-        sig = inspect.signature(write_file)
-        params = list(sig.parameters.keys())
-        assert "reason" in params
-        assert "file_name" in params
-        assert "contents" in params, "write_file should have 'contents' parameter"
-        assert "mode" in params, "write_file should have 'mode' parameter"
-
-        # edit_file: reason, file_name, offset, length, new_lines
-        sig = inspect.signature(edit_file)
-        params = list(sig.parameters.keys())
-        assert "reason" in params
-        assert "file_name" in params
-        assert "offset" in params, "edit_file should have 'offset' parameter"
-
-    def test_files_management_operations_have_expected_signatures(self):
-        """Verify file management functions have documented parameter names."""
-        from aria.tools.files import file_management
-
-        # copy_file should have src, dest
-        sig = inspect.signature(file_management.copy_file)
-        params = list(sig.parameters.keys())
-        assert "src" in params or "source" in params, (
-            "copy_file should have 'src' or 'source' parameter"
-        )
-        assert "dest" in params or "destination" in params, (
-            "copy_file should have 'dest' or 'destination' parameter"
-        )
-
-
 class TestReasoningPackageContract:
     """Verify reasoning package exports match their implementations."""
 

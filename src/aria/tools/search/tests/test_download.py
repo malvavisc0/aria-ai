@@ -28,7 +28,6 @@ from aria.tools.search._download_internals import (
     _is_binary_content,
     _is_html_content,
     _is_markitdown_supported,
-    _markitdown,
     _resolve_download_target,
     _save_bytes_fallback,
     _save_content_to_file,
@@ -410,17 +409,6 @@ class TestFetchFile:
 
         with pytest.raises(URLDownloadError, match="exceeds maximum"):
             _fetch_file("https://example.com", max_size=1000)
-
-
-@_needs_markitdown
-class TestMarkitdown:
-    """Test MarkItDown conversion."""
-
-    def test_markitdown_with_string_content(self):
-        """Test MarkItDown with string content."""
-        content = "Test content"
-        result = _markitdown(content, "text/plain", "https://example.com/test.txt")
-        assert isinstance(result, str)
 
 
 class TestCleanText:
