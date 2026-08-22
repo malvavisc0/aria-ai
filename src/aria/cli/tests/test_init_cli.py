@@ -524,9 +524,11 @@ def test_dry_run_no_mode_gpu_derives_local(monkeypatch, tmp_path: Path):
 def test_remote_mode_with_partial_flags_rejected(monkeypatch, tmp_path: Path) -> None:
     """Any of --remote-url/--api-key/--model → all three are required."""
     monkeypatch.setenv("ARIA_HOME", str(tmp_path))
-    _copy_template_env(tmp_path)
 
-    with patch("aria.cli.init.detect_hardware", return_value=_gpu()):
+    with (
+        patch("aria.cli.init._bootstrap_aria_home"),
+        patch("aria.cli.init.detect_hardware", return_value=_gpu()),
+    ):
         result = runner.invoke(
             app,
             ["--mode", "remote", "--remote-url", "https://x.example/v1"],
