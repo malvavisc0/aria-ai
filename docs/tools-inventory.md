@@ -108,7 +108,12 @@ def my_tool(reason: str, ...) -> str:
 }
 ```
 
-> **Convention:** Tools return `tool_error_response` on failure (status `"error"`), never a success payload embedding an error string.
+> **Status invariant:** Any failed call reports `status: "error"` — either
+> from a raised exception (`tool_error_response`, top-level `error` block)
+> or from a structured failure returned as `tool_response(...,
+> data={"error": ...})` (the error stays inside `data`). A response whose
+> `status` is `"success"` never carries an `error` key, so the agent can
+> branch on `status` alone.
 
 ### Error Handling (`aria.tools.errors`)
 

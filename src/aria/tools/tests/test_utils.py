@@ -42,6 +42,18 @@ class TestToolSuccessResponse:
 
         assert parsed["context"]["extra_field"] == "extra_value"
 
+    def test_error_in_data_sets_status_error(self):
+        """A payload carrying an 'error' key must not report success."""
+        result = tool_success_response(
+            tool="ax",
+            reason="missing_reason",
+            data={"error": {"code": "missing_reason", "message": "..."}},
+        )
+        parsed = json.loads(result)
+
+        assert parsed["status"] == "error"
+        assert parsed["data"]["error"]["code"] == "missing_reason"
+
 
 class TestToolErrorResponse:
     """Tests for tool_error_response() function."""

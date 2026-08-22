@@ -76,9 +76,11 @@ def tool_success_response(
     data: dict[str, Any],
     **context: Any,
 ) -> str:
-    """Generate a standardized JSON success response.
+    """Generate a standardized JSON response for ``tool_response``.
 
-    Returns a JSON string with standardized success format.
+    A payload carrying an ``"error"`` key marks the call as failed and
+    sets ``status="error"``, matching exception-based error responses —
+    a failed call never reports ``status="success"``.
 
     Args:
         tool: Name of the tool that generated the response.
@@ -94,7 +96,7 @@ def tool_success_response(
         reason = f"unspecified_{tool}_operation"
 
     response: dict[str, Any] = {
-        "status": "success",
+        "status": "error" if "error" in data else "success",
         "tool": tool,
         "reason": reason,
         "timestamp": utc_timestamp(),

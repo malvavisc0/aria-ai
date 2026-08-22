@@ -48,7 +48,7 @@ class TestBuildResponse:
         """Test building error response"""
         result = _build_response("test_op", error="Something went wrong")
         parsed = json.loads(result)
-        assert parsed["status"] == "success"
+        assert parsed["status"] == "error"
         assert parsed["data"]["error"] == "Something went wrong"
         assert parsed["context"]["error"] == "Something went wrong"
 
