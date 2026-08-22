@@ -42,13 +42,6 @@ _EXCLUDED_BINARIES: set[str] = {
     "distlib-script",
     "setuptools",
     "pkg_resources",
-    # PyInstaller internals
-    "pyi-archive_viewer",
-    "pyi-bindepend",
-    "pyi-grab_version",
-    "pyi-makespec",
-    "pyi-set_version",
-    "pyinstaller",
     # Supervisor internals
     "echo_supervisord_conf",
     "generate-supervisor-config",

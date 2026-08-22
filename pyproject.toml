@@ -77,7 +77,6 @@ dev = [
     "isort",
     "pre-commit",
     "ruff",
-    "pyinstaller",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",

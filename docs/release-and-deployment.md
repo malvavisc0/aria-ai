@@ -9,12 +9,10 @@ This document describes how Aria is released: the CI/CD pipeline, versioning str
 When a version tag (e.g. `v0.1.0`) is pushed to GitHub, a GitHub Actions workflow automatically:
 
 1. **Validates** that the tag version matches `__version__` in `src/aria/__init__.py`
-2. **Builds** standalone GUI applications for three platforms:
-   - **Linux** — AppImage (`Aria-x86_64.AppImage`)
-   - **Windows** — Portable .exe zip (`Aria-Windows-x86_64.zip`)
-   - **macOS** — .app bundle zip (`Aria-macOS-arm64.zip`, Apple Silicon)
-3. **Publishes** the Python package to [PyPI](https://pypi.org/project/aria-ai/) using trusted publishing (OIDC)
-4. **Creates** a GitHub Release with all artifacts attached
+2. **Publishes** the Python package to [PyPI](https://pypi.org/project/aria-ai/) using trusted publishing (OIDC)
+3. **Builds** four Docker image variants and pushes them to GitHub Container Registry (`ghcr.io`)
+4. **Builds** a static CUDA `whisper-server` tarball
+5. **Creates** a GitHub Release attaching the whisper artifact
 
 ---
 
@@ -85,26 +83,24 @@ The push of `vX.Y.Z` triggers `.github/workflows/release.yml`. You can monitor p
 ## Workflow Jobs
 
 ```
-┌───────────────────┐
-│ validate-version  │  ← fails fast if tag ≠ __version__
-└────────┬──────────┘
-         │
-   ┌─────┴──────┬───────────┬──────────┬───────────┬──────────────┐
-   ▼            ▼           ▼          ▼           ▼              ▼
-┌────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌────────────┐
-│ Linux  │ │ Windows  │ │  macOS   │ │  PyPI    │ │build-whisper│ ← CUDA whisper-server tarball
-│AppImage│ │  .exe    │ │  .app    │ │ publish  │ │  (static)   │
-└───┬────┘ └────┬─────┘ └────┬─────┘ └─────┬────┘ └──────┬─────┘
-    │           │             │             │             │
-    └───────────┴─────────────┴──────┬──────┴─────────────┘
-                                     │
-                              ┌──────┴──────┐
-                              │Docker (×4)  │  ← needs publish-pypi; GHCR: aria-cuda + aria-rocm + aria-lite + aria-arm64
-                              └──────┬──────┘
-                                     │
-                              ┌──────┴──────┐
-                              │   release   │  ← needs all jobs; GitHub Release with every artifact
-                              └─────────────┘
+        ┌──────────────────┐
+        │ validate-version │ ← fails fast if tag ≠ __version__
+        └─────────┬────────┘
+        ┌─────────┴──────────┐
+        ▼                    ▼
+┌───────────────┐    ┌───────────────┐
+│ build-whisper │    │ publish pypi  │
+│   (static)    │    └───────┬───────┘
+└───────────────┘    ┌───────────────┐
+        │            │  build-docker │
+        │            │     (×4)      │
+        │            └───────────────┘
+        │                    │
+        └─────────┬──────────┘
+                  ▼
+      ┌───────────────┐
+      │    release    │ ← needs whisper + pypi + docker
+      └───────────────┘
 ```
 
 ### Job Details
@@ -112,20 +108,18 @@ The push of `vX.Y.Z` triggers `.github/workflows/release.yml`. You can monitor p
 | Job | Runner | Description |
 |-----|--------|-------------|
 | `validate-version` | ubuntu-latest | Compares tag version against `__version__` |
-| `build-appimage` | ubuntu-22.04 | PyInstaller → AppImage (Linux x86_64) |
-| `build-windows` | windows-latest | PyInstaller → zipped .exe (Windows x86_64) |
-| `build-macos` | macos-latest | PyInstaller → zipped .app (macOS arm64) |
-| `build-whisper-cuda` | ubuntu-latest | Static CUDA `whisper-server` build → `whisper-server-cuda-12.6-x86_64.tar.gz` (attached to the release, consumed by the Docker images) |
+| `build-whisper-cuda` | ubuntu-latest | Static CUDA `whisper-server` build → `whisper-server-cuda-12.6-x86_64.tar.gz` (attached to the release) |
 | `publish-pypi` | ubuntu-latest | `uv build` → `pypa/gh-action-pypi-publish` |
 | `build-docker` | ubuntu-latest | Docker matrix (×4) → GHCR: CUDA/CPU + ROCm + Debian lite + ARM64 |
-| `release` | ubuntu-latest | Creates GitHub Release, attaches all artifacts |
+| `release` | ubuntu-latest | Creates GitHub Release, attaches the whisper tarball |
+
+The standalone Windows/macOS/Linux GUI builds previously produced by PyInstaller have been removed; the GUI is now distributed via PyPI (`pip install aria-ai[gui]` → `aria-gui`) and Docker.
 
 All build and publish jobs depend on `validate-version` succeeding.
-`build-whisper-cuda` needs only `validate-version` (runs in parallel with the
-platform builds). `build-docker` depends on `publish-pypi` (so the image gets
-the freshly published package). The `release` job depends on all build and
-publish jobs — including `build-whisper-cuda` (its tarball is a release asset)
-and `build-docker`.
+`build-whisper-cuda` and `publish-pypi` need only `validate-version` and run in
+parallel. `build-docker` depends on `publish-pypi` (so the image gets the
+freshly published package). The `release` job depends on `build-whisper-cuda`,
+`publish-pypi`, and `build-docker`, and attaches the whisper tarball.
 
 ---
 
@@ -153,37 +147,6 @@ After this one-time setup, every tagged release automatically publishes to PyPI.
 pip install aria-ai
 pip install aria-ai[gui]   # with GUI (PySide6) support
 ```
-
----
-
-## Standalone Application Builds
-
-### Linux (AppImage)
-
-- Built on `ubuntu-22.04` using PyInstaller + `appimagetool`
-- Output: `Aria-x86_64.AppImage`
-- Usage:
-  ```bash
-  chmod +x Aria-x86_64.AppImage
-  ./Aria-x86_64.AppImage
-  ```
-
-### Windows
-
-- Built on `windows-latest` using PyInstaller
-- Output: `Aria-Windows-x86_64.zip` (contains `aria-gui.exe` + dependencies)
-- Usage: Extract and run `aria-gui.exe`
-
-### macOS (Apple Silicon)
-
-- Built on `macos-latest` (arm64) using PyInstaller
-- Output: `Aria-macOS-arm64.zip` (contains `Aria.app`)
-- Usage:
-  ```bash
-  xattr -cr Aria.app
-  open Aria.app
-  ```
-- The `xattr` command removes the quarantine flag that macOS applies to unsigned apps downloaded from the internet.
 
 ---
 

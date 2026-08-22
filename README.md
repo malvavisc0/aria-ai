@@ -88,14 +88,6 @@ pip install aria-ai[gui]
 aria-gui
 ```
 
-Or download the standalone binary for your platform from the [latest release](https://github.com/malvavisc0/aria-ai/releases/latest):
-
-| Platform | File |
-|----------|------|
-| 🐧 Linux | `Aria-x86_64.AppImage` |
-| 🪟 Windows | `Aria-Windows-x86_64.zip` |
-| 🍎 macOS (Apple Silicon) | `Aria-macOS-arm64.zip` |
-
 ---
 
 ## 🤖 Agent System
