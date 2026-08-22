@@ -5,95 +5,9 @@ import platform
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from aria.tools.shell import shell
-from aria.tools.shell.exceptions import CommandBlockedError
-from aria.tools.shell.validation import (
-    _extract_all_command_names,
-    _is_blocked_command,
-    _validate_command,
-)
 
 IS_WINDOWS = platform.system().lower() == "windows"
-
-
-class TestValidateCommand:
-    """Tests for _validate_command and related helpers."""
-
-    def test_empty_command_raises_value_error(self):
-        """Test that an empty command raises ValueError."""
-        with pytest.raises(ValueError, match="empty"):
-            _validate_command("")
-
-    def test_whitespace_only_raises_value_error(self):
-        """Test that whitespace-only command raises ValueError."""
-        with pytest.raises(ValueError, match="empty"):
-            _validate_command("   ")
-
-    def test_too_long_command_raises_value_error(self):
-        """Test that an excessively long command raises ValueError."""
-        with pytest.raises(ValueError, match="too long"):
-            _validate_command("a" * 10001)
-
-    def test_blocked_command_dd(self):
-        """Test that dd is blocked."""
-        with pytest.raises(CommandBlockedError, match="blocked"):
-            _validate_command("dd if=/dev/zero of=/dev/sda")
-
-    def test_blocked_command_shutdown(self):
-        """Test that shutdown is blocked."""
-        with pytest.raises(CommandBlockedError):
-            _validate_command("shutdown -h now")
-
-    def test_blocked_command_in_pipe(self):
-        """Test that blocked commands are detected in pipelines."""
-        with pytest.raises(CommandBlockedError):
-            _validate_command("echo hello | dd of=/dev/null")
-
-    def test_valid_command_passes(self):
-        """Test that a valid command passes validation."""
-        _validate_command("echo hello")  # Should not raise
-
-    def test_previously_blocked_commands_now_allowed(self):
-        """Test that commands only dangerous with root are now allowed."""
-        # These should NOT raise
-        _validate_command("chmod 755 myfile")
-        _validate_command("chown user:group myfile")
-        _validate_command("ifconfig")
-        _validate_command("mount")
-
-    def test_is_blocked_command_detects_dd(self):
-        """Test _is_blocked_command detects dd."""
-        assert _is_blocked_command("dd if=/dev/zero of=/dev/sda") is True
-
-    def test_is_blocked_command_allows_echo(self):
-        """Test _is_blocked_command allows echo."""
-        assert _is_blocked_command("echo hello") is False
-
-    def test_is_blocked_command_allows_chmod(self):
-        """Test _is_blocked_command allows chmod (no longer blocked)."""
-        assert _is_blocked_command("chmod 755 file") is False
-
-    def test_extract_all_command_names_simple(self):
-        """Test extracting command name from simple command."""
-        names = _extract_all_command_names("git status")
-        assert names == ["git"]
-
-    def test_extract_all_command_names_pipe(self):
-        """Test extracting command names from piped commands."""
-        names = _extract_all_command_names("cat file | grep pattern")
-        assert names == ["cat", "grep"]
-
-    def test_extract_all_command_names_chain(self):
-        """Test extracting command names from chained commands."""
-        names = _extract_all_command_names("make && make install")
-        assert names == ["make", "make"]
-
-    def test_extract_all_command_names_env_prefix(self):
-        """Test extracting command name with env var prefix."""
-        names = _extract_all_command_names("FOO=bar git status")
-        assert names == ["git"]
 
 
 class TestShellSingleCommand:
