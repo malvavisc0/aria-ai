@@ -342,14 +342,6 @@ jobs:
             base_image: "vllm/vllm-openai:latest"
             suffix: "-cuda"
             dockerfile: "Dockerfile"
-          - label: "ROCm (AMD)"
-            base_image: "vllm/vllm-openai-rocm:latest"
-            suffix: "-rocm"
-            dockerfile: "Dockerfile"
-          - label: "Debian (lite)"
-            base_image: ""
-            suffix: "-lite"
-            dockerfile: "Dockerfile.debian"
           - label: "ARM64 (Linux)"
             base_image: ""
             suffix: "-arm64"
@@ -403,7 +395,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   # Decoupled from publish-pypi and build-docker: the whisper CUDA asset
   # is the sole reason this workflow exists (CUDA support). An unrelated
-  # PyPI hiccup or a transient ROCm/lite Docker build failure must NOT
+  # PyPI hiccup or a transient arm64 Docker build failure must NOT
   # deny the CUDA build to every GPU user on this tag — that was the
   # failure mode under the old `needs: [build-whisper-cuda, publish-pypi,
   # build-docker]`, which coupled the asset to unrelated products. This
@@ -484,18 +476,6 @@ jobs:
               -v ./data:/app/data \
               --env-file .env \
               ghcr.io/malvavisc0/aria-ai-cuda:latest
-
-            # ROCm (AMD GPUs)
-            docker run -p 9876:9876 \
-              -v ./data:/app/data \
-              --env-file .env \
-              ghcr.io/malvavisc0/aria-ai-rocm:latest
-
-            # Lightweight — no GPU (remote LLM or CPU-only)
-            docker run -p 9876:9876 \
-              -v ./data:/app/data \
-              --env-file .env \
-              ghcr.io/malvavisc0/aria-ai-lite:latest
 
             # ARM64 — Raspberry Pi 4 (remote LLM or CPU-only)
             docker run -p 9876:9876 \
