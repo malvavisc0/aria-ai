@@ -55,12 +55,7 @@ class TestVoice:
         import aria.config.folders as folders_mod
 
         with _patch_paths(folders_mod, tmp_path):
-            exe = (
-                tmp_path
-                / "bin"
-                / "whisper-bin-ubuntu-x64"
-                / "whisper-server"
-            )
+            exe = tmp_path / "bin" / "whisper-bin-ubuntu-x64" / "whisper-server"
             exe.parent.mkdir(parents=True)
             exe.touch()
             original = Voice.enabled

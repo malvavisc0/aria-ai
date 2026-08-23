@@ -7,6 +7,7 @@ from unittest.mock import patch
 import pytest
 
 from aria.scripts.voice import (
+    _WHISPER_CUDA_ASSET,
     _detect_whisper_target,
     _extract_whisper_binary,
     _whisper_download_url,
@@ -42,7 +43,7 @@ class TestWhisperDownloadUrl:
         with patch("aria.__version__", "0.3.5"):
             url = _whisper_download_url("cuda")
         assert "malvavisc0/aria-ai" in url
-        assert "whisper-server-cuda-12.6-x86_64.tar.gz" in url
+        assert _WHISPER_CUDA_ASSET in url
 
     @patch("aria.scripts.voice.platform.machine", return_value="x86_64")
     def test_cpu_url_uses_official_whisper_releases(self, mock_machine):
@@ -152,7 +153,7 @@ class TestDownloadWhisperCppCudaFallback:
         # model named after the configured Voice.whisper_model (not a hardcoded
         # base.en) so the downloaded file matches the preflight check's path.
         assert "malvavisc0/aria-ai" in calls[0]
-        assert "ggml-org/whisper.cpp" in calls[1]
+        assert _WHISPER_CUDA_ASSET in calls[0]
         assert calls[2].endswith("ggml-large-v3-turbo-q5_0.bin")
 
     @patch("aria.scripts.voice._download_file")

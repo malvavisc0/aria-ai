@@ -31,7 +31,15 @@ _KOKORO_RELEASES = "https://github.com/nazdridoy/kokoro-tts/releases/download/v1
 # Aria's own GitHub releases (where we host the CUDA build).
 _ARIA_RELEASES = "https://github.com/malvavisc0/aria-ai/releases/download"
 
-# CUDA minimum driver version (matches CUDA 12.6 toolkit requirement).
+# Static CUDA whisper-server tarball name. Single source of truth — the
+# release workflow (.github/workflows/release.yml) reads this constant to
+# name the built artifact, the GitHub Release asset, and the download URL
+# so the producer and consumer never drift. The "12.6" segment must match
+# the CUDA toolkit pinned in release.yml and _MIN_CUDA_VERSION_FOR_GPU.
+_WHISPER_CUDA_ASSET = "whisper-server-cuda-12.6-x86_64.tar.gz"
+
+# CUDA minimum driver version (matches the 12.6 segment in _WHISPER_CUDA_ASSET
+# and the toolkit pinned in release.yml).
 _MIN_CUDA_VERSION_FOR_GPU = (12, 6)
 
 
@@ -186,7 +194,7 @@ def _whisper_download_url(target: str) -> str:
     if target == "cuda":
         from aria import __version__
 
-        return f"{_ARIA_RELEASES}/v{__version__}/whisper-server-cuda-12.6-x86_64.tar.gz"
+        return f"{_ARIA_RELEASES}/v{__version__}/{_WHISPER_CUDA_ASSET}"
     # CPU prebuilt from official whisper.cpp releases
     machine = platform.machine().lower()
     if any(tok in machine for tok in ("aarch64", "arm64")):

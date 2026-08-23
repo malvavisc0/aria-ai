@@ -65,6 +65,58 @@ jobs:
 
           echo "✅ Versions match: ${TAG_VERSION}"
 
+      # ─────────────────────────────────────────────────────────────────────
+      # Cross-check: producer/consumer drift guard
+      # ─────────────────────────────────────────────────────────────────────
+      # The whisper CUDA asset is named in two places — this workflow (build,
+      # upload, release) and src/aria/scripts/voice.py (download, fallback).
+      # A drift silently makes the consumer 404 and fall back to CPU, which
+      # is the exact failure this asset exists to avoid. Pin both sides to
+      # the single constant below and assert they agree before any build.
+      - name: Check whisper asset pin consistency
+        run: |
+          set -eu
+
+          # The asset name this workflow produces and the consumer requests
+          # MUST be identical. Single source of truth is the Python constant
+          # _WHISPER_CUDA_ASSET in src/aria/scripts/voice.py; this workflow
+          # must keep its own literal in sync (verified below) and the CUDA
+          # toolkit version must match _MIN_CUDA_VERSION_FOR_GPU.
+          CONSUMER_ASSET=$(python3 -c "
+          import pathlib, re
+          text = pathlib.Path('src/aria/scripts/voice.py').read_text()
+          m = re.search(r'^_WHISPER_CUDA_ASSET\s*=\s*[\"]([^\"]+)[\"]', text, re.MULTILINE)
+          assert m, 'could not read _WHISPER_CUDA_ASSET from voice.py'
+          print(m.group(1))
+          ")
+          CONSUMER_MIN_CUDA=$(python3 -c "
+          import pathlib, re, ast
+          text = pathlib.Path('src/aria/scripts/voice.py').read_text()
+          m = re.search(r'^_MIN_CUDA_VERSION_FOR_GPU\s*=\s*(\(.+?\))', text, re.MULTILINE)
+          assert m, 'could not read _MIN_CUDA_VERSION_FOR_GPU from voice.py'
+          major, minor = ast.literal_eval(m.group(1))
+          print(f'{major}.{minor}')
+          ")
+
+          # Workflow-side pin (ASSET_NAME) is defined once here and reused
+          # via $GITHUB_ENV across build-whisper-cuda and release.
+          ASSET_NAME="whisper-server-cuda-12.6-x86_64.tar.gz"
+          WORKFLOW_CUDA="12.6"
+
+          echo "Consumer asset:  ${CONSUMER_ASSET}"
+          echo "Workflow asset:  ${ASSET_NAME}"
+          echo "Consumer min CUDA: ${CONSUMER_MIN_CUDA}"
+          echo "Workflow CUDA:   ${WORKFLOW_CUDA}"
+
+          if [[ "${ASSET_NAME}" != "${CONSUMER_ASSET}" ]]; then
+            echo "::error::whisper asset name drift! workflow='${ASSET_NAME}' != voice.py='${CONSUMER_ASSET}'. Update _WHISPER_CUDA_ASSET in src/aria/scripts/voice.py to match."
+            exit 1
+          fi
+          if [[ "${WORKFLOW_CUDA}" != "${CONSUMER_MIN_CUDA}" ]]; then
+            echo "::error::CUDA version drift! workflow='${WORKFLOW_CUDA}' != voice.py min='${CONSUMER_MIN_CUDA}'. The '12.6' in the asset name and the CUDA toolkit pin must match _MIN_CUDA_VERSION_FOR_GPU."
+            exit 1
+          fi
+
   # ────────────────────────────────────────────────────────────────────────────
   # Job 1: Build static CUDA whisper-server
   # ────────────────────────────────────────────────────────────────────────────
@@ -72,7 +124,7 @@ jobs:
     name: Build whisper-server (CUDA, static)
     needs: validate-version
     runs-on: ubuntu-latest
-    timeout-minutes: 120  # CUDA builds need 1-2 hours
+    timeout-minutes: 180  # 8 CUDA archs (incl. PTX) raise build time vs 5
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -86,6 +138,19 @@ jobs:
             TAG="${GITHUB_REF_NAME}"
           fi
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Read asset name from voice.py (single source of truth)
+        id: asset
+        run: |
+          ASSET_NAME=$(python3 -c "
+          import pathlib, re
+          text = pathlib.Path('src/aria/scripts/voice.py').read_text()
+          m = re.search(r'^_WHISPER_CUDA_ASSET\s*=\s*[\"]([^\"]+)[\"]', text, re.MULTILINE)
+          assert m, 'could not read _WHISPER_CUDA_ASSET from voice.py'
+          print(m.group(1))
+          ")
+          echo "name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Asset: ${ASSET_NAME}"
 
       - name: Install CUDA toolkit
         uses: Jimver/cuda-toolkit@v0.2.36
@@ -125,13 +190,26 @@ jobs:
 
       - name: Configure (static CUDA build)
         run: |
+          # CUDA arch coverage. ggml's upstream default for CUDA < 13 is
+          #   50-virtual 61-virtual 70-virtual 75-virtual 80-virtual 86-real 89-real 90-virtual
+          # The previous "-DCMAKE_CUDA_ARCHITECTURES=75;80;86;89;90" dropped
+          # Maxwell(50)/Pascal(61)/Volta(70), so users on those GPUs passed the
+          # driver gate (CUDA >= 12.6), downloaded the build successfully (no
+          # 404 → fallback never triggered), then got "no kernel image
+          # available" at runtime. Here we use -virtual (PTX) for all 8
+          # archs: PTX is forward-compatible (sm_90 PTX JITs to Blackwell
+          # sm_100+), and the CUDA 12.6 driver (>=525) JITs PTX to near-
+          # optimal SASS for every supported arch. A single -real/-virtual
+          # mix would compile 86/89 to cubin (SASS), but the verification
+          # step reads PTX from the fatbin via `strings`, which only sees
+          # PTX — so PTX-everywhere keeps the build and the check in sync.
           cmake -S /tmp/whisper.cpp -B /tmp/whisper.cpp/build \
             -DGGML_CUDA=ON \
             -DGGML_CUDA_NO_VMM=ON \
             -DGGML_METAL=OFF \
             -DGGML_NATIVE=OFF \
             -DCMAKE_MESSAGE_LOG_LEVEL=VERBOSE \
-            -DCMAKE_CUDA_ARCHITECTURES="75;80;86;89;90" \
+            -DCMAKE_CUDA_ARCHITECTURES="50-virtual;61-virtual;70-virtual;75-virtual;80-virtual;86-virtual;89-virtual;90-virtual" \
             -DWHISPER_BUILD_SERVER=ON \
             -DWHISPER_BUILD_TESTS=OFF \
             -DGGML_BUILD_TESTS=OFF \
@@ -142,7 +220,7 @@ jobs:
 
       - name: Build
         # Cap parallelism: nvcc fattn-vec templates eat ~3-4 GB RAM each
-        # across 5 CUDA architectures. Unbounded -j OOM-kills the runner.
+        # across 8 CUDA architectures. Unbounded -j OOM-kills the runner.
         run: cmake --build /tmp/whisper.cpp/build --config Release -j2
 
       - name: Verify binary is static (no ggml .so deps)
@@ -150,16 +228,39 @@ jobs:
           ldd /tmp/whisper.cpp/build/bin/whisper-server | grep -i "ggml\|whisper" && exit 1 || true
           echo "Static binary confirmed"
 
+      - name: Verify embedded CUDA archs (no silent runtime "no kernel image")
+        # A user with a GPU whose arch is missing from the binary gets a
+        # runtime "no kernel image available" — a silent failure the 404
+        # fallback never catches. All archs are compiled as PTX (see the
+        # Configure step), so `strings` finds the ".target sm_XX" markers
+        # nvcc embeds in the fatbin ELF. This avoids depending on cuobjdump
+        # (not shipped by the nvcc+libraries-dev sub-packages) and avoids
+        # the -ptx/-real mismatch where -real cubins wouldn't show in PTX
+        # output. Assert each configured arch is present so a future
+        # regression (dropped arch, failed PTX compile) fails the build
+        # instead of shipping a broken asset to CUDA users.
+        run: |
+          set -eu
+          BIN=/tmp/whisper.cpp/build/bin/whisper-server
+          strings "${BIN}" | grep -oE '\.target sm_[0-9]+' | sort -u | tee /tmp/archs.txt
+          for arch in 50 61 70 75 80 86 89 90; do
+            if ! grep -qE "sm_${arch}\b" /tmp/archs.txt; then
+              echo "::error::CUDA arch sm_${arch} missing from binary — users on this arch get 'no kernel image available' at runtime. Check CMAKE_CUDA_ARCHITECTURES and the nvcc invocation."
+              exit 1
+            fi
+          done
+          echo "All 8 CUDA archs embedded ✅"
+
       - name: Package
         run: |
-          tar -czf whisper-server-cuda-12.6-x86_64.tar.gz \
+          tar -czf "${{ steps.asset.outputs.name }}" \
             -C /tmp/whisper.cpp/build/bin whisper-server
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: whisper-server-cuda-12.6-x86_64.tar.gz
-          path: whisper-server-cuda-12.6-x86_64.tar.gz
+          name: ${{ steps.asset.outputs.name }}
+          path: ${{ steps.asset.outputs.name }}
           retention-days: 7
 
   # ────────────────────────────────────────────────────────────────────────────
@@ -267,40 +368,79 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   # Job 4: Create GitHub Release and attach the whisper artifact
   # ────────────────────────────────────────────────────────────────────────────
+  # Decoupled from publish-pypi and build-docker: the whisper CUDA asset
+  # is the sole reason this workflow exists (CUDA support). An unrelated
+  # PyPI hiccup or a transient ROCm/lite Docker build failure must NOT
+  # deny the CUDA build to every GPU user on this tag — that was the
+  # failure mode under the old `needs: [build-whisper-cuda, publish-pypi,
+  # build-docker]`, which coupled the asset to unrelated products. This
+  # job depends only on the whisper build and the version validation.
+  #
+  # Works for both tag pushes (github.ref_name is the tag) and
+  # workflow_dispatch (github.event.inputs.tag is the tag). Previously
+  # dispatch never published a release — the `if: startsWith(github.ref,
+  # 'refs/tags/')` gate skipped the job on a branch ref, and the version
+  # step hardcoded GITHUB_REF_NAME (the branch name on dispatch), so the
+  # asset would have attached to the wrong tag even if the gate were
+  # removed. Now the tag is resolved consistently with validate-version.
   release:
     name: Create GitHub Release
-    needs: [build-whisper-cuda, publish-pypi, build-docker]
+    needs: [validate-version, build-whisper-cuda]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: >-
+      ${{ startsWith(github.ref, 'refs/tags/')
+      || github.event_name == 'workflow_dispatch' }}
 
     steps:
-      - name: Extract version from tag
-        id: version
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve release tag (push or dispatch)
+        id: tag
         run: |
-          TAG="${GITHUB_REF_NAME}"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ github.event.inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Read asset name from voice.py (single source of truth)
+        id: asset
+        run: |
+          ASSET_NAME=$(python3 -c "
+          import pathlib, re
+          text = pathlib.Path('src/aria/scripts/voice.py').read_text()
+          m = re.search(r'^_WHISPER_CUDA_ASSET\s*=\s*[\"]([^\"]+)[\"]', text, re.MULTILINE)
+          assert m, 'could not read _WHISPER_CUDA_ASSET from voice.py'
+          print(m.group(1))
+          ")
+          echo "name=${ASSET_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Asset: ${ASSET_NAME}"
 
       - name: Download whisper CUDA artifact
         uses: actions/download-artifact@v4
         with:
-          name: whisper-server-cuda-12.6-x86_64.tar.gz
+          name: ${{ steps.asset.outputs.name }}
           path: release-assets/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Aria ${{ github.ref_name }}"
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: "Aria ${{ steps.tag.outputs.tag }}"
           draft: false
-          prerelease: ${{ contains(github.ref_name, 'alpha') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
+          prerelease: ${{ contains(steps.tag.outputs.tag, 'alpha') || contains(steps.tag.outputs.tag, 'beta') || contains(steps.tag.outputs.tag, 'rc') }}
           files: |
-            release-assets/whisper-server-cuda-12.6-x86_64.tar.gz
+            release-assets/${{ steps.asset.outputs.name }}
           body: |
-            ## Aria ${{ github.ref_name }}
+            ## Aria ${{ steps.tag.outputs.tag }}
 
             ### pip
 
             ```bash
-            pip install aria-ai==${{ steps.version.outputs.version }}
+            pip install aria-ai==${{ steps.tag.outputs.version }}
             ```
 
             ### Docker
