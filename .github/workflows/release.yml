@@ -118,11 +118,44 @@ jobs:
           fi
 
   # ────────────────────────────────────────────────────────────────────────────
-  # Job 1: Build static CUDA whisper-server
+  # Job 1b: Lint — gates every artifact-producing job so a release never
+  # ships when ruff is failing. Mirrors ci.yml's lint job exactly.
+  # ────────────────────────────────────────────────────────────────────────────
+  lint:
+    name: Lint
+    needs: validate-version
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: sudo apt update && sudo apt install -y libgl1 libglx-mesa0 libgl1-mesa-dri mesa-utils
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install
+
+      - name: Sync dependencies
+        run: uv sync --group dev --all-extras
+
+      - name: Ruff check
+        run: uv run ruff check src/
+
+      - name: Ruff format check
+        run: uv run ruff format --check src/
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Job 2: Build static CUDA whisper-server
   # ────────────────────────────────────────────────────────────────────────────
   build-whisper-cuda:
     name: Build whisper-server (CUDA, static)
-    needs: validate-version
+    needs: [validate-version, lint]
     runs-on: ubuntu-latest
     timeout-minutes: 180  # 8 CUDA archs (incl. PTX) raise build time vs 5
     steps:
@@ -268,7 +301,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   publish-pypi:
     name: Publish to PyPI
-    needs: validate-version
+    needs: [validate-version, lint]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -299,7 +332,7 @@ jobs:
   # ────────────────────────────────────────────────────────────────────────────
   build-docker:
     name: "Build Docker (${{ matrix.label }})"
-    needs: [publish-pypi]
+    needs: [validate-version, lint, publish-pypi]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -385,7 +418,7 @@ jobs:
   # removed. Now the tag is resolved consistently with validate-version.
   release:
     name: Create GitHub Release
-    needs: [validate-version, build-whisper-cuda]
+    needs: [validate-version, lint, build-whisper-cuda]
     runs-on: ubuntu-latest
     if: >-
       ${{ startsWith(github.ref, 'refs/tags/')
