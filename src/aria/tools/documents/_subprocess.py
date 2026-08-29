@@ -9,7 +9,7 @@ from aria.config.folders import Bin
 
 
 def convert(
-    pdf_path: Path,
+    input_paths: Path | list[Path],
     *,
     output_path: Path,
     model_id: str,
@@ -18,7 +18,10 @@ def convert(
     timeout: int,
     chunks: bool = False,
 ) -> dict[str, Any]:
-    """Run the docling worker to convert *pdf_path* to markdown.
+    """Run the docling worker to convert *input_paths* to markdown.
+
+    A single path or a batch — one worker invocation (one model load)
+    converts all inputs into one output file.
 
     When *chunks* is true, the worker emits a JSON chunk array to
     *output_path* instead of markdown (§6.2).
@@ -29,11 +32,12 @@ def convert(
     shim = Bin.path / "docling"
     if not shim.exists():
         return {"ok": False, "error": "docling worker not installed"}
+    paths = [input_paths] if isinstance(input_paths, Path) else list(input_paths)
     cmd = [
         str(shim),
         "convert",
         "--input",
-        str(pdf_path),
+        *[str(p) for p in paths],
         "--output",
         str(output_path),
         "--model",

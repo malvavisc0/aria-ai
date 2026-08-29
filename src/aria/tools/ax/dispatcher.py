@@ -214,6 +214,12 @@ def _documents_convert():
     return convert
 
 
+def _documents_extract():
+    from aria.tools.documents.functions import extract
+
+    return extract
+
+
 def _documents_status():
     from aria.tools.documents.functions import status
 
@@ -333,6 +339,7 @@ _DISPATCH: dict[str, dict[str, tuple[Callable, bool]]] = {
     },
     "documents": {
         "convert": (_documents_convert, True),
+        "extract": (_documents_extract, True),
         "status": (_documents_status, True),
     },
     "check": {

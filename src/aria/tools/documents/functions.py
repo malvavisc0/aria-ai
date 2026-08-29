@@ -5,6 +5,7 @@ Routing:
     office (.docx/.xlsx/...) + html    → MarkItDown, always
     pdf                               → Granite-Docling (isolated venv)
                                         when available, else MarkItDown
+    image (.png/.jpg/...)             → Granite-Docling OCR (`extract`)
 
 Output is persisted to ~/.aria/workspace/uploads/<stem>.md and the agent
 reads it via `read_file` in chunks — never returned inline.
@@ -47,6 +48,10 @@ TEXT_EXTENSIONS = {
 OFFICE_EXTENSIONS = {".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx"}
 _HTML_EXTENSIONS = {".html", ".htm"}
 _PDF_EXTENSIONS = {".pdf"}
+# Docling's IMAGE format: jpg, jpeg, png, tif, tiff, bmp, webp (no gif).
+# Public: the web layer derives its image-detection set from this so the
+# two never drift.
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 
 
 def _ok(reason: str, data: dict[str, Any]) -> str:
@@ -106,12 +111,46 @@ def _worker_shim() -> Path:
     return Bin.path / "docling"
 
 
+def _docling_device() -> str:
+    """Resolve the docling device (auto → cuda|cpu)."""
+    device = Pdf.vlm_device
+    if device == "auto":
+        from aria.scripts.docling import detect_device
+
+        device = detect_device()
+    return device
+
+
+def _warn_if_model_uncached() -> None:
+    """Warn when the model isn't cached — the conversion may trigger a
+    multi-hundred-MB download inside the subprocess timeout."""
+    from aria.config.models import _resolve_model_path
+
+    model_path = Pdf.model_path or _resolve_model_path(Pdf.vlm_model_id)
+    if not Path(model_path).is_dir():
+        logger.warning(
+            "aria.tools.documents: model snapshot not found at "
+            f"{model_path}; conversion may download it. "
+            "Run: uv run aria docling download"
+        )
+
+
 def _convert_docling(
-    fp: Path, reason: str, *, explicit: bool, max_pages: int | None = None
+    paths: Path | list[Path],
+    reason: str,
+    *,
+    explicit: bool,
+    max_pages: int | None = None,
 ) -> str:
-    """Granite-Docling via isolated subprocess. See _subprocess.convert."""
+    """Granite-Docling via isolated subprocess. See _subprocess.convert.
+
+    Accepts one path or a batch (one worker invocation, one model load).
+    With ``explicit=False`` (auto backend), failures fall back to
+    MarkItDown; ``explicit=True`` hard-fails.
+    """
     from aria.tools.documents._subprocess import convert as vlm_convert
 
+    batch = [paths] if isinstance(paths, Path) else list(paths)
     shim = _worker_shim()
     if not shim.exists():
         if explicit:
@@ -126,30 +165,15 @@ def _convert_docling(
             "aria.tools.documents: docling worker not installed; falling back to "
             "markitdown. Install with: uv run aria docling install"
         )
-        return _convert_markitdown(fp, reason)
-    device = Pdf.vlm_device
-    if device == "auto":
-        from aria.scripts.docling import detect_device
-
-        device = detect_device()
-    # Warn when the model isn't cached — the conversion may trigger a
-    # multi-hundred-MB download inside the subprocess timeout.
-    from aria.config.models import _resolve_model_path
-
-    model_path = Pdf.model_path or _resolve_model_path(Pdf.vlm_model_id)
-    if not Path(model_path).is_dir():
-        logger.warning(
-            "aria.tools.documents: model snapshot not found at "
-            f"{model_path}; conversion may download it. "
-            "Run: uv run aria docling download"
-        )
-    dest = _unique_path(fp.stem)
+        return _convert_markitdown(batch[0], reason)
+    _warn_if_model_uncached()
+    dest = _unique_path(batch[0].stem)
     pages = max_pages if max_pages is not None else Pdf.vlm_max_pages
     res = vlm_convert(
-        fp,
+        batch,
         output_path=dest,
         model_id=Pdf.vlm_model_id,
-        device=device,
+        device=_docling_device(),
         max_pages=pages,
         timeout=Pdf.vlm_timeout_seconds,
     )
@@ -160,7 +184,7 @@ def _convert_docling(
                 "falling back to markitdown"
             )
             return _convert_markitdown(
-                fp,
+                batch[0],
                 reason,
                 note="VLM failed; max_pages not honored by markitdown fallback",
             )
@@ -172,6 +196,8 @@ def _convert_docling(
         "duration_ms": res.get("duration_ms"),
         "model": res.get("model"),
     }
+    if res.get("files"):
+        meta["files"] = res["files"]
     return _ok(reason, {"file_path": str(dest), "metadata": meta})
 
 
@@ -254,6 +280,54 @@ async def convert(
             max_pages=max_pages,
         )
     return _err(reason, "unsupported", f"unsupported extension: {ext}")
+
+
+@log_tool_call
+async def extract(reason: Reason, action: str, file_name: str | list[str]) -> str:
+    """Extract text from image(s) via OCR, persisted to a markdown file.
+
+    Images (png/jpg/jpeg/webp/bmp/tif/tiff) are OCR'd by Granite-Docling.
+    Pass a single path or a list — a batch is converted in one worker
+    invocation (one model load) into one markdown file. PDFs and scanned
+    documents use ``convert`` — same OCR engine. No MarkItDown fallback:
+    it cannot OCR images, so a missing worker is a hard error.
+
+    Args:
+        reason: Why you are extracting text from this image.
+        action: Injected by the ax dispatcher ("extract").
+        file_name: Absolute path (or list of paths) to the image(s).
+
+    Returns:
+        JSON with {file_path, metadata}. Content is persisted to disk —
+        read it with read_file (offset/length/max_lines).
+    """
+    names = [file_name] if isinstance(file_name, str) else list(file_name)
+    if not names:
+        return _err(reason, "missing_file", "file_name is required")
+    batch: list[Path] = []
+    for name in names:
+        try:
+            fp = resolve_doc_path(name)
+        except Exception as exc:
+            return _err(reason, "path_error", str(exc))
+        ext = fp.suffix.lower()
+        if ext not in IMAGE_EXTENSIONS:
+            return _err(
+                reason,
+                "not_an_image",
+                f"unsupported image extension: {ext}",
+                how_to_fix=(
+                    f"extract OCRs {', '.join(sorted(IMAGE_EXTENSIONS))}. "
+                    ".gif has no OCR path — use the vision summary. "
+                    "For PDF/office/HTML use convert."
+                ),
+            )
+        if fp.stat().st_size > Pdf.max_file_mb * 1024 * 1024:
+            return _err(
+                reason, "too_large", f"{fp.name} exceeds {Pdf.max_file_mb} MB limit"
+            )
+        batch.append(fp)
+    return await asyncio.to_thread(_convert_docling, batch, reason, explicit=True)
 
 
 @log_tool_call

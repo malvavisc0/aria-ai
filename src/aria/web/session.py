@@ -33,6 +33,7 @@ from aria.config.folders import Workspace as WorkspaceConfig
 from aria.config.models import Embeddings as EmbeddingsConfig
 from aria.llm import get_default_memory
 from aria.llm.memory import BackgroundFlushMemory, wrap_memory
+from aria.tools.documents.functions import IMAGE_EXTENSIONS as _OCR_IMAGE_EXTENSIONS
 from aria.web.state import ROOT_MESSAGE_TYPES, _state
 
 # Maximum dimension (width or height) for images sent to the vision API.
@@ -46,7 +47,7 @@ _MAX_VISION_DIMENSION = 1024
 # stored, so the restored tail is deliberately kept below it.
 _RESUME_BUDGET_HEADROOM = 0.9
 
-# Image MIME types and extensions for detection
+# Image MIME types for detection
 _IMAGE_MIME_TYPES = {
     "image/png",
     "image/jpeg",
@@ -55,7 +56,11 @@ _IMAGE_MIME_TYPES = {
     "image/bmp",
     "image/tiff",
 }
-_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tiff"}
+
+#: Vision accepts every OCR-able image plus gif (caption-only — gif has
+#: no OCR path). Derived from the documents tool's set so the two
+#: definitions cannot drift.
+_IMAGE_EXTENSIONS = _OCR_IMAGE_EXTENSIONS | {".gif"}
 
 # Extension → MIME mapping for image uploads.  Required because naive
 # ``image/{ext}`` synthesis produces unregistered types such as
@@ -264,7 +269,9 @@ def extract_image_data(message: cl.Message) -> list[dict]:
 def extract_file_paths(message: cl.Message) -> list[str]:
     """Extract file paths from uploaded file elements in a message.
 
-    Skips image files — those are handled separately by extract_image_data().
+    Images are included: the vision caption (extract_image_data) is a
+    summary, and the path lets the agent OCR the image on demand via
+    ``ax documents extract``.
     """
     if not message.elements:
         return []
@@ -275,7 +282,7 @@ def extract_file_paths(message: cl.Message) -> list[str]:
     paths = []
     for element in message.elements:
         info = _ElementInfo(element)
-        if not info.path or info.is_image:
+        if not info.path:
             continue
 
         src = Path(info.path)

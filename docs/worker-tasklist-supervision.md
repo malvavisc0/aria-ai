@@ -364,7 +364,9 @@ class WorkerView:  # one renderable unit
     plan_id: str
     task: str
     steps: tuple[StepView, ...]
-    worker_status: str  # "running" | "completed" | "partial" | "failed" | "cancelled" | "zombie"
+    worker_status: (
+        str  # "running" | "completed" | "partial" | "failed" | "cancelled" | "zombie"
+    )
 
 
 def load_worker_view(worker_id: str) -> WorkerView | None:

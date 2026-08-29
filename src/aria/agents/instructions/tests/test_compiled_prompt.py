@@ -32,7 +32,7 @@ _PLACEHOLDER_RE = re.compile(r"\{\{[^}]+\}\}")
 # budgets = post-cleanup baseline + 15% headroom. Measured on resident
 # content only so the guardrail tracks markdown bloat, not environment-
 # dependent extras (managed binaries / venv table).
-ARIA_BUDGET_WORDS = 1545  # resident baseline 1344 (capability map added)
+ARIA_BUDGET_WORDS = 1646  # resident baseline 1431 (documents extract added)
 WORKER_BUDGET_WORDS = 615  # resident baseline 534
 PROMPT_ENHANCER_BUDGET_WORDS = 584  # resident baseline 507
 
@@ -148,6 +148,12 @@ class TestAriaBehaviorContracts:
     def test_multi_file_work_does_not_force_delegation(self, prompt: str):
         assert "outline a brief plan first" in prompt
         assert "delegate only when the work also meets" in prompt
+
+    def test_ocr_and_vision_capabilities_advertised(self, prompt: str):
+        assert "Granite-Docling" in prompt
+        assert "OCR" in prompt
+        assert "vision model" in prompt
+        assert "[Attached images]" in prompt
 
     @pytest.mark.parametrize(
         "contract",

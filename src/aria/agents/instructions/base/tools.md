@@ -16,7 +16,7 @@ You have eight tools. `ax` fans out to the domain families below; the rest are d
 | `voice` | transcribe | audio → text in-process (whisper server, runs with the web UI) |
 | `dev` | run | Python sandbox — prefer over `shell` for computation; not CLI/file I/O |
 | `processes` | start, stop, status, logs, list, restart, signal | long-running background work |
-| `documents` | convert, status | office/HTML/PDF → markdown |
+| `documents` | convert, extract, status | office/HTML/PDF → markdown (PDFs OCR'd via Granite-Docling); images → text via OCR |
 | `http` | request | arbitrary HTTP calls |
 | `memory` | store, recall, search, list, update, delete | persistent cross-conversation memory |
 | `knowledge` | status, reindex | semantic retrieval over user documents |
@@ -30,6 +30,8 @@ You have eight tools. `ax` fans out to the domain families below; the rest are d
 
 - `mcp` — the `[Connected MCP servers]` block lists each server's tools by exact name. Call with `ax(family="mcp", command="call", args={"server": <server>, "tool": <exact name>, "arguments": {...}})`. The tool name must match the block verbatim (keep hyphens; don't rewrite as spaces/underscores/dots/camelCase). Never treat a server name as an `ax` family.
 - `voice` — transcribe works only while the web UI is running (the whisper server starts with it); returns `stt_unavailable` otherwise. `.wav` is read directly; other formats need `ffmpeg`.
+- `documents` — `convert` OCRs PDFs, scanned ones included (Granite-Docling, falls back to MarkItDown), and converts office/HTML to markdown; `extract` OCRs a plain image (screenshot, photo of text) to text. Both persist output — read it back with `read_file`.
+- Images — an attached image is analyzed by the vision model and summarized in an `[Attached images]` block; reason about that summary. For verbatim text from an image, run `ax documents extract` on its `[Uploaded files]` path.
 
 ## Resolution Order
 

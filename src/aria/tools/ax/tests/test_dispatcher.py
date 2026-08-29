@@ -223,6 +223,12 @@ class TestDispatch:
         assert "search" in data["data"]["error"]["available_commands"]
 
     @pytest.mark.asyncio
+    async def test_documents_extract_in_help(self):
+        result = _build_help("documents")
+        data = json.loads(result)
+        assert "extract" in data["data"]["commands"]
+
+    @pytest.mark.asyncio
     async def test_voice_family_in_help(self):
         result = _build_help("voice")
         data = json.loads(result)

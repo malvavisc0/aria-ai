@@ -278,7 +278,7 @@ left behind.
 handler = _state.agents_workflow.run(
     user_msg=prompt,
     memory=memory,
-    max_iterations=ChatConfig.max_iteration,   # MAX_ITERATIONS env
+    max_iterations=ChatConfig.max_iteration,  # MAX_ITERATIONS env
 )
 ```
 

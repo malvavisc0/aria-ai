@@ -18,6 +18,7 @@ def _build_converter(device: str) -> Any:
     Imports docling lazily — this module is never imported by Aria's main
     env; only the isolated worker venv has docling installed.
     """
+    from docling.backend.image_backend import ImageDocumentBackend
     from docling.backend.pypdfium2_backend import PyPdfiumDocumentBackend
     from docling.datamodel.base_models import InputFormat
     from docling.datamodel.pipeline_options import (
@@ -37,12 +38,19 @@ def _build_converter(device: str) -> Any:
         accelerator_options=AcceleratorOptions(device=AcceleratorDevice(device)),
         vlm_options=GRANITEDOCLING_TRANSFORMERS,
     )
-    fmt = FormatOption(
+    pdf_fmt = FormatOption(
         pipeline_options=opts,
         backend=PyPdfiumDocumentBackend,
         pipeline_cls=VlmPipeline,
     )
-    return DocumentConverter(format_options={InputFormat.PDF: fmt})
+    image_fmt = FormatOption(
+        pipeline_options=opts,
+        backend=ImageDocumentBackend,
+        pipeline_cls=VlmPipeline,
+    )
+    return DocumentConverter(
+        format_options={InputFormat.PDF: pdf_fmt, InputFormat.IMAGE: image_fmt}
+    )
 
 
 def _page_count(pdf: Path) -> int:
@@ -54,14 +62,82 @@ def _page_count(pdf: Path) -> int:
     return n
 
 
+def _page_count_safe(path: Path) -> int:
+    """Page count for any input: PDF pages, image frames, else 1.
+
+    Images report their frame count (a multi-page TIFF is multi-page);
+    anything the backend treats as a single page counts as 1.
+    """
+    if path.suffix.lower() == ".pdf":
+        return _page_count(path)
+    from PIL import Image
+
+    with Image.open(path) as img:
+        return getattr(img, "n_frames", 1)
+
+
 def _emit(result: dict[str, Any]) -> int:
     """Print a JSON result and return its exit code (1 when not ok)."""
     print(json.dumps(result))
     return 0 if result.get("ok") else 1
 
 
+def _page_counts(srcs: list[Path], max_pages: int) -> list[int] | dict[str, Any]:
+    """Per-file page counts, enforcing the ``max_pages`` cap.
+
+    Returns a list of counts, or an error result dict when any file
+    exceeds the cap.
+    """
+    counts = []
+    for src in srcs:
+        n = _page_count_safe(src)
+        if max_pages and n > max_pages:
+            return {
+                "ok": False,
+                "error": f"page count {n} exceeds max_pages {max_pages} ({src.name})",
+            }
+        counts.append(n)
+    return counts
+
+
+def _write_chunks(documents: list[Any], out: Path) -> dict[str, Any]:
+    """Emit a JSON chunk array via HierarchicalChunker."""
+    from docling_core.transforms.chunker.hierarchical_chunker import (
+        HierarchicalChunker,
+    )
+
+    chunker = HierarchicalChunker()
+    items = [
+        {"text": c.text, "headings": c.meta.headings or []}
+        for document in documents
+        for c in chunker.chunk(document)
+    ]
+    out.write_text(json.dumps(items), encoding="utf-8")
+    return {"chunks": len(items)}
+
+
+def _write_markdown(
+    srcs: list[Path],
+    documents: list[Any],
+    counts: list[int],
+    out: Path,
+) -> dict[str, Any]:
+    """Emit markdown — per-file section comments when batching."""
+    parts = [
+        f"<!-- {src.name} -->\n{document.export_to_markdown()}"
+        if len(srcs) > 1
+        else document.export_to_markdown()
+        for src, document in zip(srcs, documents)
+    ]
+    out.write_text("\n\n".join(parts), encoding="utf-8")
+    return {
+        "markdown_path": str(out),
+        "files": [{"name": src.name, "pages": n} for src, n in zip(srcs, counts)],
+    }
+
+
 def cmd_convert(args: argparse.Namespace) -> int:
-    pdf = Path(args.input)
+    srcs = [Path(p) for p in args.input]
     out = Path(args.output)
     out.parent.mkdir(parents=True, exist_ok=True)
     t0 = time.time()
@@ -72,52 +148,27 @@ def cmd_convert(args: argparse.Namespace) -> int:
 
         os.environ["CUDA_VISIBLE_DEVICES"] = ""
     try:
-        n = _page_count(pdf)
-        if args.max_pages and n > args.max_pages:
-            return _emit(
-                {
-                    "ok": False,
-                    "error": f"page count {n} exceeds max_pages {args.max_pages}",
-                }
-            )
+        counted = _page_counts(srcs, args.max_pages)
+        if isinstance(counted, dict):
+            return _emit(counted)
+        counts = counted
         conv = _build_converter(args.device)
-        result = conv.convert(pdf)
+        # One converter (one model load) for all inputs — the reason
+        # batching exists.
+        documents = [conv.convert(src).document for src in srcs]
         dur_ms = int((time.time() - t0) * 1000)
         if args.chunks:
-            from docling_core.transforms.chunker.hierarchical_chunker import (
-                HierarchicalChunker,
-            )
-
-            chunker = HierarchicalChunker()
-            items = [
-                {"text": c.text, "headings": c.meta.headings or []}
-                for c in chunker.chunk(result.document)
-            ]
-            out.write_text(json.dumps(items), encoding="utf-8")
-            return _emit(
-                {
-                    "ok": True,
-                    "chunks": len(items),
-                    "pages": n,
-                    "duration_ms": dur_ms,
-                    "model": args.model,
-                    "device": args.device,
-                }
-            )
-        md = result.document.export_to_markdown()
-        provenance = (
-            f"<!-- converted by Granite-Docling (model={args.model}, "
-            f"device={args.device}, pages={n}, duration_ms={dur_ms}) -->\n"
-        )
-        out.write_text(provenance + md, encoding="utf-8")
+            result = _write_chunks(documents, out)
+        else:
+            result = _write_markdown(srcs, documents, counts, out)
         return _emit(
             {
                 "ok": True,
-                "markdown_path": str(out),
-                "pages": n,
+                "pages": sum(counts),
                 "duration_ms": dur_ms,
                 "model": args.model,
                 "device": args.device,
+                **result,
             }
         )
     except Exception as exc:  # surface to the main env as JSON
@@ -137,7 +188,7 @@ def main() -> int:
     p = argparse.ArgumentParser(prog="docling")
     sub = p.add_subparsers(dest="cmd", required=True)
     c = sub.add_parser("convert")
-    c.add_argument("--input", required=True)
+    c.add_argument("--input", nargs="+", required=True)
     c.add_argument("--output", required=True)
     c.add_argument("--model", required=True)
     c.add_argument("--device", default="cpu")

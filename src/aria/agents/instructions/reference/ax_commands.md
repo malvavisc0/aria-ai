@@ -105,9 +105,12 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 | Command | Required | Optional |
 |---------|----------|----------|
 | `convert` | `file_name` | `backend`, `max_pages` |
+| `extract` | `file_name` | — |
 | `status` | — | — |
 
 > **Convert office/HTML/PDF to markdown with `ax documents convert`** (`file_name` = absolute path). Output is persisted to a `.md` file — read it with `read_file` in chunks afterwards. Already-text files (`.txt`/`.md`/`.json`/`.py`/...) are rejected — use `read_file` directly for those.
+>
+> **Extract text from image(s) with `ax documents extract`** (`file_name` = absolute path to png/jpg/jpeg/webp/bmp/tif/tiff, or an array of paths — a batch is OCR'd in one pass into one `.md` file; read it with `read_file` afterwards). For text inside PDFs use `convert` (same OCR engine). `.gif` has no OCR path — use the vision summary. No fallback if the docling worker is missing — the error tells the user to install it.
 
 ## check
 

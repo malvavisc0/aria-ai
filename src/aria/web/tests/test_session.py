@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -271,3 +273,42 @@ class TestStepToChatMessage:
         )
         assert msg is not None
         assert msg.role == MessageRole.ASSISTANT
+
+
+class TestExtractFilePaths:
+    """Image uploads must surface in [Uploaded files] so the agent can
+    OCR them via `ax documents extract` (the vision caption alone is a
+    summary, not verbatim text)."""
+
+    @staticmethod
+    def _message(elements: list[Any], thread_id: str = "t1") -> Any:
+        return SimpleNamespace(elements=elements, thread_id=thread_id)
+
+    def test_image_paths_included(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pipeline.WorkspaceConfig, "path", tmp_path)
+        img = tmp_path / "scan.png"
+        img.write_bytes(b"\x89PNG")
+        msg = self._message(
+            [SimpleNamespace(path=str(img), mime="image/png", name="scan.png")]
+        )
+        paths = pipeline.extract_file_paths(msg)
+        assert len(paths) == 1
+        assert Path(paths[0]).read_bytes() == b"\x89PNG"
+
+    def test_non_image_paths_included(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(pipeline.WorkspaceConfig, "path", tmp_path)
+        doc = tmp_path / "notes.txt"
+        doc.write_text("hi")
+        msg = self._message(
+            [SimpleNamespace(path=str(doc), mime="text/plain", name="notes.txt")]
+        )
+        assert len(pipeline.extract_file_paths(msg)) == 1
+
+    def test_image_extensions_derived_from_documents_tool(self):
+        """Single source of truth: session's vision set must be the
+        documents tool's OCR set plus gif (caption-only). Prevents the
+        drift that made gif a dead-end and hid .tif from vision."""
+        from aria.tools.documents.functions import IMAGE_EXTENSIONS
+
+        assert pipeline._IMAGE_EXTENSIONS == IMAGE_EXTENSIONS | {".gif"}
+        assert ".tif" in pipeline._IMAGE_EXTENSIONS
