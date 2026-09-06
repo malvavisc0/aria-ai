@@ -860,6 +860,11 @@ Unified dispatcher that routes `family`/`command` pairs to native Python functio
 | `mcp` | `list`, `call` | Discover and invoke Model Context Protocol servers |
 | `help` | *(any)*, `lookup` | List families/commands; `lookup` fetches a family's detailed reference |
 
+MCP servers are connected per chat session from the web UI's plug menu.
+Named servers (including stdio) are configured with `aria mcp add`
+(see the README CLI reference); users can also paste SSE/streamable-http
+URLs directly when `features.mcp.user_servers.enabled` is on.
+
 ### Web command arguments
 
 | Command | Required | Optional |

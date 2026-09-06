@@ -38,6 +38,7 @@ from aria.cli import (
     config,
     init,
     lightpanda,
+    mcp,
     models,
     server,
     storage,
@@ -76,6 +77,7 @@ app.add_typer(server.app, name="server")
 app.add_typer(system.app, name="system")
 app.add_typer(tools_cli.app, name="tools")
 app.add_typer(storage.app, name="storage")
+app.add_typer(mcp.app, name="mcp")
 app.add_typer(init.app, name="init")
 
 console = Console()
@@ -127,6 +129,7 @@ COMMAND_GROUPS = [
             ("init", "Bootstrap, detect hardware, install and download"),
             ("config", "Show settings, paths, and keys"),
             ("users", "Manage user accounts"),
+            ("mcp", "Manage MCP servers for the web UI"),
         ],
     },
     {

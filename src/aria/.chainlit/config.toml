@@ -101,18 +101,13 @@ sample_rate = 16000
 # Enable Model Context Protocol (MCP) features
 enabled = true
 
-[features.mcp.sse]
+# Allow end-users to connect their own SSE or streamable-http MCP servers
+# from the web UI (the plug menu). allowed_urls is a prefix allowlist
+# (scheme + host + port + path prefix); empty = deny all. User-provided
+# stdio is not supported by Chainlit - use `aria mcp add` for stdio servers.
+[features.mcp.user_servers]
 enabled = true
-
-[features.mcp.streamable-http]
-enabled = true
-
-[features.mcp.stdio]
-enabled = true
-# Only the executables in the allow list can be used for MCP stdio server.
-# Only need the base name of the executable, e.g. "npx", not "/usr/bin/npx".
-# Please don't comment this line for now, we need it to parse the executable name.
-allowed_executables = ["uvx"]
+allowed_urls = ["http://localhost", "http://127.0.0.1", "https://"]
 
 [UI]
 # Name of the assistant.

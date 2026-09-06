@@ -241,6 +241,12 @@ aria users reset-password # Reset user password
 aria users update         # Update user details
 aria users delete         # Delete a user
 
+# MCP servers (web UI)
+aria mcp list                                  # List configured MCP servers
+aria mcp add fs --command "uvx mcp-server-fs ~"  # Add a stdio server
+aria mcp add remote --url "https://mcp.example.com/mcp"  # Add a remote server
+aria mcp remove fs                             # Remove a server
+
 # System info
 aria system info          # Full system overview
 aria system gpu           # GPU information
