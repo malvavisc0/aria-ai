@@ -82,7 +82,9 @@ def test_add_requires_command_or_url(monkeypatch, tmp_path) -> None:
     result = runner.invoke(app, ["add", "fs"])
 
     assert result.exit_code != 0
-    assert "--command" in result.output
+    # Rich wraps error text at the terminal width, so assert a phrase
+    # without spaces that survives wrapping.
+    assert "exactly one of" in result.output
 
 
 def test_remove_deletes_only_the_named_block(monkeypatch, tmp_path) -> None:
