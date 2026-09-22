@@ -192,7 +192,7 @@ class VllmServerManager:
 
     PID_FILE = DataConfig.path / "vllm_servers.json"
     HEALTH_POLL_INTERVAL = 1.0
-    HEALTH_TIMEOUT = 300  # vLLM model loading can take longer than llama.cpp
+    HEALTH_TIMEOUT = 600  # vLLM cold start: compile + profiling + CUDA graphs
 
     def __init__(
         self,

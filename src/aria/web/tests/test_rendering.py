@@ -178,7 +178,9 @@ class TestCreateRenderElements:
         f.write_text("# Report")
         elements, _ = await create_render_elements([str(f)], [])
         assert len(elements) == 1
-        assert elements[0].name == "report.md"
+        # "File: " prefix keeps Chainlit's name-in-text linkification from
+        # rewriting fenced paths in the message body.
+        assert elements[0].name == "File: report.md"
 
     async def test_image_becomes_cl_image(
         self, tmp_path: Path, mock_elements: None
@@ -196,7 +198,7 @@ class TestCreateRenderElements:
         f.write_bytes(b"%PDF")
         elements, _ = await create_render_elements([str(f)], [])
         assert len(elements) == 1
-        assert elements[0].name == "doc.pdf"
+        assert elements[0].name == "File: doc.pdf"
 
     async def test_unknown_ext_becomes_cl_file(
         self, tmp_path: Path, mock_elements: None
@@ -205,7 +207,7 @@ class TestCreateRenderElements:
         f.write_bytes(b"\x00")
         elements, _ = await create_render_elements([str(f)], [])
         assert len(elements) == 1
-        assert elements[0].name == "data.bin"
+        assert elements[0].name == "File: data.bin"
 
     async def test_remote_image_url_becomes_cl_image(self, mock_elements: None) -> None:
         elements, _ = await create_render_elements(

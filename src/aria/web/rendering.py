@@ -223,18 +223,26 @@ def sources_footer(names: list[str]) -> str:
 
 
 def _local_element(path: str) -> Any:
-    """Chainlit element for a local file, chosen by extension."""
+    """Chainlit element for a local file, chosen by extension.
+
+    Side elements (text/PDF/file) get a ``File: `` name prefix: Chainlit's
+    frontend rewrites every occurrence of an element's name in the message
+    text into a markdown link, ignoring code fences — a bare-filename name
+    mangles the backticked/fenced file paths the model reports. Images are
+    exempt: inline matches are not linkified.
+    """
     ext = Path(path).suffix.lower()
     name = Path(path).name
     if ext in _IMAGE_EXTS:
         return cl.Image(name=name, path=path, display="inline")
+    side_name = f"File: {name}"
     if ext in _PDF_EXTS:
-        return cl.Pdf(name=name, path=path, display="side")
+        return cl.Pdf(name=side_name, path=path, display="side")
     if ext in _TEXT_EXTS:
         return cl.Text(
-            name=name, path=path, display="side", language=LANG_MAP.get(ext, "")
+            name=side_name, path=path, display="side", language=LANG_MAP.get(ext, "")
         )
-    return cl.File(name=name, path=path, display="side")
+    return cl.File(name=side_name, path=path, display="side")
 
 
 async def create_render_elements(
