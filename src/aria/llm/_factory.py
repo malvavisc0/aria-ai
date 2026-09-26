@@ -74,6 +74,7 @@ def get_chat_llm(
         is_chat_model=True,
         is_function_calling_model=True,
         max_tokens=max_tokens,
+        context_window=VllmConfig.chat_context_size,
         temperature=VllmConfig.temperature,
         reuse_client=True,
         async_http_client=httpx.AsyncClient(  # type: ignore[call-arg]

@@ -379,6 +379,12 @@ class SanitizedOpenAILike(OpenAILike):
         all_kwargs.pop("stream", None)
         _model: str = all_kwargs.pop("model", self.model)
 
+        # Ask the API for a trailing usage chunk so token counts reach
+        # the response metadata (and telemetry) on streamed calls.
+        extra_body = dict(all_kwargs.get("extra_body") or {})
+        extra_body["stream_options"] = {"include_usage": True}
+        all_kwargs["extra_body"] = extra_body
+
         async def gen() -> "ChatResponseAsyncGen":
             content = ""
             reasoning_content = ""
