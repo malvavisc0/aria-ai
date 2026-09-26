@@ -5,6 +5,7 @@ dispatch. Same structured JSON responses, zero subprocess overhead.
 """
 
 import inspect
+import json
 import re
 from collections.abc import Callable
 from pathlib import Path
@@ -477,19 +478,12 @@ def _ax_error(reason: str, code: str, message: str, **extra: Any) -> str:
     return tool_response(tool="ax", reason=reason, data={"error": err})
 
 
-def _validate_ax_inputs(reason: str, family: str, command: str) -> str | None:
+def _validate_ax_inputs(family: str, command: str) -> str | None:
     """Validate required ax inputs; return an error response or None."""
-    if not reason:
-        return _ax_error(
-            "missing_reason",
-            "missing_reason",
-            "The 'reason' argument is required. Explain why you are calling this tool.",
-            hint="Pass a brief reason string, e.g. reason='Search for Python tutorials'.",
-        )
     if not family or not command:
         return tool_response(
             tool="ax",
-            reason=reason or "missing_args",
+            reason="missing_args",
             data={
                 "error": {
                     "code": "missing_required_args",
@@ -625,27 +619,38 @@ async def _invoke_target(
         )
 
 
-@log_tool_call
-async def ax(
-    reason: Reason = "",
-    family: str = "",
-    command: str = "",
-    args: dict[str, Any] | None = None,
+def _normalize_inputs(
+    reason: str, family: str, command: str, args: dict[str, Any] | None
+) -> tuple[str, str, str, dict[str, Any]]:
+    """Normalize raw LLM inputs: trim, default, and lowercase."""
+    return (
+        (reason or "").strip() or "unspecified",
+        (family or "").lower().strip(),
+        (command or "").lower().strip(),
+        args or {},
+    )
+
+
+def _with_reason_warning(response: str, reason_missing: bool) -> str:
+    """Surface a missing ``reason`` back to the model in the envelope."""
+    if not reason_missing:
+        return response
+    try:
+        payload = json.loads(response)
+    except json.JSONDecodeError:
+        return response
+    payload["warning"] = "'reason' is required on every ax call — pass it next time"
+    return json.dumps(payload)
+
+
+async def _dispatch_ax(
+    reason: str, family: str, command: str, args: dict[str, Any] | None
 ) -> str:
-    """Dispatch to a domain tool family with structured I/O.
+    reason, family, command, call_args = _normalize_inputs(
+        reason, family, command, args
+    )
 
-    Use this for web, knowledge, finance, IMDb, HTTP, Python sandbox,
-    and background-process actions. Use ``command="help"`` to list
-    families or subcommands.
-
-    Returns:
-        Structured JSON response from the target function.
-    """
-    family = (family or "").lower().strip()
-    command = (command or "").lower().strip()
-    call_args: dict[str, Any] = args or {}
-
-    err = _validate_ax_inputs(reason, family, command)
+    err = _validate_ax_inputs(family, command)
     if err is not None:
         return err
 
@@ -669,3 +674,25 @@ async def ax(
     kwargs = _strip_unknown_kwargs(fn, kwargs, family, command)
 
     return await _invoke_target(fn, kwargs, reason, family, command)
+
+
+@log_tool_call
+async def ax(
+    reason: Reason = "",
+    family: str = "",
+    command: str = "",
+    args: dict[str, Any] | None = None,
+) -> str:
+    """Dispatch to a domain tool family with structured I/O.
+
+    Use this for web, knowledge, finance, IMDb, HTTP, Python sandbox,
+    and background-process actions. Use ``command="help"`` to list
+    families or subcommands.
+
+    Returns:
+        Structured JSON response from the target function.
+    """
+    reason_missing = not (reason or "").strip()
+    return _with_reason_warning(
+        await _dispatch_ax(reason, family, command, args), reason_missing
+    )

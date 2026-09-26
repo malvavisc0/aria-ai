@@ -316,18 +316,23 @@ class TestDispatch:
             assert "query" in data["data"]["error"]["message"]
 
     @pytest.mark.asyncio
-    async def test_empty_reason_returns_error(self):
-        result = await ax(reason="", family="web", command="search")
-        data = json.loads(result)
-        assert data["data"]["error"]["code"] == "missing_reason"
-        assert "reason" in data["data"]["error"]["hint"].lower()
+    async def test_empty_reason_warns_and_defaults(self):
+        mock_response = '{"tool":"web_search","data":{"results":[]}}'
+        with patch(
+            "aria.tools.search.webserp.web_search",
+            return_value=mock_response,
+        ) as mock_fn:
+            result = await ax(reason="", family="web", command="search")
+            mock_fn.assert_called_once_with(reason="unspecified")
+            payload = json.loads(result)
+            assert "reason" in payload["warning"]
+            assert payload["data"] == {"results": []}
 
     @pytest.mark.asyncio
-    async def test_no_args_returns_missing_reason(self):
+    async def test_no_args_returns_missing_required_args(self):
         result = await ax()
         data = json.loads(result)
-        # reason check fires before family/command check
-        assert data["data"]["error"]["code"] == "missing_reason"
+        assert data["data"]["error"]["code"] == "missing_required_args"
 
     @pytest.mark.asyncio
     async def test_empty_family_returns_error(self):

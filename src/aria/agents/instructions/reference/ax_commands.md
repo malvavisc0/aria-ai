@@ -20,7 +20,7 @@ Call `ax` with four top-level JSON fields: `reason` (string), `family` (string),
 {"reason": "...", "family": "dev", "command": "run", "args": "{\"code\": \"...\", \"check_only\": false}"}
 ```
 
-`reason` is a **required top-level field** — pass it at the top level, never inside `args`. If you omit it, the call fails with `missing_reason`. `action` is injected automatically from `command` (do not pass it).
+`reason` is a **required top-level field** — pass it at the top level, never inside `args`. If you omit it, the call still runs but the response carries a warning; always pass reason. `action` is injected automatically from `command` (do not pass it).
 
 ## web
 
