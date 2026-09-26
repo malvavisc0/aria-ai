@@ -13,7 +13,11 @@ This module wraps the live ``Memory`` instance so:
   ``_manage_queue`` waterfall as a background ``asyncio`` task.
 - The vector memory block is replaced by an idempotent subclass that
   derives its node ID from a SHA-256 of the message text, so
-  re-embedding the same content does not accumulate duplicates.
+  re-embedding the same content does not accumulate duplicates.  It
+  stores user/assistant turns only — tool-role messages are raw JSON
+  blobs that bloat CPU embedding and poison retrieval — and queries
+  the vector store with the latest user text (capped) instead of the
+  base implementation's trailing-message concatenation.
 
 At most one flush runs at a time.  Requests that arrive while a flush
 is in flight set a dirty flag and are re-scheduled when it completes,
@@ -29,7 +33,7 @@ import asyncio
 import hashlib
 from typing import Any, NoReturn
 
-from llama_index.core.base.llms.types import ChatMessage
+from llama_index.core.base.llms.types import ChatMessage, MessageRole
 from llama_index.core.memory import Memory, VectorMemoryBlock
 from llama_index.core.schema import TextNode
 from llama_index.core.storage.chat_store.base_db import MessageStatus
@@ -40,6 +44,10 @@ from loguru import logger
 # still arriving, so a small bound is enough and guarantees shutdown
 # cannot hang.
 _DRAIN_MAX_ROUNDS = 5
+
+#: Retrieval queries are capped to this many characters so embedding
+#: cost on the critical path stays flat regardless of message size.
+_QUERY_CHAR_LIMIT = 200
 
 _SYNC_UNSUPPORTED = (
     "BackgroundFlushMemory exposes the async memory API only: the sync "
@@ -68,12 +76,20 @@ class IdempotentVectorMemoryBlock(VectorMemoryBlock):
     ``node_id`` collides with the existing node instead of creating a
     new one, so the collection stops growing without bound across
     sessions.
+
+    Only user/assistant turns are stored: tool-role messages are raw
+    JSON payloads that dominate embedding time and surface as noise
+    during retrieval.  Retrieval queries use the latest user text,
+    capped at :data:`_QUERY_CHAR_LIMIT`, instead of the base
+    implementation's trailing-message concatenation.
     """
 
     async def _aput(self, messages: list[ChatMessage]) -> None:
         nodes: list[TextNode] = []
         session_id = None
         for message in messages:
+            if message.role == MessageRole.TOOL:
+                continue
             text = self._get_text_from_messages([message])
             if not text:
                 continue
@@ -104,6 +120,26 @@ class IdempotentVectorMemoryBlock(VectorMemoryBlock):
         for node, emb in zip(nodes, embeddings):
             node.embedding = emb
         await self.vector_store.async_add(nodes)
+
+    async def _aget(
+        self,
+        messages: list[ChatMessage] | None = None,
+        session_id: str | None = None,
+        **block_kwargs: Any,
+    ) -> str:
+        """Retrieve relevant turns using the latest user text as the query."""
+        user_text = ""
+        for message in reversed(messages or []):
+            if message.role == MessageRole.USER:
+                user_text = self._get_text_from_messages([message])
+                break
+        if not user_text:
+            return ""
+        query = ChatMessage(
+            role=MessageRole.USER,
+            content=user_text[:_QUERY_CHAR_LIMIT],
+        )
+        return await super()._aget([query], session_id=session_id, **block_kwargs)
 
 
 class BackgroundFlushMemory:

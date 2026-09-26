@@ -19,7 +19,10 @@ from llama_index.core.base.embeddings.base import BaseEmbedding
 from llama_index.core.base.llms.types import ChatMessage, MessageRole, TextBlock
 from llama_index.core.memory import Memory, VectorMemoryBlock
 from llama_index.core.schema import BaseNode, TextNode
-from llama_index.core.vector_stores.types import BasePydanticVectorStore
+from llama_index.core.vector_stores.types import (
+    BasePydanticVectorStore,
+    VectorStoreQueryResult,
+)
 
 from aria.llm.memory import (
     BackgroundFlushMemory,
@@ -50,10 +53,15 @@ class _RecordingVectorStore(BasePydanticVectorStore):
     def __init__(self) -> None:
         super().__init__(stores_text=True)
         self._nodes: list[TextNode] = []
+        self._queries: list[Any] = []
 
     @property
     def nodes(self) -> list[TextNode]:
         return self._nodes
+
+    @property
+    def queries(self) -> list[Any]:
+        return self._queries
 
     @property
     def client(self) -> None:
@@ -69,6 +77,10 @@ class _RecordingVectorStore(BasePydanticVectorStore):
 
     def query(self, *args: Any, **kwargs: Any) -> Any:
         return None
+
+    async def aquery(self, query: Any, **kwargs: Any) -> Any:
+        self.queries.append(query)
+        return VectorStoreQueryResult(nodes=[], similarities=[])
 
     def delete(self, *args: Any, **kwargs: Any) -> None:
         return None
@@ -102,6 +114,29 @@ class TestIdempotentVectorBlock:
         )
         await block._aput([])
         assert store.nodes == []
+
+    @pytest.mark.asyncio
+    async def test_skips_tool_messages(self) -> None:
+        """Tool-role JSON must never reach the vector store.
+
+        Tool outputs are multi-KB JSON blobs: embedding them dominates
+        flush time and they surface as noise in every retrieval.
+        """
+        store = _RecordingVectorStore()
+        block = IdempotentVectorMemoryBlock(
+            name="vector_memory",
+            vector_store=store,  # type: ignore[arg-type]
+            embed_model=_FakeEmbedding(),
+        )
+        await block._aput(
+            [
+                _msg(MessageRole.USER, "find me a widget"),
+                _msg(MessageRole.TOOL, '{"status": "error", "data": {"huge": true}}'),
+                _msg(MessageRole.ASSISTANT, "the widget is in aisle 3"),
+            ]
+        )
+        assert len(store.nodes) == 2
+        assert all("role='tool'" not in n.text for n in store.nodes)
 
     @pytest.mark.asyncio
     async def test_attaches_session_id_via_additional_kwargs(self) -> None:
@@ -201,6 +236,47 @@ class TestIdempotentVectorBlock:
         assert len(set(ids)) == 2
         assert ids[0] == ids[2]
         assert ids[1] == ids[3]
+
+
+class TestVectorRetrievalQuery:
+    """Retrieval queries use the latest user text, capped in length."""
+
+    @staticmethod
+    def _make_block() -> tuple[_RecordingVectorStore, IdempotentVectorMemoryBlock]:
+        store = _RecordingVectorStore()
+        block = IdempotentVectorMemoryBlock(
+            name="vector_memory",
+            vector_store=store,  # type: ignore[arg-type]
+            embed_model=_FakeEmbedding(),
+        )
+        return store, block
+
+    @pytest.mark.asyncio
+    async def test_queries_with_latest_user_text(self) -> None:
+        store, block = self._make_block()
+        await block._aget(
+            [
+                _msg(MessageRole.USER, "the earlier question"),
+                _msg(MessageRole.ASSISTANT, "huge tool json as trailing message"),
+                _msg(MessageRole.USER, "and what about X?"),
+                _msg(MessageRole.ASSISTANT, "trailing answer"),
+            ]
+        )
+        assert store.queries[-1].query_str == "and what about X?"
+
+    @pytest.mark.asyncio
+    async def test_caps_query_length(self) -> None:
+        store, block = self._make_block()
+        await block._aget([_msg(MessageRole.USER, "q" * 5000)])
+        assert store.queries[-1].query_str == "q" * 200
+        assert store.queries[-1].query_embedding == [200.0]
+
+    @pytest.mark.asyncio
+    async def test_no_user_text_skips_retrieval(self) -> None:
+        store, block = self._make_block()
+        result = await block._aget([_msg(MessageRole.ASSISTANT, "hi")])
+        assert result == ""
+        assert store.queries == []
 
 
 class TestBackgroundFlushMemory:
