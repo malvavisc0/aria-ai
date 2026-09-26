@@ -8,7 +8,7 @@ You have eight tools. `ax` fans out to the domain families below; the rest are d
 
 **Direct:** `reasoning` (structured reasoning sessions — skip for straightforward tasks), `shell` (fallback for venv/CLI tools `ax` doesn't cover), `read_file` / `write_file` / `edit_file` / `list_files` / `search_files`.
 
-**`ax` families** — call as `ax(family, command, args)`. The command names here are your surface; exact arguments are on-demand via `ax(family="help", command="lookup", args={"topic": "<family>"})`. Know the surface before guessing.
+**`ax` families** — call as `ax(family, command, args)`, always with a `reason`. The command names here are your surface; exact arguments are on-demand via `ax(family="help", command="lookup", args={"topic": "<family>"})`. Know the surface before guessing.
 
 | Family | Commands | Covers |
 |---|---|---|
@@ -28,6 +28,7 @@ You have eight tools. `ax` fans out to the domain families below; the rest are d
 
 ## Notes
 
+- `web` — prefer `search` + `fetch`; `visit` only for JS-rendered pages. One browser, one page: never parallelize `visit`/`click` — they serialize and stack timeouts. On a `visit` failure or timeout, fall back to `fetch` instead of retrying `visit`.
 - `mcp` — the `[Connected MCP servers]` block lists each server's tools by exact name. Call with `ax(family="mcp", command="call", args={"server": <server>, "tool": <exact name>, "arguments": {...}})`. The tool name must match the block verbatim (keep hyphens; don't rewrite as spaces/underscores/dots/camelCase). Never treat a server name as an `ax` family.
 - `voice` — transcribe works only while the web UI is running (the whisper server starts with it); returns `stt_unavailable` otherwise. `.wav` is read directly; other formats need `ffmpeg`.
 - `documents` — `convert` OCRs PDFs, scanned ones included (Granite-Docling, falls back to MarkItDown), and converts office/HTML to markdown; `extract` OCRs a plain image (screenshot, photo of text) to text. Both persist output — read it back with `read_file`.
