@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Protocol
@@ -34,6 +33,7 @@ from aria.config.models import Embeddings as EmbeddingsConfig
 from aria.llm import get_agent_workflow, get_chat_llm, get_embeddings_model
 from aria.server.vllm import VllmServerManager
 from aria.web.state import _state
+from aria.web.tracing import init_tracing
 
 _HEALTH_ENDPOINTS = ("/health",)
 
@@ -56,31 +56,6 @@ class _HealthCheckFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
         return not any(ep in msg for ep in _HEALTH_ENDPOINTS)
-
-
-def _init_langfuse() -> None:
-    """Initialize Langfuse instrumentation if env vars are present."""
-    _langfuse_keys = (
-        "LANGFUSE_SECRET_KEY",
-        "LANGFUSE_PUBLIC_KEY",
-        "LANGFUSE_BASE_URL",
-    )
-    _missing = [k for k in _langfuse_keys if not os.getenv(k)]
-    if _missing:
-        logger.warning(
-            f"Langfuse instrumentation disabled — "
-            f"missing env vars: {', '.join(_missing)}"
-        )
-        return
-
-    from langfuse import get_client
-    from openinference.instrumentation.llama_index import (
-        LlamaIndexInstrumentor,
-    )
-
-    get_client()
-    LlamaIndexInstrumentor().instrument()
-    logger.info("Langfuse instrumentation initialized")
 
 
 def _init_logging() -> None:
@@ -584,7 +559,7 @@ async def _init_critical_infra() -> None:
     DebugConfig.path.mkdir(parents=True, exist_ok=True)
     DebugConfig.startup_error_path.unlink(missing_ok=True)
 
-    _init_langfuse()
+    init_tracing()
     _init_logging()
     logger.info("Starting Aria web UI...")
 

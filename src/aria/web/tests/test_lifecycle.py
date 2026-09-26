@@ -26,7 +26,7 @@ async def test_startup_fails_when_vllm_fails(tmp_path: Path) -> None:
             "aria.web.lifecycle.DebugConfig.startup_error_path",
             tmp_path / "logs" / "startup-error.txt",
         ),
-        patch("aria.web.lifecycle._init_langfuse"),
+        patch("aria.web.lifecycle.init_tracing"),
         patch("aria.web.lifecycle._init_logging"),
         patch("aria.web.lifecycle._init_storage_mount"),
         patch("aria.web.lifecycle._init_database"),

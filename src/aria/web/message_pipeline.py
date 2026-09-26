@@ -41,6 +41,7 @@ from aria.web.session import (
 from aria.web.state import AppStateNotInitializedError, _state
 from aria.web.streaming import stream_agent_response
 from aria.web.thread_titler import maybe_title_thread
+from aria.web.tracing import trace_session
 
 # Metadata key used to mark messages as processed (for edit detection)
 _PROCESSED_KEY = "processed"
@@ -138,43 +139,48 @@ async def _stream_and_finalize(
     prompt: str,
     memory: BackgroundFlushMemory,
 ) -> dict:
-    handler = _state.agents_workflow.run(  # type: ignore[union-attr]
-        user_msg=prompt,
-        memory=memory,
-        max_iterations=ChatConfig.max_iteration,
-    )
-    _run_succeeded = False
-    stream_meta: dict = {}
-    answer_text = ""
-    try:
-        _, stream_meta, answer_text = await stream_agent_response(handler, output)
-        _run_succeeded = True
-    finally:
-        partial = getattr(output, "answer_text", "")
-        if _run_succeeded:
-            clean_answer = strip_model_sources(answer_text)
-            output.answer_text = clean_answer  # type: ignore[attr-defined]
-            await _apply_render_elements(output, clean_answer, answer_text)
-            try:
-                await output.send()
-            except Exception:
-                logger.error("Failed to persist assistant message", exc_info=True)
-            await _mark_message_processed(
-                message, extra_metadata={**pipeline_meta, **stream_meta}
-            )
-            from aria.web.supervisor import ensure_watching
+    user = cl.user_session.get("user")
+    with trace_session(
+        session_id=message.thread_id,
+        user_id=str(user.identifier) if user else "",
+    ):
+        handler = _state.agents_workflow.run(  # type: ignore[union-attr]
+            user_msg=prompt,
+            memory=memory,
+            max_iterations=ChatConfig.max_iteration,
+        )
+        _run_succeeded = False
+        stream_meta: dict = {}
+        answer_text = ""
+        try:
+            _, stream_meta, answer_text = await stream_agent_response(handler, output)
+            _run_succeeded = True
+        finally:
+            partial = getattr(output, "answer_text", "")
+            if _run_succeeded:
+                clean_answer = strip_model_sources(answer_text)
+                output.answer_text = clean_answer  # type: ignore[attr-defined]
+                await _apply_render_elements(output, clean_answer, answer_text)
+                try:
+                    await output.send()
+                except Exception:
+                    logger.error("Failed to persist assistant message", exc_info=True)
+                await _mark_message_processed(
+                    message, extra_metadata={**pipeline_meta, **stream_meta}
+                )
+                from aria.web.supervisor import ensure_watching
 
-            try:
-                await ensure_watching(message.thread_id, for_id=output.id)
-            except Exception:
-                logger.warning("ensure_watching failed", exc_info=True)
-        elif partial:
-            clean_partial = strip_model_sources(partial)
-            await _apply_render_elements(output, clean_partial, partial)
-            await output.send()
-        elif output.streaming:
-            await output.remove()
-    return stream_meta
+                try:
+                    await ensure_watching(message.thread_id, for_id=output.id)
+                except Exception:
+                    logger.warning("ensure_watching failed", exc_info=True)
+            elif partial:
+                clean_partial = strip_model_sources(partial)
+                await _apply_render_elements(output, clean_partial, partial)
+                await output.send()
+            elif output.streaming:
+                await output.remove()
+        return stream_meta
 
 
 async def _apply_render_elements(
