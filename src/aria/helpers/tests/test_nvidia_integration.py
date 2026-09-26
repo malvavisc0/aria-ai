@@ -137,46 +137,31 @@ class TestNvidiaIntegration:
 
         assert len(gpus) == gpu_count
 
-    def test_gpu_details_have_valid_data(self):
-        """Test that GPU details contain valid data."""
+    def test_gpu_identity_fields_valid(self):
+        """Test that GPU identity fields contain valid data."""
         gpus = detect_gpus_with_details()
 
         for gpu in gpus:
-            # Index should be non-negative
             assert gpu.index >= 0
-
-            # Name should not be empty
             assert gpu.name != ""
-
-            # UUID should not be empty
             assert gpu.uuid != ""
+            assert gpu.driver_version != ""
+            assert isinstance(gpu.display_active, bool)
+            assert gpu.compute_mode != ""
 
-            # Memory values should be non-negative
+    def test_gpu_resource_fields_valid(self):
+        """Test that GPU resource readings are within valid ranges."""
+        gpus = detect_gpus_with_details()
+
+        for gpu in gpus:
             assert gpu.total_memory >= 0
             assert gpu.used_memory >= 0
             assert gpu.free_memory >= 0
-
-            # Memory utilization should be 0-100
             assert 0.0 <= gpu.memory_utilization <= 100.0
-
-            # Power values should be non-negative
             assert gpu.power_limit >= 0
             assert gpu.power_draw >= 0
-
-            # Temperature should be reasonable (0-100°C)
             assert 0 <= gpu.temperature <= 150
-
-            # Fan speed should be 0-100%
             assert 0 <= gpu.fan_speed <= 100
-
-            # Driver version should not be empty
-            assert gpu.driver_version != ""
-
-            # Display active should be boolean
-            assert isinstance(gpu.display_active, bool)
-
-            # Compute mode should not be empty
-            assert gpu.compute_mode != ""
 
     def test_gpu_details_memory_consistency(self):
         """Test that memory values are consistent."""

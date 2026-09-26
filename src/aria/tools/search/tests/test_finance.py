@@ -531,25 +531,16 @@ class TestFetchTickerNews:
 
     def test_fetch_news_invalid_max_articles_type(self):
         """Test news fetch with invalid max_articles type."""
-        result = fetch_ticker_news(
-            "Testing ticker news", "AAPL", max_articles=cast(Any, "10")
-        )
-        context = _response_context(result)
-        assert context["ticker"] == "AAPL"
-        assert context["error_type"] == "validation_error"
-        assert "max_articles must be an integer" in _response_error(result)
-        assert context["articles"] == []
-        assert context["count"] == 0
-
-        result = fetch_ticker_news(
-            "Testing ticker news", "AAPL", max_articles=cast(Any, 10.5)
-        )
-        context = _response_context(result)
-        assert context["ticker"] == "AAPL"
-        assert context["error_type"] == "validation_error"
-        assert "max_articles must be an integer" in _response_error(result)
-        assert context["articles"] == []
-        assert context["count"] == 0
+        for bad_value in ("10", 10.5):
+            result = fetch_ticker_news(
+                "Testing ticker news", "AAPL", max_articles=cast(Any, bad_value)
+            )
+            context = _response_context(result)
+            assert context["ticker"] == "AAPL"
+            assert context["error_type"] == "validation_error"
+            assert "max_articles must be an integer" in _response_error(result)
+            assert context["articles"] == []
+            assert context["count"] == 0
 
     def test_fetch_news_invalid_ticker(self):
         """Test news fetch with invalid ticker."""

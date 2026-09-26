@@ -72,13 +72,8 @@ class TestGetWorkerAgent:
         assert agent.tools is not None
         tools = [t for t in agent.tools if isinstance(t, FunctionTool)]
         names = {t.metadata.name for t in tools}
-        assert "plan" in names
-        assert "scratchpad" in names
-        assert "shell" in names
-        assert "read_file" in names
-        assert "write_file" in names
+        assert names >= {"plan", "scratchpad", "shell", "read_file", "write_file", "ax"}
         assert "reasoning" not in names
-        assert "ax" in names
 
     def test_agent_with_output_dir(self):
         """Agent system prompt should include output dir."""

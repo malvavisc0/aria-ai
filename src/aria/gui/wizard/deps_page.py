@@ -174,12 +174,8 @@ class _DependenciesPage(QWizardPage):
     }
 
     @classmethod
-    def _group_rows(cls, checks: list) -> list:
-        """Collapse per-target multi-row checks into one accurately-labeled row."""
-        voice = [c for c in checks if cls._resolve_target(c.name) == "voice"]
-        if not voice:
-            return checks
-        rest = [c for c in checks if cls._resolve_target(c.name) != "voice"]
+    def _merge_voice_rows(cls, voice: list, rest: list) -> list:
+        """Collapse voice checks into one row showing the worst state."""
         merged = (
             next((c for c in voice if not c.passed), None)
             or next((c for c in voice if c.warning), None)
@@ -187,6 +183,15 @@ class _DependenciesPage(QWizardPage):
         )
         merged.name = cls._VOICE_ROW
         return rest + [merged]
+
+    @classmethod
+    def _group_rows(cls, checks: list) -> list:
+        """Collapse per-target multi-row checks into one accurately-labeled row."""
+        voice = [c for c in checks if cls._resolve_target(c.name) == "voice"]
+        if not voice:
+            return checks
+        rest = [c for c in checks if cls._resolve_target(c.name) != "voice"]
+        return cls._merge_voice_rows(voice, rest)
 
     @staticmethod
     def _deps_summary(relevant) -> str:

@@ -65,6 +65,25 @@ def _print_check_header():
     console.print()
 
 
+def _print_check(check) -> None:
+    """Print a single check line with its status icon and details."""
+    if not check.passed:
+        console.print(f"   [red]✗[/red] {check.name} - [red]{check.error}[/red]")
+        if check.hint:
+            console.print(f"      [dim]→ {check.hint}[/dim]")
+        return
+    if check.informational:
+        icon, icon_color, detail_color = "ℹ", "cyan", "cyan"
+    elif check.warning:
+        icon, icon_color, detail_color = "⚠", "yellow", "yellow"
+    else:
+        icon, icon_color, detail_color = "✓", "green", "dim"
+    details = (
+        f" [{detail_color}]({check.details})[/{detail_color}]" if check.details else ""
+    )
+    console.print(f"   [{icon_color}]{icon}[/{icon_color}] {check.name}{details}")
+
+
 def _print_category(category: str, checks: list) -> tuple[int, int]:
     """Print a category and its checks.
 
@@ -82,22 +101,7 @@ def _print_category(category: str, checks: list) -> tuple[int, int]:
     console.print(f"{config['icon']} {config['label']} {status}")
 
     for check in checks:
-        if check.passed:
-            if check.informational:
-                details = f" [cyan]({check.details})[/cyan]" if check.details else ""
-                console.print(f"   [cyan]ℹ[/cyan] {check.name}{details}")
-            elif check.warning:
-                details = (
-                    f" [yellow]({check.details})[/yellow]" if check.details else ""
-                )
-                console.print(f"   [yellow]⚠[/yellow] {check.name}{details}")
-            else:
-                details = f" [dim]({check.details})[/dim]" if check.details else ""
-                console.print(f"   [green]✓[/green] {check.name}{details}")
-        else:
-            console.print(f"   [red]✗[/red] {check.name} - [red]{check.error}[/red]")
-            if check.hint:
-                console.print(f"      [dim]→ {check.hint}[/dim]")
+        _print_check(check)
 
     console.print()
     return passed, failed

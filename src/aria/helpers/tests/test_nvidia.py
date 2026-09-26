@@ -608,24 +608,24 @@ class TestDetectGpusWithDetails:
             mock_run.return_value = Mock(returncode=0, stdout=MOCK_GPU_DETAILS_SINGLE)
             gpus = detect_gpus_with_details()
 
-            assert len(gpus) == 1
-            gpu = gpus[0]
-
-            assert isinstance(gpu, GPUMetadata)
-            assert gpu.index == 0
-            assert gpu.name == "NVIDIA GeForce RTX 3090"
-            assert gpu.uuid == "GPU-12345678-1234-1234-1234-123456789012"
-            assert gpu.total_memory == 24576
-            assert gpu.used_memory == 12288
-            assert gpu.free_memory == 12288
-            assert gpu.memory_utilization == 50.0
-            assert gpu.power_limit == 350
-            assert gpu.power_draw == 280
-            assert gpu.temperature == 65
-            assert gpu.fan_speed == 45
-            assert gpu.driver_version == "535.104.05"
-            assert gpu.display_active is True
-            assert gpu.compute_mode == "Default"
+        assert gpus == [
+            GPUMetadata(
+                index=0,
+                name="NVIDIA GeForce RTX 3090",
+                uuid="GPU-12345678-1234-1234-1234-123456789012",
+                total_memory=24576,
+                used_memory=12288,
+                free_memory=12288,
+                memory_utilization=50.0,
+                power_limit=350,
+                power_draw=280,
+                temperature=65,
+                fan_speed=45,
+                driver_version="535.104.05",
+                display_active=True,
+                compute_mode="Default",
+            )
+        ]
 
     def test_dual_gpu_with_details(self):
         """Test detection of two GPUs with different states."""
@@ -633,22 +633,40 @@ class TestDetectGpusWithDetails:
             mock_run.return_value = Mock(returncode=0, stdout=MOCK_GPU_DETAILS_DUAL)
             gpus = detect_gpus_with_details()
 
-            assert len(gpus) == 2
-
-            # First GPU
-            assert gpus[0].index == 0
-            assert gpus[0].memory_utilization == 50.0
-            assert gpus[0].display_active is True
-
-            # Second GPU
-            assert gpus[1].index == 1
-            assert gpus[1].used_memory == 8192
-            assert gpus[1].free_memory == 16384
-            assert gpus[1].memory_utilization == 33.33
-            assert gpus[1].power_draw == 250
-            assert gpus[1].temperature == 58
-            assert gpus[1].fan_speed == 40
-            assert gpus[1].display_active is False
+        assert gpus == [
+            GPUMetadata(
+                index=0,
+                name="NVIDIA GeForce RTX 3090",
+                uuid="GPU-12345678-1234-1234-1234-123456789012",
+                total_memory=24576,
+                used_memory=12288,
+                free_memory=12288,
+                memory_utilization=50.0,
+                power_limit=350,
+                power_draw=280,
+                temperature=65,
+                fan_speed=45,
+                driver_version="535.104.05",
+                display_active=True,
+                compute_mode="Default",
+            ),
+            GPUMetadata(
+                index=1,
+                name="NVIDIA GeForce RTX 3090",
+                uuid="GPU-87654321-4321-4321-4321-210987654321",
+                total_memory=24576,
+                used_memory=8192,
+                free_memory=16384,
+                memory_utilization=33.33,
+                power_limit=350,
+                power_draw=250,
+                temperature=58,
+                fan_speed=40,
+                driver_version="535.104.05",
+                display_active=False,
+                compute_mode="Default",
+            ),
+        ]
 
     def test_gpu_with_unit_suffixes(self):
         """Test parsing values with unit suffixes (W, C, %)."""
