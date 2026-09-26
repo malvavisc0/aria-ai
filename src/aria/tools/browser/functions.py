@@ -46,14 +46,14 @@ def _get_manager():
 async def visit_url(reason: Reason, url: str) -> str:
     """Visit a URL in the headless browser and capture rendered content.
 
-    This is the PRIMARY tool for reading web page content. Always prefer
-    it over `download` for HTML pages: it renders JavaScript, follows
-    consent flows, and gets through anti-bot protection that a plain HTTP
-    fetch cannot.
+    Use `web fetch` first for static HTML pages; use this only when the
+    page needs JavaScript rendering, consent flows, or anti-bot handling
+    that a plain HTTP fetch cannot get through. Never parallelize visits —
+    one browser, one page.
 
-    Only use `download` instead when:
+    Fall back to `web fetch` when:
         - The URL points to a binary file (PDF, image, archive, media), or
-        - `visit_url` fails and you need the raw content as a fallback.
+        - `visit_url` fails and you need the raw content.
 
     Do not use this for plain API/JSON calls.
 

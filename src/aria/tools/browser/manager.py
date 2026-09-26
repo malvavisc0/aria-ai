@@ -40,6 +40,7 @@ from aria.tools.browser.constants import (
     BROWSER_CONTENT_DIR,
     DEFAULT_WAIT_STRATEGY,
     LIGHTPANDA_DEFAULT_PORT,
+    NAVIGATION_TIMEOUT,
 )
 
 
@@ -406,7 +407,7 @@ class LightpandaManager:
                             str(e), recovery=True, tool=tool, reason=reason
                         )
                 return self._error(
-                    f"{e} — Use the download tool as a fallback.",
+                    f"{e} — Use `ax web fetch` as a fallback.",
                     tool=tool,
                     reason=reason,
                 )
@@ -434,13 +435,21 @@ class LightpandaManager:
         """
 
         async def _do_navigate(page: Page) -> str:
-            timeout_ms = BROWSER_COMMAND_TIMEOUT * 1000
             await page.goto(
                 url,
-                timeout=timeout_ms,
-                wait_until=DEFAULT_WAIT_STRATEGY,
+                timeout=NAVIGATION_TIMEOUT * 1000,
+                wait_until="commit",
             )
-            await page.wait_for_load_state(DEFAULT_WAIT_STRATEGY, timeout=timeout_ms)
+            try:
+                await page.wait_for_load_state(
+                    DEFAULT_WAIT_STRATEGY,
+                    timeout=BROWSER_COMMAND_TIMEOUT * 1000,
+                )
+            except Exception:
+                logger.warning(
+                    f"Load state {DEFAULT_WAIT_STRATEGY} not reached; "
+                    "extracting content anyway"
+                )
 
             content = await self._get_text_content(page)
 

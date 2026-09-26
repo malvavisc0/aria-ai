@@ -123,7 +123,7 @@ async def test_with_recovery_returns_plain_error_when_page_still_valid() -> None
 
     assert payload["status"] == "error"
     assert "timeout" in payload["error"]["message"]
-    assert "download tool" in payload["error"]["message"]
+    assert "ax web fetch" in payload["error"]["message"]
     assert payload["error"]["recoverable"] is False
 
 
