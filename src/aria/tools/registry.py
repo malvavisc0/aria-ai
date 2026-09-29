@@ -44,6 +44,15 @@ def _get_core_lite_tools() -> list[FunctionTool]:
     from aria.tools.reasoning.functions import ReasoningSchema
     from aria.tools.shell.functions import ShellToolSchema
 
+    _DESCRIPTIONS = {
+        "reasoning": (
+            "Analyze tradeoffs between competing approaches, diagnose "
+            "non-obvious failures, or synthesize information from multiple "
+            "sources. Start a session with action='start', add analysis "
+            "steps with action='step' (content=your analysis), then close "
+            "with action='end'. Skip for straightforward tasks."
+        ),
+    }
     tool_specs = [
         ("aria.tools.reasoning", "reasoning"),
         ("aria.tools.shell", "shell"),
@@ -56,10 +65,11 @@ def _get_core_lite_tools() -> list[FunctionTool]:
     for mod, fn in tool_specs:
         func = _import_function(mod, fn)
         schema = explicit_schemas.get(fn)
-        if schema is not None:
-            tools.append(FunctionTool.from_defaults(fn=func, fn_schema=schema))
-        else:
-            tools.append(FunctionTool.from_defaults(fn=func))
+        desc = _DESCRIPTIONS.get(fn)
+        kw: dict = {"fn_schema": schema} if schema else {}
+        if desc is not None:
+            kw["description"] = desc
+        tools.append(FunctionTool.from_defaults(fn=func, **kw))
     return tools
 
 

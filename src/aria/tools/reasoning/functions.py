@@ -30,7 +30,12 @@ _DEFAULT_AGENT_ID = "aria"
 
 
 class ReasoningSchema(BaseModel):
-    """Schema exposed to the LLM for the reasoning tool."""
+    """Minimal schema exposed to the LLM for the reasoning tool.
+
+    Advanced parameters (cognitive_mode, reasoning_type, evidence,
+    confidence, on_step) are accepted by the function but hidden from
+    the LLM to keep the tool description compact and approachable.
+    """
 
     reason: str = Field(
         description=(
@@ -40,46 +45,17 @@ class ReasoningSchema(BaseModel):
     )
     action: str = Field(
         description=(
-            "Action to perform: 'start' (new session), 'step' (add reasoning), "
-            "'reflect' (examine a step), 'evaluate' (score session), "
-            "'summary' (get summary), 'end' (close session)."
+            "Action: 'start' (begin session), 'step' (add analysis — "
+            "provide in 'content'), 'end' (close session). Also available: "
+            "'summary', 'evaluate', 'reflect'."
         )
     )
     content: str | None = Field(
         default=None,
         description=(
-            "Reasoning content text. Required for 'step' and 'reflect' actions."
+            "Analysis text. Required for 'step' and 'reflect' actions. "
+            "Include your reasoning, evidence, and tradeoffs here."
         ),
-    )
-    cognitive_mode: str | None = Field(
-        default=None,
-        description=(
-            "Mode for the reasoning step: 'planning', 'analysis', "
-            "'evaluation', 'synthesis', 'creative', 'reflection'."
-        ),
-    )
-    reasoning_type: str | None = Field(
-        default=None,
-        description=(
-            "Type of reasoning: 'deductive', 'inductive', 'abductive', "
-            "'causal', 'probabilistic', 'analogical'."
-        ),
-    )
-    evidence: list[str] | None = Field(
-        default=None,
-        description="List of supporting evidence strings for a step.",
-    )
-    confidence: float | None = Field(
-        default=None,
-        description="Confidence score 0.0-1.0 (default: 0.65).",
-    )
-    on_step: int | None = Field(
-        default=None,
-        description="Step number to reflect on (required for 'reflect' action).",
-    )
-    agent_id: str = Field(
-        default=_DEFAULT_AGENT_ID,
-        description="Auto-set. Do not provide.",
     )
 
 
