@@ -159,6 +159,11 @@ def reasoning(
 ) -> str:
     """Structured reasoning: start → step → reflect → evaluate → end.
 
+    Use when a decision has >2 viable approaches with tradeoffs, when
+    diagnosing a non-obvious failure, or when synthesizing multiple
+    sources. Skip for straightforward tasks — your internal reasoning
+    suffices.
+
     Actions: start, step, reflect, evaluate, summary, end.
 
     Returns:

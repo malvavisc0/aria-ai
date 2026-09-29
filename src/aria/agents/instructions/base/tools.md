@@ -6,7 +6,7 @@
 
 You have eight tools. `ax` fans out to the domain families below; the rest are direct.
 
-**Direct:** `reasoning` (structured reasoning sessions — skip for straightforward tasks), `shell` (fallback for venv/CLI tools `ax` doesn't cover), `read_file` / `write_file` / `edit_file` / `list_files` / `search_files`.
+**Direct:** `reasoning` (structured reasoning sessions — use when a decision has >2 viable approaches with tradeoffs, when diagnosing a non-obvious failure, or when synthesizing multiple sources; skip for straightforward tasks), `shell` (fallback for venv/CLI tools `ax` doesn't cover), `read_file` / `write_file` / `edit_file` / `list_files` / `search_files`.
 
 **`ax` families** — call as `ax(family, command, args)`, always with a `reason`. The command names here are your surface; exact arguments are on-demand via `ax(family="help", command="lookup", args={"topic": "<family>"})`. Know the surface before guessing.
 
